@@ -1,0 +1,51 @@
+#
+# This file helps to enforce a consistent coding style across different editors.
+#
+# Single-line comments, rather than end-of-line comments, are used for
+# compatibility with Neovim!
+#
+# https://editorconfig.org/
+#
+
+# This is the project's root directory.
+root = true
+
+# Defaults for all files.
+[*]
+
+# Files are UTF-8 encoded.
+charset = utf-8
+
+# Files use Unix line endings.
+end_of_line = lf
+
+# Use spaces for indentation.
+indent_style = space
+
+# Each indent should contain two spaces.
+indent_size = 2
+
+# For VCS, end files with an empty line.
+insert_final_newline = true
+
+# Lines should not exceed this length.
+max_line_length = 120
+
+# No whitespace on the end of lines.
+trim_trailing_whitespace = true
+
+# Go overrides.
+[*.go]
+indent_style = tab
+
+# Makefile overrides.
+[Makefile]
+indent_style = tab
+
+# PHP overrides.
+[*.php]
+indent_size = 4
+
+# Python overrides.
+[*.py]
+indent_size = 4
