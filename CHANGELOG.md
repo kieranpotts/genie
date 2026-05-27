@@ -4,7 +4,9 @@
 
 ## [0.0.0] - YYYY-MM-DD
 
-- Changed this.
-- Changed that.
-- Added this and that.
-- Deprecated this.
+- step: increment toward new feature - EXPERIMENT
+- maintenance: update dependencies
+- fix: fix a bug - INCOMPAT
+- chore: update README
+- refactor: refactor code
+- performance: improve performance of X
