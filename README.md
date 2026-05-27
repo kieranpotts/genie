@@ -2,6 +2,8 @@
 
 My extensions for the Pi coding agent.
 
+**🚧 Under construction.**
+
 ## 📓 Documentation
 
 <!-- TODO -->
