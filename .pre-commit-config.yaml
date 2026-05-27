@@ -4,7 +4,7 @@
 # See https://pre-commit.com for more information.
 #
 # Install the framework:
-#   pip install pre-commit
+#   pipx install pre-commit
 #
 # Install the git hook scripts:
 #   pre-commit install
