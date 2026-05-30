@@ -78,9 +78,9 @@ show_usage() {
   echo "  -l, --list          List available extensions."
   echo ""
   echo "Examples:"
-  echo "  ./run/install                                # Install all."
-  echo "  ./run/install pickling-gnomes                 # Install one."
-  echo "  ./run/install pickling-gnomes other-ext       # Install multiple."
+  echo "  ./run/install                              # Install all."
+  echo "  ./run/install pickling-penguins            # Install one."
+  echo "  ./run/install pickling-penguins other-ext  # Install multiple."
 }
 
 # post_install_instructions - Print next steps and documentation pointers.
@@ -96,8 +96,8 @@ post_install_instructions() {
   echo "2. In Pi, reload extensions:"
   printf '   %b%s%b\n' "${GREEN}" "/reload" "${RESET}"
   echo "3. Try an extension:"
-  if [[ -f "${pi_extensions_dir}/pickling-gnomes/index.ts" ]]; then
-    printf '   %b%s%b   (just give Pi a prompt and watch the status line)\n' "${GREEN}" "pickling-gnomes" "${RESET}"
+  if [[ -f "${pi_extensions_dir}/pickling-penguins/index.ts" ]]; then
+    printf '   %b%s%b   (just give Pi a prompt and watch the status line)\n' "${GREEN}" "pickling-penguins" "${RESET}"
   fi
   printf '   %b%s%b\n' "${GREEN}" "${repo_root}/README.md" "${RESET}"
   local ext

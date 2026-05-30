@@ -62,7 +62,7 @@ list_available_extensions() {
   local ext desc
   for ext in "${available_extensions[@]}"; do
     case "${ext}" in
-      pickling-gnomes)
+      pickling-penguins)
         desc="Replaces the \"Working...\" status with randomly composed nonsense"
         ;;
       *)

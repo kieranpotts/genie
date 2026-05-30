@@ -1,10 +1,10 @@
-# pickling-gnomes
+# pickling-penguins
 
-A Pi extension that replaces the default "Working..." status with a stream of randomly-composed nonsense, like "Pickling gnomes...", so waiting for the agent is a little more entertaining!
+A Pi extension that replaces the default "Working..." status with a stream of randomly-composed nonsense, like "Pickling penguins...", so waiting for the agent is a little more entertaining!
 
 ## What it does
 
-While the agent is working, the status line shows a message built on-the-fly by pairing a random present participle with a random noun, generating nonsense like "Herding penguins...", "Flambéing the singularity...", or "Schlepping doppelgängers...".
+While the agent is working, the status line shows a message built on-the-fly by pairing a random present participle with a random noun, generating nonsense like "Flambéing the singularity..." or "Schlepping doppelgängers...".
 
 With over 100 participles and over 100 nouns, that is over 10,000 possible combinations, so you will rarely see the same one twice.
 
@@ -19,7 +19,7 @@ None. There are no settings, no commands, and nothing to invoke. Once installed,
 From this repository's root directory, run:
 
 ```sh
-./run/install pickling-gnomes
+./run/install pickling-penguins
 ```
 
 See the [installation guide](../../docs/installation.md) for more details.

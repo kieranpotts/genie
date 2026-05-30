@@ -51,7 +51,7 @@ pi_extensions_dir="${HOME}/.pi/agent/extensions"
 # Read by the sourced helpers in run/inc/fn/.
 # shellcheck disable=SC2034
 available_extensions=(
-  "pickling-gnomes"
+  "pickling-penguins"
 )
 
 #

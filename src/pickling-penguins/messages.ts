@@ -1,8 +1,8 @@
 /**
- * Message composition for the pickling-gnomes extension.
+ * Message composition for the pickling-penguins extension.
  *
  * Each status message is built on-the-fly by pairing a random present
- * participle with a random noun, eg. "Pickling gnomes...". With over 100
+ * participle with a random noun, eg. "Pickling penguins...". With over 100
  * participles and nouns each, there are more than 10,000 possible
  * combinations, so repeats are rare. Both lists are sorted alphabetically.
  */

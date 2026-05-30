@@ -27,10 +27,10 @@ With no arguments, every available extension is installed.
 ### Examples
 
 ```sh
-./run/install                        # Install all.
-./run/install pickling-gnomes        # Install one.
-./run/install pickling-gnomes other  # Install multiple.
-./run/install --list                 # See what is available.
+./run/install                          # Install all.
+./run/install pickling-penguins        # Install one.
+./run/install pickling-penguins other  # Install multiple.
+./run/install --list                   # See what is available.
 ```
 
 Unknown extension names are reported and skipped; the rest of the run continues.
@@ -48,7 +48,7 @@ For each extension it:
 It's easy to install the extensions yourself. Just copy the extension directory into `~/.pi/agent/extensions/`.
 
 ```sh
-cp -R src/pickling-gnomes ~/.pi/agent/extensions/pickling-gnomes
+cp -R src/pickling-penguins ~/.pi/agent/extensions/pickling-penguins
 ```
 
 ## After installing

@@ -3,7 +3,7 @@
  * waiting for the AI more entertaining.
  *
  * Each message is composed on-the-fly by pairing a random present participle
- * with a random noun, eg. "Pickling gnomes...".
+ * with a random noun, eg. "Pickling penguins...".
  */
 
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
