@@ -1,6 +1,6 @@
 # Pi
 
-My extensions for the Pi coding agent.
+Personal and experimental extensions for the Pi coding agent.
 
 **🚧 Under construction.**
 
