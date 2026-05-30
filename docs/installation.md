@@ -35,13 +35,21 @@ With no arguments, every available extension is installed.
 
 Unknown extension names are reported and skipped; the rest of the run continues.
 
-## What the installer does
+### What the installer does
 
 For each extension it:
 
 1. Ensures Pi's extensions directory exists, creating `~/.pi/agent/extensions/` if necessary.
 2. Backs up any existing install of the same name to `~/.pi/agent/extensions/<name>.backup.<timestamp>/` before overwriting.
 3. Copies the extension's source directory (`src/<name>/`, entry point `index.ts`) to `~/.pi/agent/extensions/<name>/`, preserving the directory layout so multi-file extensions work.
+
+## Manual installation
+
+It's easy to install the extensions yourself. Just copy the extension directory into `~/.pi/agent/extensions/`.
+
+```sh
+cp -R src/pickling-gnomes ~/.pi/agent/extensions/pickling-gnomes
+```
 
 ## After installing
 
