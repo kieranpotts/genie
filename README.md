@@ -6,7 +6,8 @@ Personal and experimental extensions for the Pi coding agent.
 
 ## 📓 Documentation
 
-<!-- TODO -->
+- [**Requirements**](./docs/requirements.md)
+- [**Installation**](./docs/installation.md)
 
 -----
 
