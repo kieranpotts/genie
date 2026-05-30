@@ -12,6 +12,7 @@ Personal and experimental extensions for the Pi coding agent.
 - [**Requirements**](./docs/requirements.md)
 - [**Installation**](./docs/installation.md)
 - [**Contributing**](./CONTRIBUTING.md)
+- [**Acknowledgements**](./docs/acknowledgements.md)
 
 -----
 
