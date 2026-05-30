@@ -1,0 +1,7 @@
+#
+# The `.shellcheckrc` file tells ShellCheck which of its linting rules to
+# disable throughout this project.
+#
+
+# SC1091: Don't follow source links.
+disable=SC1091
