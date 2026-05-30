@@ -1,10 +1,10 @@
-# Development
+# Contributing
 
-This page covers working on the extensions themselves. To just install and use them, see [Requirements](./requirements.md) and [Installation](./installation.md) instead.
+This page covers working on the extensions themselves. To just install and use them, see [Requirements](./docs/requirements.md) and [Installation](./docs/installation.md) instead.
 
 ## Prerequisites
 
-Development needs [Node.js][node] (with `npm`) for the linting toolchain, in addition to the [runtime requirements](./requirements.md). Install the dev dependencies once, from the repository root:
+Development needs [Node.js][node] (with `npm`) for the linting toolchain, in addition to the [runtime requirements](./docs/requirements.md). Install the dev dependencies once, from the repository root:
 
 ```sh
 npm install
@@ -22,11 +22,11 @@ ext/
     └── index.ts
 ```
 
-See the section on adding a new extension in the [installation instructions](./installation.md) for details on how to register a new extension with the installer.
+See the section on adding a new extension in the [installation instructions](./docs/installation.md) for details on how to register a new extension with the installer.
 
 ## Linting
 
-Extensions are linted with [ESLint][eslint] using the [neostandard][neostandard] config in [`eslint.config.js`](../eslint.config.js). Two scripts wrap it:
+Extensions are linted with [ESLint][eslint] using the [neostandard][neostandard] config in [`eslint.config.js`](./eslint.config.js). Two scripts wrap it:
 
 ```sh
 ./run/lint   # Report problems.
@@ -63,7 +63,7 @@ Extra arguments are forwarded to `node --test`, and the command is also exposed 
 
 It is also exposed as `npm run check`.
 
-The [`Check`](../.github/workflows/check.yaml) GitHub Actions workflow runs this same command on every push and pull request, so changes are linted and tested automatically.
+The [`Check`](./.github/workflows/check.yaml) GitHub Actions workflow runs this same command on every push and pull request, so changes are linted and tested automatically.
 
 ## Commit messages
 

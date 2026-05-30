@@ -24,7 +24,8 @@ The repository currently ships one extension, `pickling-gnomes`, which replaces 
 - `run/`: Dev scripts – `install`, `lint`, `fix`, `test`, `check`.
 - `run/inc/fn/`: Shared shell helpers (status printers, banners, extension install and list helpers).
 - `run/inc/var/`: Shared shell variables (ANSI codes).
-- `docs/`: Requirements, installation, and development docs.
+- `docs/`: Requirements and installation docs.
+- `CONTRIBUTING.md`: How to develop, lint, test, and check extensions.
 - `eslint.config.js`, `package.json`: Lint configuration and the `npm` script aliases.
 - `.github/workflows/`: CI – `check` (lint and test), `validate-commit-messages`, and `sync-labels`.
 
