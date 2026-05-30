@@ -8,6 +8,7 @@ Personal and experimental extensions for the Pi coding agent.
 
 - [**Requirements**](./docs/requirements.md)
 - [**Installation**](./docs/installation.md)
+- [**Development**](./docs/development.md)
 
 -----
 

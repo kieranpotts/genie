@@ -1,0 +1,20 @@
+{
+  "name": "kieranpotts-pi",
+  "version": "0.0.0",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kieranpotts/pi.git"
+  },
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "eslint": "^9.39.4",
+    "neostandard": "^0.13.0",
+    "typescript": "~6.0.0"
+  },
+  "scripts": {
+    "fix": "./run/fix",
+    "lint": "./run/lint"
+  }
+}
