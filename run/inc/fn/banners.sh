@@ -58,13 +58,10 @@ print_summary() {
   local success_count="$1"
   local fail_count="$2"
 
-  echo ""
-  echo "═══════════════════════════════════════════════════════════════"
   print_success "Installed: ${success_count} extension(s)."
   if [[ "${fail_count}" -gt 0 ]]; then
     print_error "Failed: ${fail_count} extension(s)."
   fi
-  echo "═══════════════════════════════════════════════════════════════"
 }
 
 # show_usage - Print usage information and the list of available extensions.
@@ -84,8 +81,6 @@ show_usage() {
   echo "  ./run/install                                # Install all."
   echo "  ./run/install my-first-extension             # Install one."
   echo "  ./run/install my-first-extension my-second   # Install multiple."
-  echo ""
-  list_available_extensions
 }
 
 # post_install_instructions - Print next steps and documentation pointers.
@@ -94,29 +89,21 @@ post_install_instructions() {
   echo ""
   print_banner "${GREEN}" "INSTALLATION COMPLETE"
   echo ""
-  printf '%b%bNext steps:%b\n\n' "${BOLD}" "${BLUE}" "${RESET}"
-
+  printf '%b%bNext steps:%b\n' "${BOLD}" "${BLUE}" "${RESET}"
+  echo ""
   echo "1. Start or restart Pi:"
-  printf '   %b%s%b\n\n' "${GREEN}" "pi" "${RESET}"
-
+  printf '   %b%s%b\n' "${GREEN}" "pi" "${RESET}"
   echo "2. In Pi, reload extensions:"
-  printf '   %b%s%b\n\n' "${GREEN}" "/reload" "${RESET}"
-
+  printf '   %b%s%b\n' "${GREEN}" "/reload" "${RESET}"
   echo "3. Try an extension:"
   if [[ -f "${pi_extensions_dir}/my-first-extension.ts" ]]; then
     printf '   %b%s%b   (My first extension — see its README)\n' "${GREEN}" "/my-first-extension" "${RESET}"
   fi
-  echo ""
-
-  printf '%b%bDocumentation:%b\n' "${BOLD}" "${BLUE}" "${RESET}"
-  printf '   %b%s%b\n\n' "${GREEN}" "${repo_root}/README.md" "${RESET}"
-
-  printf '%b%bExtension docs:%b\n' "${BOLD}" "${BLUE}" "${RESET}"
+  printf '   %b%s%b\n' "${GREEN}" "${repo_root}/README.md" "${RESET}"
   local ext
   for ext in "${available_extensions[@]}"; do
     if [[ -f "${pi_extensions_dir}/${ext}.ts" ]]; then
       printf '   %b%s%b\n' "${GREEN}" "${extensions_source_dir}/${ext}/README.md" "${RESET}"
     fi
   done
-  echo ""
 }

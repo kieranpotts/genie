@@ -57,8 +57,7 @@ is_available_extension() {
 # list_available_extensions - Print the available extensions and descriptions.
 #
 list_available_extensions() {
-  echo ""
-  printf '%b%bAvailable extensions:%b\n\n' "${BOLD}" "${BLUE}" "${RESET}"
+  printf '%b%bAvailable extensions:%b\n' "${BOLD}" "${BLUE}" "${RESET}"
 
   local ext desc
   for ext in "${available_extensions[@]}"; do
@@ -72,7 +71,6 @@ list_available_extensions() {
     esac
     printf '  %b%s%b - %s\n' "${GREEN}" "${ext}" "${RESET}" "${desc}"
   done
-  echo ""
 }
 
 # backup_existing_extension - Back up an installed extension before overwriting.
@@ -127,9 +125,7 @@ install_extension() {
 # install_all_extensions - Install every entry in `available_extensions`.
 #
 install_all_extensions() {
-  echo ""
   print_info "Installing all extensions..."
-  echo ""
 
   local success_count=0
   local fail_count=0
@@ -141,7 +137,6 @@ install_all_extensions() {
     else
       fail_count=$((fail_count + 1))
     fi
-    echo ""
   done
 
   print_summary "${success_count}" "${fail_count}"
@@ -158,7 +153,7 @@ install_named_extensions() {
   local success_count=0
   local fail_count=0
   local ext_name
-  
+
   for ext_name in "$@"; do
     if ! is_available_extension "${ext_name}"; then
       print_error "Unknown extension: ${ext_name}"
@@ -172,7 +167,6 @@ install_named_extensions() {
     else
       fail_count=$((fail_count + 1))
     fi
-    echo ""
   done
 
   print_summary "${success_count}" "${fail_count}"

@@ -77,17 +77,18 @@ main() {
   case "${1:-}" in
     -h|--help)
       show_usage
+      echo ""
       exit 0
       ;;
     -l|--list)
       list_available_extensions
+      echo ""
       exit 0
       ;;
   esac
 
   # Verify prerequisites and ensure the target directory exists.
   check_prerequisites
-  echo ""
 
   # With no arguments, install everything; otherwise install the named ones.
   if [[ $# -eq 0 ]]; then
@@ -97,6 +98,7 @@ main() {
   fi
 
   post_install_instructions
+  echo ""
 }
 
 main "$@"
