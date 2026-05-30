@@ -1,5 +1,8 @@
 # Contributing
 
+> [!NOTE]
+> Pull requests are turned off on this repository, and external contributions are not accepted. These notes are kept for the author's own benefit — and for AI agents let loose in this repo — not to solicit contributions. You are welcome to fork and adapt the project for your own use.
+
 This page covers working on the extensions themselves. To just install and use them, see [Requirements](./docs/requirements.md) and [Installation](./docs/installation.md) instead.
 
 ## Prerequisites
@@ -78,3 +81,7 @@ pre-commit install
 ```
 
 [pre-commit]: https://pre-commit.com
+
+## Versioning
+
+The extensions are not versioned. There are no release tags, version numbers, or changelog — the latest commit on the default branch is the only supported state. Reinstall with `./run/install` to pick up changes.

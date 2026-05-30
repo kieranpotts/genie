@@ -61,8 +61,6 @@ The capitalized words REQUIRED, MUST, MUST NOT, RECOMMENDED, SHOULD, SHOULD NOT,
 
 - SHOULD write documentation prose as one line per paragraph, with no hard wrapping, and let the editor soft-wrap.
 
-- SHOULD add an "[Unreleased]" entry to `CHANGELOG.md` when adding, removing, or materially changing an extension.
-
 ## Skills
 
 Skills that are specific to this project are installed in `./agents/skills/`. None are defined yet.
