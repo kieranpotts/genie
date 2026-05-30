@@ -37,7 +37,7 @@ repo_root="$(cd "${script_dir}/.." && pwd)"
 inc_path="${script_dir}/inc"
 
 # Where extension sources live in this repo, and where they install to. Each
-# extension must exist at `${extensions_source_dir}/<name>/<name>.ts`.
+# extension must exist at `${extensions_source_dir}/<name>/index.ts`.
 
 # Read by the sourced helpers in run/inc/fn/.
 # shellcheck disable=SC2034

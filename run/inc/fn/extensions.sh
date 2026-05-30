@@ -21,7 +21,7 @@
 check_prerequisites() {
   if ! command -v pi &> /dev/null; then
     print_warning "Pi coding agent not found in PATH."
-    print_info "Install Pi first: npm install -g @mariozechner/pi-coding-agent"
+    print_info "Install Pi first: npm install -g @earendil-works/pi-coding-agent"
     print_info "Continuing anyway... your extensions will be ready when you install Pi."
   else
     print_success "Pi coding agent found: $(pi --version)."
@@ -80,41 +80,48 @@ list_available_extensions() {
 #
 backup_existing_extension() {
   local ext_name="$1"
-  local target_file="${pi_extensions_dir}/${ext_name}.ts"
+  local target_dir="${pi_extensions_dir}/${ext_name}"
 
-  if [[ -f "${target_file}" ]]; then
-    local backup_file
-    backup_file="${target_file}.backup.$(date +%Y%m%d_%H%M%S)"
-    print_warning "Existing extension found, backing up to $(basename "${backup_file}")."
-    cp "${target_file}" "${backup_file}"
+  if [[ -d "${target_dir}" ]]; then
+    local backup_dir
+    backup_dir="${target_dir}.backup.$(date +%Y%m%d_%H%M%S)"
+    print_warning "Existing extension found, backing up to $(basename "${backup_dir}")."
+    cp -R "${target_dir}" "${backup_dir}"
     print_success "Backup created."
   fi
 }
 
 # install_extension - Install a single extension from source.
 #
+# Copies the extension's source directory into the Pi extensions directory,
+# preserving the `<name>/index.ts` layout so directory-form (multi-file)
+# extensions are auto-discovered by Pi.
+#
 # Arguments:
 #   $1 - Extension name. Source must exist at
-#        `${extensions_source_dir}/<name>/<name>.ts`.
+#        `${extensions_source_dir}/<name>/index.ts`.
 #
 # Returns:
 #   0 on success, 1 if the source is missing or the copy fails.
 #
 install_extension() {
   local ext_name="$1"
-  local source_file="${extensions_source_dir}/${ext_name}/${ext_name}.ts"
-  local target_file="${pi_extensions_dir}/${ext_name}.ts"
+  local source_dir="${extensions_source_dir}/${ext_name}"
+  local source_file="${source_dir}/index.ts"
+  local target_dir="${pi_extensions_dir}/${ext_name}"
 
   if [[ ! -f "${source_file}" ]]; then
-    print_error "Extension source not found: ${source_file}"
+    print_error "Extension entry point not found: ${source_file}"
     return 1
   fi
 
   backup_existing_extension "${ext_name}"
 
   print_info "Installing ${ext_name}..."
-  if cp "${source_file}" "${target_file}"; then
-    print_success "Installed ${ext_name} to ${target_file}."
+  # Replace any previous install so files removed from source do not linger.
+  rm -rf "${target_dir}"
+  if cp -R "${source_dir}" "${target_dir}"; then
+    print_success "Installed ${ext_name} to ${target_dir}/."
     return 0
   else
     print_error "Failed to install ${ext_name}."

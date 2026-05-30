@@ -96,13 +96,13 @@ post_install_instructions() {
   echo "2. In Pi, reload extensions:"
   printf '   %b%s%b\n' "${GREEN}" "/reload" "${RESET}"
   echo "3. Try an extension:"
-  if [[ -f "${pi_extensions_dir}/my-first-extension.ts" ]]; then
+  if [[ -f "${pi_extensions_dir}/my-first-extension/index.ts" ]]; then
     printf '   %b%s%b   (My first extension — see its README)\n' "${GREEN}" "/my-first-extension" "${RESET}"
   fi
   printf '   %b%s%b\n' "${GREEN}" "${repo_root}/README.md" "${RESET}"
   local ext
   for ext in "${available_extensions[@]}"; do
-    if [[ -f "${pi_extensions_dir}/${ext}.ts" ]]; then
+    if [[ -f "${pi_extensions_dir}/${ext}/index.ts" ]]; then
       printf '   %b%s%b\n' "${GREEN}" "${extensions_source_dir}/${ext}/README.md" "${RESET}"
     fi
   done
