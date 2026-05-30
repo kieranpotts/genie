@@ -53,6 +53,16 @@ Extra arguments are forwarded to `node --test`, and the command is also exposed 
 
 [node-test]: https://nodejs.org/api/test.html
 
+## Running all checks
+
+`./run/check` runs the linter and then the tests in sequence, stopping at the first failure. It is the single command to run before committing, and the one CI runs:
+
+```sh
+./run/check
+```
+
+It is also exposed as `npm run check`.
+
 ## Commit messages
 
 Commit messages are validated by a [pre-commit][pre-commit] hook and again in CI.

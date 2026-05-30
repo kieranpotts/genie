@@ -14,6 +14,7 @@
     "typescript": "~6.0.0"
   },
   "scripts": {
+    "check": "./run/check",
     "fix": "./run/fix",
     "lint": "./run/lint",
     "test": "./run/test"
