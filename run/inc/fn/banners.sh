@@ -79,8 +79,8 @@ show_usage() {
   echo ""
   echo "Examples:"
   echo "  ./run/install                                # Install all."
-  echo "  ./run/install my-first-extension             # Install one."
-  echo "  ./run/install my-first-extension my-second   # Install multiple."
+  echo "  ./run/install pickling-gnomes                 # Install one."
+  echo "  ./run/install pickling-gnomes other-ext       # Install multiple."
 }
 
 # post_install_instructions - Print next steps and documentation pointers.
@@ -96,8 +96,8 @@ post_install_instructions() {
   echo "2. In Pi, reload extensions:"
   printf '   %b%s%b\n' "${GREEN}" "/reload" "${RESET}"
   echo "3. Try an extension:"
-  if [[ -f "${pi_extensions_dir}/my-first-extension/index.ts" ]]; then
-    printf '   %b%s%b   (My first extension — see its README)\n' "${GREEN}" "/my-first-extension" "${RESET}"
+  if [[ -f "${pi_extensions_dir}/pickling-gnomes/index.ts" ]]; then
+    printf '   %b%s%b   (just give Pi a prompt and watch the status line)\n' "${GREEN}" "pickling-gnomes" "${RESET}"
   fi
   printf '   %b%s%b\n' "${GREEN}" "${repo_root}/README.md" "${RESET}"
   local ext

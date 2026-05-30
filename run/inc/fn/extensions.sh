@@ -62,8 +62,8 @@ list_available_extensions() {
   local ext desc
   for ext in "${available_extensions[@]}"; do
     case "${ext}" in
-      my-first-extension)
-        desc="My first extension"
+      pickling-gnomes)
+        desc="Replaces the \"Working...\" status with randomly composed nonsense"
         ;;
       *)
         desc=""
