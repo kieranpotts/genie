@@ -5,6 +5,8 @@
 
 This page covers working on the extensions themselves. To just install and use them, see [Requirements](./docs/requirements.md) and [Installation](./docs/installation.md) instead.
 
+The [Pi extension docs](https://pi.dev/docs/latest/extensions) are the primary reference for writing extensions — the `ExtensionAPI`, lifecycle events, custom tools, commands, and UI. The notes below cover the conventions specific to this repository.
+
 ## Prerequisites
 
 Development needs [Node.js][node] (with `npm`) for the linting toolchain, in addition to the [runtime requirements](./docs/requirements.md). Install the dev dependencies once, from the repository root:
