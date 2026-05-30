@@ -4,10 +4,10 @@
 # Banner, summary, and usage output for the installer.
 #
 # These read the globals defined in `run/install`:
-#   available_extensions   - Names of installable extensions.
-#   extensions_source_dir  - Where extension sources live in this repo.
-#   pi_extensions_dir      - Where extensions are installed to.
-#   repo_root              - Absolute path to the repository root.
+#   available_extensions  - Names of installable extensions.
+#   src_dir               - Where extension sources live in this repo.
+#   pi_extensions_dir     - Where extensions are installed to.
+#   repo_root             - Absolute path to the repository root.
 #
 
 # Globals above are assigned in `run/install` and sourced before this file.
@@ -103,7 +103,7 @@ post_install_instructions() {
   local ext
   for ext in "${available_extensions[@]}"; do
     if [[ -f "${pi_extensions_dir}/${ext}/index.ts" ]]; then
-      printf '   %b%s%b\n' "${GREEN}" "${extensions_source_dir}/${ext}/README.md" "${RESET}"
+      printf '   %b%s%b\n' "${GREEN}" "${src_dir}/${ext}/README.md" "${RESET}"
     fi
   done
 }

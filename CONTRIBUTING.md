@@ -14,10 +14,10 @@ npm install
 
 ## Project layout
 
-Each extension lives in its own directory under `ext/`, with an `index.ts` entry point:
+Each extension lives in its own directory under `src/`, with an `index.ts` entry point:
 
 ```text
-ext/
+src/
 └── <name>/
     └── index.ts
 ```
@@ -42,7 +42,7 @@ Both forward any extra arguments to ESLint, eg. `./run/lint --quiet`). The comma
 
 Tests use the [Node.js built-in test runner][node-test] (`node:test` and `node:assert`) and run TypeScript directly through Node's native type stripping, so there is no test framework to install and no build step. Node 22.18 or newer is required.
 
-Test files live under `test/`, mirroring the `ext/` layout, and are named `*.test.ts`. Keeping them out of `ext/` means the installer never ships them with an extension.
+Test files live under `test/`, mirroring the `src/` layout, and are named `*.test.ts`. Keeping them out of `src/` means the installer never ships them with an extension.
 
 ```sh
 ./run/test            # Run all tests once.

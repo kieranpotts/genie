@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { participles, nouns, randomItem, randomMessage } from '../../ext/pickling-gnomes/messages.ts'
+import { participles, nouns, randomItem, randomMessage } from '../../src/pickling-gnomes/messages.ts'
 
 describe('word lists', () => {
   it('hold enough words for 10,000+ combinations', () => {

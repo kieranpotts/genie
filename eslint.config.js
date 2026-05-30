@@ -6,7 +6,7 @@
 import neostandard from 'neostandard'
 
 /*
- * Pi extensions are authored in TypeScript under `ext/` and run inside Pi's
+ * Pi extensions are authored in TypeScript under `src/` and run inside Pi's
  * Node process, so enable neostandard's TypeScript rules and expose the Node
  * globals everywhere. `node_modules/` is ignored by ESLint automatically.
  */

@@ -3,7 +3,7 @@
 #
 # Pi extensions installer.
 #
-# Installs Pi extensions from this repository's `ext/` directory into the Pi
+# Installs Pi extensions from this repository's `src/` directory into the Pi
 # agent's extensions directory (`~/.pi/agent/extensions/`).
 #
 # Usage: ./run/install [extension-name...]
@@ -37,11 +37,11 @@ repo_root="$(cd "${script_dir}/.." && pwd)"
 inc_path="${script_dir}/inc"
 
 # Where extension sources live in this repo, and where they install to. Each
-# extension must exist at `${extensions_source_dir}/<name>/index.ts`.
+# extension must exist at `${src_dir}/<name>/index.ts`.
 
 # Read by the sourced helpers in run/inc/fn/.
 # shellcheck disable=SC2034
-extensions_source_dir="${repo_root}/ext"
+src_dir="${repo_root}/src"
 
 # Read by the sourced helpers in run/inc/fn/.
 # shellcheck disable=SC2034

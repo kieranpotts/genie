@@ -4,7 +4,7 @@
 
 Personal and experimental extensions for the [Pi coding agent](https://pi.dev) (`@earendil-works/pi-coding-agent`). Each extension is a TypeScript module that hooks into Pi's lifecycle events or registers tools, commands, or UI.
 
-Extensions live under `ext/<name>/` and are installed into Pi's extensions directory (`~/.pi/agent/extensions/`) by `run/install`, which copies each extension directory verbatim. Pi runs the TypeScript directly – there is no build step.
+Extensions live under `src/<name>/` and are installed into Pi's extensions directory (`~/.pi/agent/extensions/`) by `run/install`, which copies each extension directory verbatim. Pi runs the TypeScript directly – there is no build step.
 
 The repository currently ships one extension, `pickling-gnomes`, which replaces the default "Working…" status with randomly composed nonsense.
 
@@ -19,8 +19,8 @@ The repository currently ships one extension, `pickling-gnomes`, which replaces 
 
 ## Repository structure
 
-- `ext/<name>/index.ts`: An extension's entry point, with a default-exported factory `(pi: ExtensionAPI) => void`. Helper modules (eg. `messages.ts`) sit alongside it and are imported with explicit `.ts` extensions.
-- `test/`: Tests for the Node test runner, mirroring the `ext/` layout (`*.test.ts`). Kept out of `ext/` so the installer never ships them.
+- `src/<name>/index.ts`: An extension's entry point, with a default-exported factory `(pi: ExtensionAPI) => void`. Helper modules (eg. `messages.ts`) sit alongside it and are imported with explicit `.ts` extensions.
+- `test/`: Tests for the Node test runner, mirroring the `src/` layout (`*.test.ts`). Kept out of `src/` so the installer never ships them.
 - `run/`: Dev scripts – `install`, `lint`, `fix`, `test`, `check`.
 - `run/inc/fn/`: Shared shell helpers (status printers, banners, extension install and list helpers).
 - `run/inc/var/`: Shared shell variables (ANSI codes).
@@ -43,13 +43,13 @@ Each `run/` script is also exposed as an `npm run` alias (`lint`, `fix`, `test`,
 
 The capitalized words REQUIRED, MUST, MUST NOT, RECOMMENDED, SHOULD, SHOULD NOT, OPTIONAL, and MAY, in the context of this document and agent skills/instructions/rules, are to be interpreted as described in [RFC 2119](https://www.ietf.org/rfc/rfc2119.txt).
 
-- MUST author each extension as a directory `ext/<name>/` with an `index.ts` entry point that default-exports a factory function `(pi: ExtensionAPI) => void`.
+- MUST author each extension as a directory `src/<name>/` with an `index.ts` entry point that default-exports a factory function `(pi: ExtensionAPI) => void`.
 
 - MUST import Pi's types from `@earendil-works/pi-coding-agent`, and import local helper modules with their explicit `.ts` extension – both Pi and Node's type stripping require it.
 
 - MUST register a new extension in the `available_extensions` array in `run/install` and add a matching description arm to `list_available_extensions` in `run/inc/fn/extensions.sh`, or the installer will not offer it.
 
-- MUST keep tests under `test/`, never inside `ext/`, because `run/install` copies each extension directory verbatim and would otherwise ship them.
+- MUST keep tests under `test/`, never inside `src/`, because `run/install` copies each extension directory verbatim and would otherwise ship them.
 
 - MUST run `./run/check` and get a clean pass before committing. CI runs the same command on every push and pull request.
 

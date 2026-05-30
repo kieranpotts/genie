@@ -1,6 +1,6 @@
 # Installation
 
-The `./run/install` script copies extensions from this repository's `ext/` directory into Pi's extensions directory in your home directory, where Pi auto-discovers them.
+The `./run/install` script copies extensions from this repository's `src/` directory into Pi's extensions directory in your home directory, where Pi auto-discovers them.
 
 ## Running the installer
 
@@ -41,7 +41,7 @@ For each extension it:
 
 1. Ensures Pi's extensions directory exists, creating `~/.pi/agent/extensions/` if necessary.
 2. Backs up any existing install of the same name to `~/.pi/agent/extensions/<name>.backup.<timestamp>/` before overwriting.
-3. Copies the extension's source directory (`ext/<name>/`, entry point `index.ts`) to `~/.pi/agent/extensions/<name>/`, preserving the directory layout so multi-file extensions work.
+3. Copies the extension's source directory (`src/<name>/`, entry point `index.ts`) to `~/.pi/agent/extensions/<name>/`, preserving the directory layout so multi-file extensions work.
 
 ## After installing
 
@@ -61,10 +61,10 @@ Auto-discovered extensions in `~/.pi/agent/extensions/` can be hot-reloaded with
 
 ## Adding a new extension
 
-Each extension lives in its own directory under `ext/`, with an `index.ts` entry point:
+Each extension lives in its own directory under `src/`, with an `index.ts` entry point:
 
 ```text
-ext/
+src/
 └── <name>/
     └── index.ts
 ```

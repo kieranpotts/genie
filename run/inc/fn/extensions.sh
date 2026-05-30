@@ -4,9 +4,9 @@
 # Helpers for discovering, backing up, and installing Pi extensions.
 #
 # These read the globals defined in `run/install`:
-#   available_extensions   - Names of installable extensions.
-#   extensions_source_dir  - Where extension sources live in this repo.
-#   pi_extensions_dir      - Where extensions are installed to.
+#   available_extensions  - Names of installable extensions.
+#   src_dir               - Where extension sources live in this repo.
+#   pi_extensions_dir     - Where extensions are installed to.
 #
 
 # Globals above are assigned in `run/install` and sourced before this file.
@@ -99,14 +99,14 @@ backup_existing_extension() {
 #
 # Arguments:
 #   $1 - Extension name. Source must exist at
-#        `${extensions_source_dir}/<name>/index.ts`.
+#        `${src_dir}/<name>/index.ts`.
 #
 # Returns:
 #   0 on success, 1 if the source is missing or the copy fails.
 #
 install_extension() {
   local ext_name="$1"
-  local source_dir="${extensions_source_dir}/${ext_name}"
+  local source_dir="${src_dir}/${ext_name}"
   local source_file="${source_dir}/index.ts"
   local target_dir="${pi_extensions_dir}/${ext_name}"
 
