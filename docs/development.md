@@ -55,13 +55,15 @@ Extra arguments are forwarded to `node --test`, and the command is also exposed 
 
 ## Running all checks
 
-`./run/check` runs the linter and then the tests in sequence, stopping at the first failure. It is the single command to run before committing, and the one CI runs:
+`./run/check` runs the linter and then the tests in sequence, stopping at the first failure. It is the single command to run before committing:
 
 ```sh
 ./run/check
 ```
 
 It is also exposed as `npm run check`.
+
+The [`Check`](../.github/workflows/check.yaml) GitHub Actions workflow runs this same command on every push and pull request, so changes are linted and tested automatically.
 
 ## Commit messages
 

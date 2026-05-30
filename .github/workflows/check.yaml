@@ -1,0 +1,45 @@
+#
+# Lint and test the source on every push and pull request.
+#
+
+name: Check
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+# Only the latest run for a given branch or pull request needs to finish;
+# cancel any earlier run still in progress.
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+# The job only reads the repository contents.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Lint and test
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Node 22.18+ is required for the native TypeScript support the tests
+      # rely on; pin to the current major to match local development.
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint and test
+        run: ./run/check
