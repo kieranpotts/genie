@@ -52,6 +52,7 @@ pi_extensions_dir="${HOME}/.pi/agent/extensions"
 # shellcheck disable=SC2034
 available_extensions=(
   "pickling-penguins"
+  "realize"
 )
 
 #

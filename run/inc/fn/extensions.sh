@@ -65,6 +65,9 @@ list_available_extensions() {
       pickling-penguins)
         desc="Replaces the \"Working...\" status with randomly composed nonsense"
         ;;
+      realize)
+        desc="Hands a spec (file, directory, or URL) to the agent to implement in full"
+        ;;
       *)
         desc=""
         ;;

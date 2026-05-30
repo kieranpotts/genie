@@ -6,7 +6,7 @@ Personal and experimental extensions for the [Pi coding agent](https://pi.dev) (
 
 Extensions live under `src/<name>/` and are installed into Pi's extensions directory (`~/.pi/agent/extensions/`) by `run/install`, which copies each extension directory verbatim. Pi runs the TypeScript directly – there is no build step.
 
-The repository currently ships one extension, `pickling-penguins`, which replaces the default "Working…" status with randomly composed nonsense.
+The repository ships two extensions: `pickling-penguins`, which replaces the default "Working…" status with randomly composed nonsense; and `realize`, a `/realize` command that hands a specification (a file, directory, or URL) to the agent to implement in full.
 
 ## Tech stack
 
