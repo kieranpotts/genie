@@ -15,6 +15,7 @@
   },
   "scripts": {
     "fix": "./run/fix",
-    "lint": "./run/lint"
+    "lint": "./run/lint",
+    "test": "./run/test"
   }
 }

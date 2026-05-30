@@ -38,6 +38,21 @@ Both forward any extra arguments to ESLint, eg. `./run/lint --quiet`). The comma
 [eslint]: https://eslint.org
 [neostandard]: https://github.com/neostandard/neostandard
 
+## Testing
+
+Tests use the [Node.js built-in test runner][node-test] (`node:test` and `node:assert`) and run TypeScript directly through Node's native type stripping, so there is no test framework to install and no build step. Node 22.18 or newer is required.
+
+Test files live under `test/`, mirroring the `ext/` layout, and are named `*.test.ts`. Keeping them out of `ext/` means the installer never ships them with an extension.
+
+```sh
+./run/test            # Run all tests once.
+./run/test --watch    # Re-run on change.
+```
+
+Extra arguments are forwarded to `node --test`, and the command is also exposed as `npm test`.
+
+[node-test]: https://nodejs.org/api/test.html
+
 ## Commit messages
 
 Commit messages are validated by a [pre-commit][pre-commit] hook and again in CI.
