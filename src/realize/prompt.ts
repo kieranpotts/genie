@@ -16,7 +16,7 @@ import type { ResolvedSource } from './source.ts'
  * These route the agent through the author's workflow skills, by name, in
  * lifecycle order. The methodology lives in those skills (one source of truth);
  * this prompt is the entry point that hands them the source as their starting
- * artifact. See `docs/design/realize.md` for the rationale.
+ * artifact. See this extension's README for the rationale.
  */
 const OWNERSHIP_INSTRUCTIONS = [
   'You are taking full ownership of realizing this specification — turning it into working, verified reality, end to end.',
