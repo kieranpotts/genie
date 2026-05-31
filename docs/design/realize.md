@@ -82,11 +82,13 @@ Ordered by priority. P0 (the decisions above) is settled, and P1 is implemented:
 
 ### P2 — Polish and robustness
 
-- **2.1 — Multiple sources** (`/realize <a> <b> …`) for a spec split across, say, an issue and a design doc. A capability decision, not a bug.
-- **2.2 — `gh auth` not checked.** The `gh --version` probe confirms the binary, not authentication; a private-repo URL fails at runtime. Likely accept the clear runtime error rather than add a slow `gh auth status` probe.
-- **2.3 — `file://` URLs** are classified as paths and fail `stat`. Strip the scheme or document as unsupported.
-- **2.4 — Argument hygiene** — strip surrounding quotes or backticks pasted around a path.
-- **2.5 — GitHub shorthand** — accept `owner/repo#42` as a convenience form.
+P2 is implemented, except 2.2, which is resolved by decision:
+
+- **2.1 — Multiple sources** *(done).* `/realize <a> <b> …` accepts several sources for a spec split across, say, an issue and a design doc. `index.ts` splits the argument on whitespace and resolves each token; `buildRealizePrompt` takes a `ResolvedSource[]` and, for more than one, enumerates them as a numbered list. Because sources are whitespace-separated, a path containing spaces must be passed on its own — a documented caveat.
+- **2.2 — `gh auth` not checked** *(won't do).* The `gh --version` probe confirms the binary, not authentication; a private-repo URL fails at runtime. We accept that clear runtime error rather than add a slow `gh auth status` probe to every GitHub URL.
+- **2.3 — `file://` URLs** *(done).* Converted to a filesystem path with `fileURLToPath` (which also decodes escapes like `%20`) and then classified like any other path.
+- **2.4 — Argument hygiene** *(done).* A single matching pair of wrapping quotes or backticks is stripped from each source before classification.
+- **2.5 — GitHub shorthand** *(done).* `owner/repo#42` expands to a canonical issue URL and flows through the normal GitHub URL handling. It is always treated as an issue (GitHub redirects to the PR view if the number is a PR); the full `/pull/<n>` URL targets a pull request explicitly.
 
 ## Open questions
 

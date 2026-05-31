@@ -6,15 +6,19 @@ A Pi extension that adds a `/realize` command. You point it at a specification, 
 
 `/realize <source>` hands a specification to the agent and instructs it to take full ownership of realizing it end to end. Rather than improvising, the agent is directed to work through the source using a set of software-development workflow skills, in lifecycle order: `specify`, `design`, `elaborate`, `plan`, `code`, `test`, and `review`. "Done" means every acceptance criterion is satisfied and verified with evidence.
 
-The single argument is the source of the specification, which can be any of:
+Each argument is a source of the specification, which can be any of:
 
 - A local file, eg. `/realize ./docs/spec.md`.
 - A local directory of artifacts, eg. `/realize ./docs/spec/`.
+- A `file://` URL, eg. `/realize file:///home/me/spec.md`.
 - A URL, eg. `/realize https://example.com/spec`.
 - A GitHub issue or pull request, eg. `/realize https://github.com/owner/repo/issues/42`.
 - A GitHub file, eg. `/realize https://github.com/owner/repo/blob/main/spec.md`.
+- The GitHub shorthand `owner/repo#42`, treated as an issue (use the full `/pull/` URL for a pull request).
 
-The extension does not read the source itself. It validates and classifies the source, then builds a prompt that points the agent at it — so the agent reads the file, lists the directory, or fetches the URL using its own tools, and is never limited by what would fit in a single message.
+You can pass several sources at once for a specification spread across more than one place, eg. `/realize ./docs/spec.md owner/repo#42`. Sources are separated by spaces, so an individual path that contains spaces must be passed on its own (quotes around it are tolerated and stripped).
+
+The extension does not read the sources itself. It validates and classifies them, then builds a prompt that points the agent at each — so the agent reads the file, lists the directory, or fetches the URL using its own tools, and is never limited by what would fit in a single message.
 
 When the source is a GitHub issue or pull request and the [`gh`](https://cli.github.com) CLI is installed, the agent is directed to read it (including the discussion) with `gh issue view` or `gh pr view`. A GitHub file (`/blob/`) URL is rewritten to its `raw.githubusercontent.com` form so the agent fetches the plain file. Any other URL — including a GitHub discussion, wiki, or repository root — is fetched like an ordinary web page.
 
