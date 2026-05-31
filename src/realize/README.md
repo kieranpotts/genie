@@ -1,10 +1,10 @@
 # realize
 
-A Pi extension that adds a `/realize` command. You point it at a specification, and the agent takes full responsibility for implementing it end-to-end.
+A Pi extension that adds a `/realize` command. You point it at a specification, and a multi-phase pipeline takes it through to a verified implementation.
 
 ## What it does
 
-`/realize <source>` instructs the agent to realize a specification using a rigorous software development workflow. Rather than improvising, the agent follows these lifecycle skills: `specify`, `design`, `elaborate`, `plan`, `code`, `test`, and `review`. "Done" means every acceptance criterion is satisfied and verified with evidence.
+`/realize <source>` runs a specification through a rigorous software delivery pipeline — `specify → design → elaborate → plan → code → test → review` — finishing with a summary. Each phase runs in its own isolated context and hands off to the next through artifacts on disk, so no phase inherits the previous one's reasoning. "Done" means the change clears both verification and review.
 
 Each argument is a source of the specification, which can be:
 
@@ -18,51 +18,58 @@ Each argument is a source of the specification, which can be:
 
 You can pass multiple sources separated by spaces: `/realize ./docs/spec.md owner/repo#42`.
 
-The extension validates and classifies sources, then builds a prompt pointing the agent to them. The agent reads the files or fetches the URLs using its own tools.
+The extension validates and classifies the sources, then hands them to the first phase. It does not read the sources itself — the `specify` phase reads them with its own tools, so the pipeline is never limited by what fits in a single message.
 
-When the source is a GitHub issue or PR and the [`gh`](https://cli.github.com) CLI is installed, the agent is directed to use `gh issue view` or `gh pr view`. GitHub file (`/blob/`) URLs are rewritten to `raw.githubusercontent.com` for plain-text fetching.
+Progress is shown in the status line as each phase runs. When the run finishes, the outcome and the artifact directory are reported. The artifacts — the specification, design, elaboration, plan, the change diff, the test and review reports, and a summary — are written under `.pi/realize/<run-id>/`.
 
 ## How it works
 
-Three core principles shape the extension:
+Four ideas shape the pipeline. The first three are the original `realize` principles; the fourth is what makes it a pipeline rather than a single prompt. The full design and its rationale are recorded in [SPEC.md](./SPEC.md).
 
-**It is a rigorous process, not a shortcut.** `/realize` is a disciplined entry point to the full development lifecycle. The prompt frames the specification as acceptance criteria, requires rationale for architecturally significant decisions, and defines "done" as verification of each lifecycle step with evidence.
+**It is a rigorous process, not a shortcut.** `/realize` is a disciplined run through the full development lifecycle. The specification is framed as acceptance criteria, architecturally significant decisions require rationale, and "done" means verification and review both clear, with evidence.
 
-**It delegates to installed workflow skills.** The prompt routes the agent through the author's own workflow skills: specify → design → elaborate → plan → code → test → review`. The methodology lives in the [`skills`][skills] collection; `realize` simply acts as the router.
+**It delegates to installed workflow skills.** Each phase loads the matching workflow skill from the [`skills`][skills] collection and follows its methodology. The methodology lives in one place; `realize` is the router that drives the phases in order.
 
-**It defers to project conventions.** `realize` does not impose its own branch or commit rules. It instructs the agent to discover and follow the target project's existing conventions, such as `AGENTS.md`, `CONTRIBUTING`, and historical code patterns.
+**It defers to project conventions.** `realize` imposes no branch or commit rules of its own. The phases discover and follow the target project's existing conventions — its `AGENTS.md`, `CONTRIBUTING`, and code patterns.
 
-### The prompt
+**Each phase runs in an isolated context.** Every phase is a separate, headless `pi` process with only the access it needs: the reviewer is strictly read-only, and the tester can run builds and checks but cannot edit source — so neither can quietly rewrite the code it is judging. Only the coder has unrestricted access. Phases communicate solely through artifacts, so the reviewer judges the change with fresh eyes rather than the coder's reasoning, and a failed check is sent back to a fresh coder — not the one that wrote the defect.
 
-The prompt consists of a preamble listing the sources and a set of ownership instructions. The instructions (implemented in [`prompt.ts`](./prompt.ts)) are:
+### The pipeline
 
-> You are taking full ownership of realizing this specification — turning it into working, verified reality, end to end.
->
-> Work through it using your installed workflow skills, in order, invoking each for its phase:
->
-> 1. **specify** — Treat the supplied source material as the requirements input. Capture it as testable acceptance criteria. If it is already a rigorous specification, validate and adopt it; if it is informal, formalize it.
-> 2. **design** — Explore options for any architecturally significant decision, and record the chosen approach and its rationale.
-> 3. **elaborate** — Resolve ambiguities, gaps, and contradictions. Decide the ones where intent is clear and record your assumptions; ask only when a genuinely significant choice cannot reasonably be made on your own.
-> 4. **plan** — Break the work into small, independently shippable steps.
-> 5. **code** — Implement each step in full: code, configuration, tests, and documentation.
-> 6. **test** — Verify the result against every acceptance criterion, with evidence. Run the relevant builds, tests, and checks.
-> 7. **review** — Self-review the change for correctness, design, clarity, and completeness before finishing.
->
-> Throughout, follow the conventions of the project you are working in — its branch and commit rules, its coding style, and any instructions in its `AGENTS.md` or `CONTRIBUTING`.
->
-> Finish with a concise summary: what you built, the key decisions and assumptions you made, each acceptance criterion and how it was verified, and anything left outstanding.
+The build phases run once, in order, each reading its predecessors' artifacts:
+
+`specify` → `design` → `elaborate` → `plan` → `code`
+
+Then a bounded rework loop verifies the result and sends it back when needed:
+
+`test` → `review` → (if the gate fails) a fresh `code` pass → repeat
+
+The gate passes only when verification passes **and** review does not request changes. If either is unsatisfied, the diff and the two reports go to a fresh coder, up to a small cycle limit (two by default). A final `summary` phase reports the outcome whether or not the gate cleared.
 
 ### Architecture
 
-The extension consists of three modules:
+The extension is a thin I/O edge over a pure, deterministic core, behind two swappable ports:
 
-- [`index.ts`](./index.ts) — Registers the `/realize` command, resolves sources, and dispatches.
-- [`source.ts`](./source.ts) — Classifies source tokens into `ResolvedSource` (handles `stat` and `gh --version` probes).
-- [`prompt.ts`](./prompt.ts) — Builds the prompt. Pure and side-effect free for easy unit testing.
+- [`index.ts`](./index.ts) — registers the `/realize` command, classifies sources, and runs the pipeline.
+- [`source.ts`](./source.ts) — classifies source tokens into `ResolvedSource` (a `stat` and a `gh --version` probe; the only source I/O).
+- [`prompt.ts`](./prompt.ts) — builds the task text for the `specify` phase. Pure.
+- [`phases.ts`](./phases.ts) — the eight phase definitions (role, access, model tier, skill) and the gate verdict parsers. Pure.
+- [`runner.ts`](./runner.ts) — the `PhaseRunner` port: how a phase is executed, in semantic terms.
+- [`runner-pi.ts`](./runner-pi.ts) — `PiCliRunner`, the port's `pi -p` implementation. The only module that spawns a process.
+- [`workspace.ts`](./workspace.ts) — the `Workspace` port and its filesystem/git implementation: artifact storage and diff capture.
+- [`pipeline.ts`](./pipeline.ts) — the deterministic orchestrator: the phase sequence, the gate, and the rework loop. Pure control flow over the two ports.
+
+Unlike other agentic workflows, an agent is NOT used as the orchestrator. Instead the pipeline is driven by a deterministic, stateless orchestrator that calls each phase in sequence, evaluates the gate, and re-runs the loop if needed. It means control flow lives in code – so it is testable and predictable. The trade-off is the workflow doesn't adapt to circumstance. The phases of the lifecycle are literally hard-coded.
+
+Each phase spawns an "expert" in a clean session, seeded with the diff and findings from the previous phase. This means there's a clean context starting at every phase boundary. This means increased cold-start cost, but it means each expert operates on the evolving artifacts using their own judgement – they're not influenced by prior discussion/context.
 
 ## Requirements
 
-This extension expects the [workflow skills][skills] (`specify`, `design`, `elaborate`, `plan`, `code`, `test`, `review`) to be installed in Pi (`~/.pi/agent/skills/`). See the [requirements guide](../../docs/requirements.md#per-extension-requirements). If a skill is missing, the agent will perform that phase unaided.
+This extension expects the [workflow skills][skills] (`specify`, `design`, `elaborate`, `plan`, `code`, `test`, `review`) to be installed in Pi (`~/.pi/agent/skills/`). See the [requirements guide](../../docs/requirements.md#per-extension-requirements). Each phase is launched with its corresponding skill, so the skills must be installed for the pipeline to run as intended (the `summary` phase uses no skill).
+
+## Limitations
+
+Local file and directory sources are read directly by the `specify` phase. Remote sources — a URL, or a GitHub issue, pull request, or file — are classified, but the `specify` phase does not yet have the tools to retrieve them, so end-to-end support for remote sources is still pending.
 
 ## Configuration
 

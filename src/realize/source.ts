@@ -18,7 +18,7 @@ const execFileAsync = promisify(execFile)
 
 /**
  * A `/realize` source argument, classified into one of four kinds. The `kind`
- * discriminant selects the matching instruction in `buildRealizePrompt`.
+ * discriminant selects the matching instruction in `buildSpecifyTask`.
  */
 export type ResolvedSource =
   | { kind: 'file', path: string }

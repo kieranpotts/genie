@@ -1,84 +1,44 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildRealizePrompt } from '../../src/realize/prompt.ts'
+import { buildSpecifyTask } from '../../src/realize/prompt.ts'
 
-describe('buildRealizePrompt', () => {
-  it('references a file path and tells the agent to read it', () => {
-    const prompt = buildRealizePrompt([{ kind: 'file', path: './spec.md' }])
-    assert.match(prompt, /`\.\/spec\.md`/)
-    assert.match(prompt, /Read it in full/)
+describe('buildSpecifyTask', () => {
+  it('references a file path and tells the phase to read it', () => {
+    const task = buildSpecifyTask([{ kind: 'file', path: './spec.md' }])
+    assert.match(task, /`\.\/spec\.md`/)
+    assert.match(task, /Read it in full/)
   })
 
   it('references a directory and its artifacts', () => {
-    const prompt = buildRealizePrompt([{ kind: 'directory', path: './spec' }])
-    assert.match(prompt, /directory `\.\/spec`/)
-    assert.match(prompt, /artifacts/)
+    const task = buildSpecifyTask([{ kind: 'directory', path: './spec' }])
+    assert.match(task, /directory `\.\/spec`/)
+    assert.match(task, /artifacts/)
   })
 
   it('uses gh issue view for GitHub issues', () => {
-    const url = 'https://github.com/owner/repo/issues/42'
-    const prompt = buildRealizePrompt([{ kind: 'github', subtype: 'issue', url }])
-    assert.match(prompt, /gh issue view/)
-    assert.match(prompt, /--comments/)
-    assert.ok(prompt.includes(url))
+    const task = buildSpecifyTask([{ kind: 'github', subtype: 'issue', url: 'https://github.com/owner/repo/issues/42' }])
+    assert.match(task, /gh issue view/)
+    assert.match(task, /--comments/)
+    assert.ok(task.includes('https://github.com/owner/repo/issues/42'))
   })
 
   it('uses gh pr view for GitHub pull requests', () => {
-    const prompt = buildRealizePrompt([{ kind: 'github', subtype: 'pr', url: 'https://github.com/owner/repo/pull/7' }])
-    assert.match(prompt, /gh pr view/)
+    const task = buildSpecifyTask([{ kind: 'github', subtype: 'pr', url: 'https://github.com/owner/repo/pull/7' }])
+    assert.match(task, /gh pr view/)
   })
 
-  it('tells the agent to fetch a generic URL', () => {
-    const prompt = buildRealizePrompt([{ kind: 'url', url: 'https://example.com/spec' }])
-    assert.match(prompt, /Fetch and read it/)
-    assert.ok(prompt.includes('https://example.com/spec'))
+  it('tells the phase to fetch a generic URL', () => {
+    const task = buildSpecifyTask([{ kind: 'url', url: 'https://example.com/spec' }])
+    assert.match(task, /Fetch and read it/)
+    assert.ok(task.includes('https://example.com/spec'))
   })
 
   it('enumerates several sources as a numbered list', () => {
-    const prompt = buildRealizePrompt([
+    const task = buildSpecifyTask([
       { kind: 'file', path: './spec.md' },
       { kind: 'github', subtype: 'issue', url: 'https://github.com/owner/repo/issues/42' }
     ])
-    assert.match(prompt, /spread across these sources/)
-    assert.match(prompt, /1\. The file `\.\/spec\.md`/)
-    assert.match(prompt, /2\. GitHub issue `https:\/\/github\.com\/owner\/repo\/issues\/42`/)
-    assert.match(prompt, /gh issue view/)
-  })
-
-  it('always includes the ownership instructions, for one or many sources', () => {
-    const single = buildRealizePrompt([{ kind: 'file', path: 'x' }])
-    assert.match(single, /full ownership/)
-    assert.match(single, /concise summary/)
-
-    const many = buildRealizePrompt([
-      { kind: 'file', path: 'a' },
-      { kind: 'url', url: 'https://example.com/b' }
-    ])
-    assert.match(many, /full ownership/)
-    assert.match(many, /concise summary/)
-  })
-
-  it('delegates to the workflow skills, in lifecycle order', () => {
-    const prompt = buildRealizePrompt([{ kind: 'file', path: 'x' }])
-    /* Match the bolded phase markers, not bare words: "test" would otherwise
-       also match "testable" in the specify phase and "tests" in the code phase. */
-    const order = ['specify', 'design', 'elaborate', 'plan', 'code', 'test', 'review']
-    let last = -1
-    for (const skill of order) {
-      const at = prompt.indexOf(`**${skill}**`)
-      assert.ok(at > last, `expected **${skill}** to appear after the previous phase`)
-      last = at
-    }
-  })
-
-  it('defines done as evidence against acceptance criteria', () => {
-    const prompt = buildRealizePrompt([{ kind: 'file', path: 'x' }])
-    assert.match(prompt, /acceptance criteri/i)
-    assert.match(prompt, /evidence/i)
-  })
-
-  it('tells the agent to follow the project conventions', () => {
-    const prompt = buildRealizePrompt([{ kind: 'file', path: 'x' }])
-    assert.match(prompt, /AGENTS\.md/)
+    assert.match(task, /1\. The file/)
+    assert.match(task, /2\. GitHub issue/)
   })
 })

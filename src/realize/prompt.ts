@@ -1,40 +1,12 @@
 /**
- * Prompt construction for the `/realize` command.
+ * Source-description for the `/realize` pipeline.
  *
- * Builds the user message handed to the agent: a preamble naming each
- * specification source and how to obtain it, followed by the shared ownership
- * instructions saying what to do with them. Pure and side-effect free, so it is
- * unit-tested without touching the Pi API.
+ * Turns the classified specification sources into the task text handed to the
+ * pipeline's `specify` phase: a preamble naming each source and how to obtain it.
+ * Pure and side-effect free, so it is unit-tested without touching the Pi API.
  */
 
 import type { ResolvedSource } from './source.ts'
-
-/**
- * The source-independent instructions that delegate full ownership of the
- * specification to the agent. Appended after the source preamble.
- *
- * These route the agent through the author's workflow skills, by name, in
- * lifecycle order. The methodology lives in those skills (one source of truth);
- * this prompt is the entry point that hands them the source as their starting
- * artifact. See this extension's README for the rationale.
- */
-const OWNERSHIP_INSTRUCTIONS = [
-  'You are taking full ownership of realizing this specification — turning it into working, verified reality, end to end.',
-  '',
-  'Work through it using your installed workflow skills, in order, invoking each for its phase:',
-  '',
-  '1. **specify** — Treat the supplied source material as the requirements input. Capture it as testable acceptance criteria. If it is already a rigorous specification, validate and adopt it; if it is informal, formalize it.',
-  '2. **design** — Explore options for any architecturally significant decision, and record the chosen approach and its rationale.',
-  '3. **elaborate** — Resolve ambiguities, gaps, and contradictions. Decide the ones where intent is clear and record your assumptions; ask only when a genuinely significant choice cannot reasonably be made on your own.',
-  '4. **plan** — Break the work into small, independently shippable steps.',
-  '5. **code** — Implement each step in full: code, configuration, tests, and documentation.',
-  '6. **test** — Verify the result against every acceptance criterion, with evidence. Run the relevant builds, tests, and checks.',
-  '7. **review** — Self-review the change for correctness, design, clarity, and completeness before finishing.',
-  '',
-  'Throughout, follow the conventions of the project you are working in — its branch and commit rules, its coding style, and any instructions in its `AGENTS.md` or `CONTRIBUTING`.',
-  '',
-  'Finish with a concise summary: what you built, the key decisions and assumptions you made, each acceptance criterion and how it was verified, and anything left outstanding.'
-].join('\n')
 
 /**
  * The `gh` command that retrieves a GitHub issue or pull request, including its
@@ -50,8 +22,8 @@ function ghViewCommand (resolved: Extract<ResolvedSource, { kind: 'github' }>): 
 }
 
 /**
- * Produce a full sentence telling the agent where a single specification lives
- * and how to obtain its contents, tailored to the source kind.
+ * Produce a full sentence telling the specify phase where a single specification
+ * lives and how to obtain its contents, tailored to the source kind.
  *
  * Used when `/realize` is given exactly one source. For several sources, see
  * {@link sourceListItem}.
@@ -103,7 +75,7 @@ function sourceListItem (resolved: ResolvedSource): string {
  * list introduced by a "spread across these sources" header for several.
  *
  * @param sources - One or more classified sources.
- * @returns The preamble that precedes the ownership instructions.
+ * @returns The preamble naming each source and how to read it.
  */
 function sourcePreamble (sources: ResolvedSource[]): string {
   if (sources.length === 1) {
@@ -115,14 +87,16 @@ function sourcePreamble (sources: ResolvedSource[]): string {
 }
 
 /**
- * Build the full prompt handed to the agent when `/realize` is invoked.
+ * Build the task for the pipeline's `specify` phase: where the specification
+ * source material lives and how to read it.
  *
- * Combines the source preamble (where each spec source is, how to read it) with
- * the shared ownership instructions (what to do with it).
+ * The specify phase's own role (see `./phases.ts`) tells it to formalize that
+ * material into a testable specification, so the task only needs to point at the
+ * sources — described in the same words the command has always used.
  *
  * @param sources - One or more classified sources from `resolveSource`.
- * @returns The complete user message to send to the agent.
+ * @returns The instruction handed to the specify phase.
  */
-export function buildRealizePrompt (sources: ResolvedSource[]): string {
-  return `${sourcePreamble(sources)}\n\n${OWNERSHIP_INSTRUCTIONS}`
+export function buildSpecifyTask (sources: ResolvedSource[]): string {
+  return sourcePreamble(sources)
 }
