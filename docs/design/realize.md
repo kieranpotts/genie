@@ -46,9 +46,9 @@ The methodology therefore lives in exactly one place — the [`skills`](https://
 
 *Rationale:* `realize` is intended for the author's own projects, which carry their own conventions. Baking branch or commit rules into `realize` would be wrong for any project whose conventions differ, and redundant for those that already declare them. Deferral is correct for the intended use and degrades gracefully when conventions are absent.
 
-## Proposed prompt
+## The prompt
 
-The source-specific opening line is unchanged in spirit (it says where the spec is and how to read it, per source kind). The shared ownership block is rewritten to encode [D1](#d1--realize-is-a-rigorous-front-door-not-a-lightweight-shortcut)–[D3](#d3--defer-to-the-target-projects-conventions). Draft, pending implementation in [P1.2](#p1--high-value):
+The source-specific opening line says where the spec is and how to read it, per source kind. The shared ownership block — implemented in [`prompt.ts`](../../src/realize/prompt.ts), which is the source of truth — encodes [D1](#d1--realize-is-a-rigorous-front-door-not-a-lightweight-shortcut)–[D3](#d3--defer-to-the-target-projects-conventions). It reads:
 
 > You are taking full ownership of realizing this specification — turning it into working, verified reality, end to end.
 >
@@ -72,20 +72,13 @@ The source-specific opening line is unchanged in spirit (it says where the spec 
 
 [D2](#d2--delegate-to-the-installed-workflow-skills) makes the author's workflow skills a prerequisite for `realize` to behave as designed.
 
-[`docs/requirements.md`](../requirements.md) currently states that the only requirement is Pi itself. It MUST be updated to add the workflow skills as a requirement, with a pointer to installing them into Pi (`~/.pi/agent/skills/`, via the `skills` repo's `build/pi` target). The `realize` README SHOULD note the same.
+[`docs/requirements.md`](../requirements.md) and the [`realize` README](../../src/realize/README.md) document this: they list the workflow skills as a requirement and point to installing them into Pi (`~/.pi/agent/skills/`, via the `skills` repo's `build/pi` target).
 
 If a named skill is not installed, Pi simply will not surface it; the agent will fall back to performing that phase unaided. This is acceptable degradation, not a guaranteed mode — the supported configuration is with the skills installed.
 
 ## Backlog
 
-Ordered by priority. P0 (the decisions above) is settled.
-
-### P1 — High value
-
-- **1.1 — Normalize GitHub URLs before they reach the prompt.** `parseGitHubTarget` stores the *raw* argument, which `prompt.ts` interpolates into `gh issue view <url> --comments`. A deep link (`…/pull/7/files`, `…/issues/42#comment`) is passed verbatim: the `/files` suffix can break `gh … view`, and an unquoted `#…` fragment comments out the rest of the agent's shell line, silently dropping `--comments`. Capture `owner/repo` and the number in `parseGitHubTarget` and emit a canonical `https://github.com/<owner>/<repo>/(issues|pull)/<n>`. This is a latent correctness bug and ships independent of the prompt work.
-- **1.2 — Rewrite `OWNERSHIP_INSTRUCTIONS`** to the [proposed prompt](#proposed-prompt), encoding [D1](#d1--realize-is-a-rigorous-front-door-not-a-lightweight-shortcut)–[D3](#d3--defer-to-the-target-projects-conventions). Update the `prompt.test.ts` assertions to match (phase names, evidence-based "done", convention deferral).
-- **1.3 — Update requirements/README** per [C1](#c1--realize-now-depends-on-the-workflow-skills).
-- **1.4 — GitHub blob and discussion handling.** Today anything that is not a clean issue/PR URL or a local path falls through to a generic `url` fetched as HTML, including `/blob/…` file links and `/discussions/…`. At minimum, route `/blob/` to a raw fetch. Decide discussion coverage explicitly rather than by omission.
+Ordered by priority. P0 (the decisions above) is settled, and P1 is implemented: the prompt rewrite to the seven-phase delegation, GitHub URL canonicalization, GitHub blob handling (`/blob/…` → raw, with discussions and other pages left to a generic fetch by design), and the requirements/README updates. What remains:
 
 ### P2 — Polish and robustness
 

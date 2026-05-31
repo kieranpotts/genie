@@ -37,6 +37,30 @@ describe('buildRealizePrompt', () => {
   it('always includes the ownership instructions', () => {
     const prompt = buildRealizePrompt({ kind: 'file', path: 'x' })
     assert.match(prompt, /full ownership/)
-    assert.match(prompt, /summary of what you did/)
+    assert.match(prompt, /concise summary/)
+  })
+
+  it('delegates to the workflow skills, in lifecycle order', () => {
+    const prompt = buildRealizePrompt({ kind: 'file', path: 'x' })
+    /* Match the bolded phase markers, not bare words: "test" would otherwise
+       also match "testable" in the specify phase and "tests" in the code phase. */
+    const order = ['specify', 'design', 'elaborate', 'plan', 'code', 'test', 'review']
+    let last = -1
+    for (const skill of order) {
+      const at = prompt.indexOf(`**${skill}**`)
+      assert.ok(at > last, `expected **${skill}** to appear after the previous phase`)
+      last = at
+    }
+  })
+
+  it('defines done as evidence against acceptance criteria', () => {
+    const prompt = buildRealizePrompt({ kind: 'file', path: 'x' })
+    assert.match(prompt, /acceptance criteri/i)
+    assert.match(prompt, /evidence/i)
+  })
+
+  it('tells the agent to follow the project conventions', () => {
+    const prompt = buildRealizePrompt({ kind: 'file', path: 'x' })
+    assert.match(prompt, /AGENTS\.md/)
   })
 })

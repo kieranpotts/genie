@@ -12,17 +12,28 @@ import type { ResolvedSource } from './source.ts'
 /**
  * The source-independent instructions that delegate full ownership of the
  * specification to the agent. Appended after a source-specific opening line.
+ *
+ * These route the agent through the author's workflow skills, by name, in
+ * lifecycle order. The methodology lives in those skills (one source of truth);
+ * this prompt is the entry point that hands them the source as their starting
+ * artifact. See `docs/design/realize.md` for the rationale.
  */
 const OWNERSHIP_INSTRUCTIONS = [
-  'You are taking full ownership of realizing this specification — turning it into a working reality, end to end.',
+  'You are taking full ownership of realizing this specification — turning it into working, verified reality, end to end.',
   '',
-  'Work through it as follows:',
+  'Work through it using your installed workflow skills, in order, invoking each for its phase:',
   '',
-  '1. Understand the specification completely before changing anything. Follow any references it makes to other documents, code, issues, or resources.',
-  '2. Identify ambiguities, gaps, and contradictions. Resolve the ones where intent is clear, recording the assumptions you make. Ask only when a genuinely significant choice is unclear and you cannot reasonably decide it yourself.',
-  '3. Plan the work, then implement it in full — code, configuration, tests, and documentation, as the specification requires.',
-  '4. Verify your work against the specification. Run the relevant builds, tests, and checks, and confirm the result satisfies what was asked.',
-  '5. Finish with a concise summary of what you did, the decisions and assumptions you made, and anything left outstanding.'
+  '1. **specify** — Treat the source as the requirements input. Capture it as testable acceptance criteria. If the source is already a rigorous specification, validate and adopt it; if it is informal, formalize it.',
+  '2. **design** — Explore options for any architecturally significant decision, and record the chosen approach and its rationale.',
+  '3. **elaborate** — Resolve ambiguities, gaps, and contradictions. Decide the ones where intent is clear and record your assumptions; ask only when a genuinely significant choice cannot reasonably be made on your own.',
+  '4. **plan** — Break the work into small, independently shippable steps.',
+  '5. **code** — Implement each step in full: code, configuration, tests, and documentation.',
+  '6. **test** — Verify the result against every acceptance criterion, with evidence. Run the relevant builds, tests, and checks.',
+  '7. **review** — Self-review the change for correctness, design, clarity, and completeness before finishing.',
+  '',
+  'Throughout, follow the conventions of the project you are working in — its branch and commit rules, its coding style, and any instructions in its `AGENTS.md` or `CONTRIBUTING`.',
+  '',
+  'Finish with a concise summary: what you built, the key decisions and assumptions you made, each acceptance criterion and how it was verified, and anything left outstanding.'
 ].join('\n')
 
 /**

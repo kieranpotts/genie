@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { isUrl, parseGitHubTarget, resolveSource } from '../../src/realize/source.ts'
+import { isUrl, parseGitHubTarget, parseGitHubBlob, resolveSource } from '../../src/realize/source.ts'
 
 describe('isUrl', () => {
   it('recognizes http and https URLs', () => {
@@ -81,6 +81,32 @@ describe('parseGitHubTarget', () => {
   })
 })
 
+describe('parseGitHubBlob', () => {
+  it('rewrites a blob URL to its raw form', () => {
+    assert.equal(
+      parseGitHubBlob('https://github.com/owner/repo/blob/main/docs/spec.md'),
+      'https://raw.githubusercontent.com/owner/repo/main/docs/spec.md'
+    )
+  })
+
+  it('drops a line-number fragment and query', () => {
+    assert.equal(
+      parseGitHubBlob('https://github.com/owner/repo/blob/main/x.ts?plain=1#L5-L9'),
+      'https://raw.githubusercontent.com/owner/repo/main/x.ts'
+    )
+  })
+
+  it('returns null for non-blob GitHub URLs', () => {
+    assert.equal(parseGitHubBlob('https://github.com/owner/repo/issues/42'), null)
+    assert.equal(parseGitHubBlob('https://github.com/owner/repo/discussions/3'), null)
+  })
+
+  it('returns null for non-GitHub URLs and non-URLs', () => {
+    assert.equal(parseGitHubBlob('https://example.com/owner/repo/blob/main/x'), null)
+    assert.equal(parseGitHubBlob('./x'), null)
+  })
+})
+
 describe('resolveSource', () => {
   it('classifies an existing file', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'realize-'))
@@ -112,6 +138,14 @@ describe('resolveSource', () => {
     assert.deepEqual(
       await resolveSource('https://example.com/spec'),
       { kind: 'url', url: 'https://example.com/spec' }
+    )
+  })
+
+  it('resolves a GitHub blob URL to a raw url', async () => {
+    /* A blob is not an issue/PR, so `gh` is never consulted — deterministic. */
+    assert.deepEqual(
+      await resolveSource('https://github.com/owner/repo/blob/main/spec.md'),
+      { kind: 'url', url: 'https://raw.githubusercontent.com/owner/repo/main/spec.md' }
     )
   })
 })

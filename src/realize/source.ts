@@ -92,6 +92,46 @@ export function parseGitHubTarget (source: string): GitHubTarget | null {
 }
 
 /**
+ * Convert a GitHub file (blob) URL into its `raw.githubusercontent.com`
+ * equivalent, so the agent fetches the plain file rather than the HTML page
+ * wrapped in GitHub's chrome.
+ *
+ * Recognizes `https://github.com/<owner>/<repo>/blob/<ref>/<path>` and returns
+ * `https://raw.githubusercontent.com/<owner>/<repo>/<ref>/<path>`. Any trailing
+ * query or line-number fragment (eg. `#L5-L9`) is dropped, since `url.pathname`
+ * excludes both. Non-blob and non-GitHub URLs yield `null`.
+ *
+ * Other GitHub pages without a clean machine-readable form — discussions, repo
+ * roots, the wiki — are intentionally not special-cased; they fall through to a
+ * generic web fetch in {@link resolveSource}.
+ *
+ * @param source - A source string, which may or may not be a URL.
+ * @returns The raw file URL, or `null` if `source` is not a GitHub blob URL.
+ */
+export function parseGitHubBlob (source: string): string | null {
+  let url: URL
+  try {
+    url = new URL(source)
+  } catch {
+    return null /* Not a parseable URL. */
+  }
+
+  if (url.hostname !== 'github.com' && url.hostname !== 'www.github.com') {
+    return null
+  }
+
+  /* Capture /<owner>/<repo>/blob/<ref>/<path...>; <ref> may be a branch, tag,
+     or commit SHA, and <path> may contain further slashes. */
+  const match = url.pathname.match(/^\/([^/]+)\/([^/]+)\/blob\/(.+)$/)
+  if (match === null) {
+    return null
+  }
+
+  const [, owner, repo, refAndPath] = match
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${refAndPath}`
+}
+
+/**
  * Test whether an executable is available and runnable on the host.
  *
  * Used to decide whether GitHub issue/PR URLs can be resolved through the `gh`
@@ -115,9 +155,10 @@ export async function commandExists (command: string): Promise<boolean> {
  *
  * URLs are inspected for GitHub issue/PR shape; if matched and the `gh` CLI is
  * available, the source resolves as a `github` target (so the agent can use
- * `gh` for clean text), otherwise as a generic `url`. Non-URL arguments are
- * treated as filesystem paths and `stat`-ed to distinguish a directory from a
- * file. A missing or unreadable path throws.
+ * `gh` for clean text). A GitHub file (blob) URL is rewritten to its raw form
+ * so the agent fetches the plain file. Anything else resolves as a generic
+ * `url`. Non-URL arguments are treated as filesystem paths and `stat`-ed to
+ * distinguish a directory from a file. A missing or unreadable path throws.
  *
  * This only *classifies* the source — it never reads file contents or fetches
  * URL bodies. The agent does that itself from the prompt.
@@ -133,6 +174,11 @@ export async function resolveSource (source: string): Promise<ResolvedSource> {
        installed; otherwise fall back to a plain web fetch. */
     if (github !== null && await commandExists('gh')) {
       return { kind: 'github', subtype: github.type, url: github.url }
+    }
+    /* A GitHub file URL fetches cleanest as raw text, with no `gh` needed. */
+    const raw = parseGitHubBlob(source)
+    if (raw !== null) {
+      return { kind: 'url', url: raw }
     }
     return { kind: 'url', url: source }
   }
