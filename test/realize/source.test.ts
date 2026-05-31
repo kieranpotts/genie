@@ -35,9 +35,39 @@ describe('parseGitHubTarget', () => {
     )
   })
 
-  it('ignores trailing path and query segments', () => {
-    const target = parseGitHubTarget('https://github.com/owner/repo/issues/42#issuecomment-1')
-    assert.equal(target?.type, 'issue')
+  it('canonicalizes an issue deep link, dropping the fragment', () => {
+    assert.deepEqual(
+      parseGitHubTarget('https://github.com/owner/repo/issues/42#issuecomment-1'),
+      { type: 'issue', url: 'https://github.com/owner/repo/issues/42' }
+    )
+  })
+
+  it('canonicalizes a PR deep link, dropping a trailing path', () => {
+    assert.deepEqual(
+      parseGitHubTarget('https://github.com/owner/repo/pull/7/files'),
+      { type: 'pr', url: 'https://github.com/owner/repo/pull/7' }
+    )
+  })
+
+  it('drops query strings', () => {
+    assert.deepEqual(
+      parseGitHubTarget('https://github.com/owner/repo/issues/42?foo=bar'),
+      { type: 'issue', url: 'https://github.com/owner/repo/issues/42' }
+    )
+  })
+
+  it('normalizes the pulls alias to pull', () => {
+    assert.deepEqual(
+      parseGitHubTarget('https://github.com/owner/repo/pulls/7'),
+      { type: 'pr', url: 'https://github.com/owner/repo/pull/7' }
+    )
+  })
+
+  it('normalizes the www host to github.com', () => {
+    assert.deepEqual(
+      parseGitHubTarget('https://www.github.com/owner/repo/issues/42'),
+      { type: 'issue', url: 'https://github.com/owner/repo/issues/42' }
+    )
   })
 
   it('returns null for non-issue GitHub URLs', () => {

@@ -48,10 +48,17 @@ export function isUrl (source: string): boolean {
 /**
  * Parse a GitHub issue or pull request URL into a target descriptor.
  *
- * Recognizes the canonical web URLs for issues and pull requests, eg.
+ * Recognizes the web URLs for issues and pull requests, eg.
  * `https://github.com/owner/repo/issues/42` and
  * `https://github.com/owner/repo/pull/42`. Any other URL — including other
  * GitHub pages such as a repository root or a file blob — yields `null`.
+ *
+ * The returned `url` is always *canonical*: scheme and host normalized to
+ * `https://github.com`, the `pulls` alias rewritten to `pull`, and any trailing
+ * path (eg. `/files`), query, or fragment (eg. `#issuecomment-1`) stripped. This
+ * matters because the prompt interpolates the URL into a `gh ... view` command
+ * the agent runs in a shell: a `/files` suffix can confuse `gh`, and an unquoted
+ * `#` fragment would comment out the rest of the command line.
  *
  * @param source - A source string, which may or may not be a URL.
  * @returns A {@link GitHubTarget} for issues and pull requests, otherwise `null`.
@@ -69,15 +76,19 @@ export function parseGitHubTarget (source: string): GitHubTarget | null {
     return null
   }
 
-  /* Match /<owner>/<repo>/<issues|pull|pulls>/<number>, ignoring any trailing
-     path or query so deep links (eg. to a comment) still resolve. */
-  const match = url.pathname.match(/^\/[^/]+\/[^/]+\/(issues|pull|pulls)\/\d+/)
+  /* Capture /<owner>/<repo>/<issues|pull|pulls>/<number>, ignoring any trailing
+     path, query, or fragment so deep links (eg. to a comment) still resolve. */
+  const match = url.pathname.match(/^\/([^/]+)\/([^/]+)\/(issues|pull|pulls)\/(\d+)/)
   if (match === null) {
     return null
   }
 
-  const type = match[1] === 'issues' ? 'issue' : 'pr'
-  return { type, url: source }
+  const [, owner, repo, kind, number] = match
+  const type = kind === 'issues' ? 'issue' : 'pr'
+  /* Rebuild a canonical URL rather than echoing the raw input: the agent runs
+     this in a shell, so it must be free of trailing paths and `#` fragments. */
+  const path = type === 'issue' ? 'issues' : 'pull'
+  return { type, url: `https://github.com/${owner}/${repo}/${path}/${number}` }
 }
 
 /**
