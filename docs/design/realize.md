@@ -82,7 +82,6 @@ Ordered by priority. P0 (the decisions above) is settled.
 
 ### P1 — High value
 
-- **1.1 — Normalize GitHub URLs before they reach the prompt.** `parseGitHubTarget` stores the *raw* argument, which `prompt.ts` interpolates into `gh issue view <url> --comments`. A deep link (`…/pull/7/files`, `…/issues/42#comment`) is passed verbatim: the `/files` suffix can break `gh … view`, and an unquoted `#…` fragment comments out the rest of the agent's shell line, silently dropping `--comments`. Capture `owner/repo` and the number in `parseGitHubTarget` and emit a canonical `https://github.com/<owner>/<repo>/(issues|pull)/<n>`. This is a latent correctness bug and ships independent of the prompt work.
 - **1.2 — Rewrite `OWNERSHIP_INSTRUCTIONS`** to the [proposed prompt](#proposed-prompt), encoding [D1](#d1--realize-is-a-rigorous-front-door-not-a-lightweight-shortcut)–[D3](#d3--defer-to-the-target-projects-conventions). Update the `prompt.test.ts` assertions to match (phase names, evidence-based "done", convention deferral).
 - **1.3 — Update requirements/README** per [C1](#c1--realize-now-depends-on-the-workflow-skills).
 - **1.4 — GitHub blob and discussion handling.** Today anything that is not a clean issue/PR URL or a local path falls through to a generic `url` fetched as HTML, including `/blob/…` file links and `/discussions/…`. At minimum, route `/blob/` to a raw fetch. Decide discussion coverage explicitly rather than by omission.
