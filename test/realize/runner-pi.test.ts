@@ -1,9 +1,16 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, writeFile, chmod, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, chmod, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { buildPiArgs, toolsForAccess, PiCliRunner } from '../../src/realize/runner-pi.ts'
+import {
+  buildPiArgs,
+  toolsForAccess,
+  PiCliRunner,
+  parsePreferredModel,
+  parseLoadedModels,
+  resolveSkillDir
+} from '../../src/realize/runner-pi.ts'
 import type { Phase } from '../../src/realize/runner.ts'
 
 /**
@@ -99,6 +106,16 @@ describe('buildPiArgs', () => {
     assert.ok(!args.includes('--model'))
   })
 
+  it('a resolved model wins over the default tier', () => {
+    const args = buildPiArgs(makePhase({ tier: 'default' }), { inputs: [], task: 'go' }, { resolvedModel: 'qwen3.5:9b' })
+    assert.equal(valueOf(args, '--model'), 'qwen3.5:9b')
+  })
+
+  it('a resolved model wins over a configured strong model', () => {
+    const args = buildPiArgs(makePhase({ tier: 'strong' }), { inputs: [], task: 'go' }, { resolvedModel: 'qwen3.5:9b', strongModel: 'qwen3.5:35b' })
+    assert.equal(valueOf(args, '--model'), 'qwen3.5:9b')
+  })
+
   it('passes inputs as @file positionals before the task, in order', () => {
     const args = buildPiArgs(makePhase(), { inputs: ['/a/spec.md', '/b/design.md'], task: 'GO' })
     const a = args.indexOf('@/a/spec.md')
@@ -112,6 +129,157 @@ describe('buildPiArgs', () => {
   it('ends with the task message', () => {
     const args = buildPiArgs(makePhase(), { inputs: [], task: 'the instruction' })
     assert.equal(args[args.length - 1], 'the instruction')
+  })
+})
+
+describe('parsePreferredModel', () => {
+  it('reads a value nested under metadata', () => {
+    const src = '---\nname: code\nmetadata:\n  preferred_model: claude-opus-4-8\n---\nbody'
+    assert.equal(parsePreferredModel(src), 'claude-opus-4-8')
+  })
+
+  it('strips surrounding quotes', () => {
+    assert.equal(parsePreferredModel('---\nmetadata:\n  preferred_model: "qwen3.5:35b"\n---\n'), 'qwen3.5:35b')
+    assert.equal(parsePreferredModel("---\nmetadata:\n  preferred_model: 'ollama/qwen3.5:9b'\n---\n"), 'ollama/qwen3.5:9b')
+  })
+
+  it('returns undefined when the key is absent', () => {
+    assert.equal(parsePreferredModel('---\nname: code\n---\nbody'), undefined)
+  })
+
+  it('ignores a top-level key of the same name (must be nested under metadata)', () => {
+    assert.equal(parsePreferredModel('---\nname: code\npreferred_model: claude-opus-4-8\n---\n'), undefined)
+  })
+
+  it('returns undefined when there is no frontmatter block', () => {
+    assert.equal(parsePreferredModel('# code\n\nmetadata:\n  preferred_model: claude-opus-4-8\n'), undefined)
+  })
+
+  it('returns undefined for an empty value', () => {
+    assert.equal(parsePreferredModel('---\nmetadata:\n  preferred_model:\n---\n'), undefined)
+  })
+})
+
+describe('parseLoadedModels', () => {
+  const table = [
+    'provider  model             context  max-out  thinking  images',
+    'ollama    qwen3.5:9b        262.1K   16.4K    yes       yes   ',
+    'ollama    qwen3.5:35b       262.1K   16.4K    yes       yes   '
+  ].join('\n')
+
+  it('skips the header and collects each model id', () => {
+    const models = parseLoadedModels(table)
+    assert.ok(models.has('qwen3.5:9b'))
+    assert.ok(models.has('qwen3.5:35b'))
+    assert.ok(!models.has('model'))
+  })
+
+  it('also recognises the provider/model form', () => {
+    const models = parseLoadedModels(table)
+    assert.ok(models.has('ollama/qwen3.5:9b'))
+  })
+
+  it('tolerates blank lines and trailing whitespace', () => {
+    const models = parseLoadedModels(`\n${table}\n\n`)
+    assert.ok(models.has('qwen3.5:35b'))
+  })
+
+  it('yields an empty set for empty output', () => {
+    assert.equal(parseLoadedModels('').size, 0)
+  })
+})
+
+describe('resolveSkillDir', () => {
+  it('joins the skill onto a configured base', () => {
+    assert.equal(resolveSkillDir('review', '/opt/skills'), join('/opt/skills', 'review'))
+  })
+
+  it('defaults to ~/.pi/agent/skills', () => {
+    assert.match(resolveSkillDir('code'), /[/\\]\.pi[/\\]agent[/\\]skills[/\\]code$/)
+  })
+})
+
+describe('PiCliRunner model resolution', () => {
+  /**
+   * Write a fake `pi` that records its own argv to a file and reports the loaded
+   * models on `--list-models`, so a test can assert which `--model` (if any) the
+   * runner forwarded.
+   */
+  async function fakePi (dir: string, loaded: string[]): Promise<string> {
+    const bin = join(dir, 'fake-pi')
+    const argsLog = join(dir, 'args.txt')
+    const listing = ['provider  model', ...loaded.map(m => `ollama    ${m}`)].join('\\n')
+    await writeFile(bin, [
+      '#!/bin/sh',
+      'if [ "$1" = "--list-models" ]; then',
+      `  printf '${listing}\\n'`,
+      '  exit 0',
+      'fi',
+      `printf '%s\\n' "$@" > "${argsLog}"`,
+      'printf "DONE\\n"'
+    ].join('\n'))
+    await chmod(bin, 0o755)
+    return argsLog
+  }
+
+  /** Create a skill dir with a SKILL.md declaring the given preferred model. */
+  async function skillWithPreference (skillsDir: string, name: string, model: string | null): Promise<void> {
+    const dir = join(skillsDir, name)
+    await mkdir(dir, { recursive: true })
+    const fm = model === null ? `---\nname: ${name}\n---\n` : `---\nname: ${name}\nmetadata:\n  preferred_model: ${model}\n---\n`
+    await writeFile(join(dir, 'SKILL.md'), fm)
+  }
+
+  async function modelArg (argsLog: string): Promise<string | undefined> {
+    const lines = (await readFile(argsLog, 'utf8')).split('\n')
+    const i = lines.indexOf('--model')
+    return i >= 0 ? lines[i + 1] : undefined
+  }
+
+  it('forwards a preferred model that is loaded, overriding tier', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'realize-model-'))
+    try {
+      const argsLog = await fakePi(dir, ['qwen3.5:9b'])
+      const skillsDir = join(dir, 'skills')
+      await skillWithPreference(skillsDir, 'review', 'qwen3.5:9b')
+
+      const runner = new PiCliRunner({ bin: join(dir, 'fake-pi'), skillsDir, strongModel: 'qwen3.5:35b' })
+      const result = await runner.run(makePhase({ skill: 'review', tier: 'strong' }), { inputs: [], task: 'go' })
+      assert.equal(result.ok, true)
+      assert.equal(await modelArg(argsLog), 'qwen3.5:9b')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('falls back to tier when the preferred model is not loaded', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'realize-model-'))
+    try {
+      const argsLog = await fakePi(dir, ['qwen3.5:35b'])
+      const skillsDir = join(dir, 'skills')
+      await skillWithPreference(skillsDir, 'review', 'claude-opus-4-8')
+
+      const runner = new PiCliRunner({ bin: join(dir, 'fake-pi'), skillsDir, strongModel: 'qwen3.5:35b' })
+      await runner.run(makePhase({ skill: 'review', tier: 'strong' }), { inputs: [], task: 'go' })
+      assert.equal(await modelArg(argsLog), 'qwen3.5:35b')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('falls back to tier when the skill declares no preference', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'realize-model-'))
+    try {
+      const argsLog = await fakePi(dir, ['qwen3.5:9b'])
+      const skillsDir = join(dir, 'skills')
+      await skillWithPreference(skillsDir, 'plan', null)
+
+      const runner = new PiCliRunner({ bin: join(dir, 'fake-pi'), skillsDir })
+      await runner.run(makePhase({ skill: 'plan', tier: 'default' }), { inputs: [], task: 'go' })
+      assert.equal(await modelArg(argsLog), undefined)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })
 

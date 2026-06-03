@@ -41,7 +41,7 @@ Each `run/` script is also exposed as an `npm run` alias (`lint`, `fix`, `test`,
 
 ## Rules
 
-The capitalized words REQUIRED, MUST, MUST NOT, RECOMMENDED, SHOULD, SHOULD NOT, OPTIONAL, and MAY, in the context of this document and agent skills/instructions/rules, are to be interpreted as described in [RFC 2119](https://www.ietf.org/rfc/rfc2119.txt).
+The capitalized words REQUIRED, MUST, MUST NOT, RECOMMENDED, SHOULD, SHOULD NOT, OPTIONAL, and MAY, in the context of this document and agent skills/instructions/rules, are to be interpreted as described in [IETF RFC 2119](https://www.ietf.org/rfc/rfc2119.txt).
 
 - MUST author each extension as a directory `src/<name>/` with an `index.ts` entry point that default-exports a factory function `(pi: ExtensionAPI) => void`.
 
