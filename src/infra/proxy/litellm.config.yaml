@@ -1,0 +1,76 @@
+# =============================================================================
+# LiteLLM proxy configuration — the host-side model router.
+#
+# This is the ONLY component that holds cloud API keys. The agent container is
+# given only this proxy's endpoint and a master key; it never receives an
+# ANTHROPIC_API_KEY / OPENAI_API_KEY. See:
+#   - docs/local-agent-architecture.md  (Model routing, Approach 2)
+#   - src/infra/.env.example            (the host env contract)
+#
+# All `os.environ/NAME` values are resolved at runtime from the host `.env`
+# (loaded by the proxy process), never written literally into this file.
+#
+# Run (host side, bound to the bridge gateway — see .env LITELLM_HOST/PORT):
+#   litellm --config src/infra/proxy/litellm.config.yaml \
+#           --host "$LITELLM_HOST" --port "$LITELLM_PORT"
+# =============================================================================
+
+model_list:
+  # ---------------------------------------------------------------------------
+  # Routing aliases — what the agent selects with Pi's /model command.
+  # `fast` keeps data on the machine; `capable` reaches a frontier cloud model.
+  # ---------------------------------------------------------------------------
+
+  # Local, low-latency, no data leaves the machine. Ollama on the host,
+  # reachable from the proxy via the bridge gateway.
+  - model_name: fast
+    litellm_params:
+      model: ollama/llama3.1
+      api_base: os.environ/OLLAMA_HOST
+      api_key: none
+
+  # Frontier capability for harder tasks. Key held here, on the host, only.
+  - model_name: capable
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # ---------------------------------------------------------------------------
+  # Explicit provider models — available by exact name for deliberate selection.
+  # Each cloud entry reads its key from the environment only.
+  # ---------------------------------------------------------------------------
+  - model_name: ollama/llama3.1
+    litellm_params:
+      model: ollama/llama3.1
+      api_base: os.environ/OLLAMA_HOST
+      api_key: none
+
+  - model_name: claude-sonnet-4-6
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+
+litellm_settings:
+  # Retry transient provider failures before surfacing an error to the agent.
+  num_retries: 2
+  request_timeout: 120
+  # Drop unsupported params rather than erroring when routing between providers
+  # with different parameter sets (e.g. local Ollama vs. cloud).
+  drop_params: true
+  # If the cloud "capable" route is unreachable (offline, outage, missing key),
+  # fall back to the local model so the agent keeps working without leaking
+  # data to a provider it could not otherwise reach.
+  fallbacks:
+    - capable: ["fast"]
+
+general_settings:
+  # The agent authenticates to the proxy with this token. It is a low-value,
+  # rotatable shared secret that gates access to the proxy — deliberately NOT
+  # the high-value cloud keys, which never leave this host. Held in the host
+  # `.env` and given to the agent container as its only model credential.
+  master_key: os.environ/LITELLM_MASTER_KEY

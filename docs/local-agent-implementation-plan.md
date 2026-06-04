@@ -98,22 +98,37 @@ add the in-Pi controls; step 8 ties it together.
   clean; `./run/install --list` still shows exactly `pickling-penguins` and
   `realize`.
 
-### Step 1 — `src/infra/` skeleton + README
+### Step 1 — `src/infra/` skeleton + README ✅ DONE
 
-- Create `src/infra/` with a README describing the components and a quick-start,
-  plus `.env.example` enumerating required host env vars (no secrets).
-- **Delivers:** a home for infra and the contract for what the host must
-  provide. **Test:** docs render; `.env.example` lists every var the later steps
-  reference.
+- ✅ Created `src/infra/` with `README.md` (components table, trust boundaries,
+  quick-start, security notes) and `.env.example` documenting the full host-env
+  contract (cloud keys, Ollama, proxy endpoint, project path, session dir,
+  `PI_OFFLINE`) with no secrets.
+- ✅ Placeholder subdirs `proxy/`, `pi-container/`, `mcp/toolkit/` (with
+  `.gitkeep`) for steps 2–4.
+- ✅ Hardened `.gitignore`: `.env` and `.env.*` ignored, `.env.example` tracked
+  — closes the risk of committing host API keys in a security-focused repo.
+- **Delivered:** a home for infra and the host contract. **Verified:**
+  `git check-ignore` confirms `.env` ignored / `.env.example` tracked;
+  `./run/install --list` shows only the two extensions and `./run/install infra`
+  is rejected (`Unknown extension: infra`); `./run/check` clean (117/117).
 
-### Step 2 — LiteLLM proxy config (credential isolation)
+### Step 2 — LiteLLM proxy config (credential isolation) ✅ DONE
 
-- `src/infra/proxy/litellm.config.yaml`: route "fast/cheap" → Ollama,
-  "capable" → cloud; keys read from env only. Document binding to the bridge
-  gateway, not `0.0.0.0`.
-- **Delivers:** the host-side credential holder. **Test (manual, documented):**
-  proxy starts; a request routes to Ollama locally and to cloud for the capable
-  route; no key is present in any committed file.
+- ✅ `src/infra/proxy/litellm.config.yaml`: `fast` → Ollama (local), `capable` →
+  cloud (Anthropic), plus explicit provider models (`ollama/llama3.1`,
+  `claude-sonnet-4-6`, `gpt-4o`). All keys via `os.environ/` only; Ollama
+  `api_base` from `OLLAMA_HOST`. `capable` falls back to `fast` when cloud is
+  unreachable (keeps the agent working offline without leaking data).
+- ✅ Proxy gated by `master_key` (`os.environ/LITELLM_MASTER_KEY`) — a low-value
+  rotatable token the agent holds *instead of* cloud keys; added to
+  `.env.example`.
+- ✅ README quick-start updated with the host-side proxy launch command.
+- **Delivered:** the host-side credential holder. **Verified:** config parses as
+  valid YAML; routing aliases + fallback resolve; every `api_key`/`master_key`
+  is `none` or `os.environ/` — **no literal secret in any committed file**.
+  Runtime startup (`litellm --config …`) deferred — `litellm` is not installed
+  on this host; documented in the quick-start and step-8 runbook.
 - **Why early:** credential isolation is the second objective and is independent
   of the filesystem boundary — provable on its own.
 

@@ -11,3 +11,9 @@
 #
 
 node_modules
+
+# Local environment files may hold API keys and host paths. Never commit them.
+# The tracked `.env.example` files document the contract without secrets.
+.env
+.env.*
+!.env.example
