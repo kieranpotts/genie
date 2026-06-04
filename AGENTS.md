@@ -12,7 +12,7 @@ The repository ships two extensions: `pickling-penguins`, which replaces the def
 
 ## Tech stack
 
-- TypeScript, run directly by Pi and by Node's native type stripping – no compile or bundling step.
+- TypeScript, run directly by Pi and by Node's native type stripping – no compile or bundling step. Type *checking* is a separate gate (`tsc --noEmit`); "no build" means nothing is emitted or bundled, not that types are unchecked.
 - Node.js 22.18+ (development uses Node 24) for the tooling and the built-in test runner.
 - ESLint with [neostandard](https://github.com/neostandard/neostandard)style, ie. single quotes and no semicolons.
 - The Node.js built-in test runner (`node:test`, `node:assert`).
@@ -24,7 +24,8 @@ The repository ships two extensions: `pickling-penguins`, which replaces the def
 - `src/extensions/<name>/index.ts`: An extension's entry point, with a default-exported factory `(pi: ExtensionAPI) => void`. Helper modules (eg. `messages.ts`) sit alongside it and are imported with explicit `.ts` extensions.
 - `src/infra/`: Non-extension infrastructure for the secure local agent architecture (Docker, compose, model proxy, MCP server wiring). Not installable – see the rule below.
 - `test/extensions/<name>/`: Tests for the Node test runner, mirroring the `src/extensions/` layout (`*.test.ts`). Kept out of `src/` so the installer never ships them.
-- `run/`: Dev scripts – `install`, `lint`, `fix`, `test`, `check`.
+- `run/`: Dev scripts – `install`, `lint`, `fix`, `typecheck`, `test`, `check`.
+- `tsconfig.json`: TypeScript config for the `noEmit` type-check (NodeNext, strict, `.ts` import extensions allowed). Not a build config.
 - `run/inc/fn/`: Shared shell helpers (status printers, banners, extension install and list helpers).
 - `run/inc/var/`: Shared shell variables (ANSI codes).
 - `docs/`: Requirements and installation docs.
@@ -36,11 +37,12 @@ The repository ships two extensions: `pickling-penguins`, which replaces the def
 
 - `./run/install [name…]` to install extensions into `~/.pi/agent/extensions/` (no arguments installs all; `--list` and `--help` are also available).
 - `./run/lint` and `./run/fix` to lint and auto-fix with ESLint.
+- `./run/typecheck` to type-check with `tsc --noEmit` (extra args forwarded, eg. `--watch`).
 - `./run/test` to run the test suite (extra arguments are forwarded to `node --test`, eg. `--watch`).
-- `./run/check` to run the linter and then the tests – the command CI runs, and the one to run before committing.
+- `./run/check` to run the linter, then the type-check, then the tests – the command CI runs, and the one to run before committing.
 - `shellcheck run/install run/lint run/fix run/test run/check run/inc/**/*.sh` to lint the shell scripts.
 
-Each `run/` script is also exposed as an `npm run` alias (`lint`, `fix`, `test`, `check`).
+Each `run/` script is also exposed as an `npm run` alias (`lint`, `fix`, `typecheck`, `test`, `check`).
 
 ## Rules
 
@@ -56,7 +58,9 @@ The capitalized words REQUIRED, MUST, MUST NOT, RECOMMENDED, SHOULD, SHOULD NOT,
 
 - MUST keep non-extension infrastructure under `src/infra/` and MUST NOT add it to the `available_extensions` array in `run/install`, nor repoint `src_dir` away from `src/extensions`. Infrastructure is not an installable Pi extension.
 
-- MUST run `./run/check` and get a clean pass before committing. CI runs the same command on every push and pull request.
+- MUST run `./run/check` and get a clean pass before committing. CI runs the same command on every push and pull request. `check` now includes `typecheck`, so the build must type-check as well as lint and test.
+
+- SHOULD avoid `as never` / `as any` at the `registerTool` and event-handler seams. Where Pi's types expect a TypeBox `TSchema` but a plain JSON Schema is passed at runtime, an escape hatch is sometimes unavoidable; keep it to the single seam, comment why, and never use it to silence a genuine type error in the surrounding logic.
 
 - MUST conform to the neostandard style enforced by ESLint. Run `./run/fix` rather than formatting by hand.
 

@@ -83,6 +83,16 @@ Each step is independently shippable and reversible, smallest blast-radius
 first. Steps 1–4 stand up the infra boundary (the security objective); steps 5–7
 add the in-Pi controls; step 8 ties it together.
 
+> **Post-step-8 follow-up (done):** the recurring "no `tsc` typecheck" caveat in
+> steps 5–7 is now closed. A `tsc --noEmit` gate (`run/typecheck`, folded into
+> `run/check` and CI) type-checks all sources against Pi's *real* types
+> (`@earendil-works/pi-coding-agent` and `@types/node` added as devDependencies,
+> fixing a previously undeclared dependency). The extension code type-checks
+> clean under `strict`; the `as never` casts remain only at the documented
+> `registerTool`/event-handler seams (plain JSON Schema where Pi types a TypeBox
+> `TSchema`). `noUncheckedIndexedAccess` is left off pending a separate cleanup
+> of ~20 latent findings in existing code.
+
 ### Step 0 — Conventions & guardrails ✅ DONE
 
 - ✅ Updated `AGENTS.md`: extensions live under `src/extensions/<name>/`;
