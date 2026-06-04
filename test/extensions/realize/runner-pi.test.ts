@@ -10,8 +10,8 @@ import {
   parsePreferredModel,
   parseLoadedModels,
   resolveSkillDir
-} from '../../src/extensions/realize/runner-pi.ts'
-import type { Phase } from '../../src/extensions/realize/runner.ts'
+} from '../../../src/extensions/realize/runner-pi.ts'
+import type { Phase } from '../../../src/extensions/realize/runner.ts'
 
 /**
  * Build a phase with sensible defaults, overriding only the fields a test cares

@@ -5,7 +5,7 @@ import {
   testPhase, parseTestVerdict, TEST_ROLE,
   specifyPhase, designPhase, elaboratePhase, planPhase, codePhase, summaryPhase,
   phases
-} from '../../src/extensions/realize/phases.ts'
+} from '../../../src/extensions/realize/phases.ts'
 import { FakeRunner } from './fake-runner.ts'
 
 describe('reviewPhase', () => {

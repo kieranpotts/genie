@@ -4,7 +4,9 @@
 
 Personal and experimental extensions for the [Pi coding agent](https://pi.dev) (`@earendil-works/pi-coding-agent`). Each extension is a TypeScript module that hooks into Pi's lifecycle events or registers tools, commands, or UI.
 
-Extensions live under `src/<name>/` and are installed into Pi's extensions directory (`~/.pi/agent/extensions/`) by `run/install`, which copies each extension directory verbatim. Pi runs the TypeScript directly – there is no build step.
+Extensions live under `src/extensions/<name>/` and are installed into Pi's extensions directory (`~/.pi/agent/extensions/`) by `run/install`, which copies each extension directory verbatim. Pi runs the TypeScript directly – there is no build step.
+
+Non-extension infrastructure for the secure local agent architecture (Docker images, compose files, the model proxy, MCP server wiring) lives under `src/infra/`. This is **not** installable and `run/install` MUST NOT copy it into Pi's extensions directory. See [docs/local-agent-architecture.md](./docs/local-agent-architecture.md) and [docs/local-agent-implementation-plan.md](./docs/local-agent-implementation-plan.md).
 
 The repository ships two extensions: `pickling-penguins`, which replaces the default "Working…" status with randomly composed nonsense; and `realize`, a `/realize` command that hands a specification (a file, directory, or URL) to the agent to implement in full.
 
@@ -19,8 +21,9 @@ The repository ships two extensions: `pickling-penguins`, which replaces the def
 
 ## Repository structure
 
-- `src/<name>/index.ts`: An extension's entry point, with a default-exported factory `(pi: ExtensionAPI) => void`. Helper modules (eg. `messages.ts`) sit alongside it and are imported with explicit `.ts` extensions.
-- `test/`: Tests for the Node test runner, mirroring the `src/` layout (`*.test.ts`). Kept out of `src/` so the installer never ships them.
+- `src/extensions/<name>/index.ts`: An extension's entry point, with a default-exported factory `(pi: ExtensionAPI) => void`. Helper modules (eg. `messages.ts`) sit alongside it and are imported with explicit `.ts` extensions.
+- `src/infra/`: Non-extension infrastructure for the secure local agent architecture (Docker, compose, model proxy, MCP server wiring). Not installable – see the rule below.
+- `test/extensions/<name>/`: Tests for the Node test runner, mirroring the `src/extensions/` layout (`*.test.ts`). Kept out of `src/` so the installer never ships them.
 - `run/`: Dev scripts – `install`, `lint`, `fix`, `test`, `check`.
 - `run/inc/fn/`: Shared shell helpers (status printers, banners, extension install and list helpers).
 - `run/inc/var/`: Shared shell variables (ANSI codes).
@@ -43,13 +46,15 @@ Each `run/` script is also exposed as an `npm run` alias (`lint`, `fix`, `test`,
 
 The capitalized words REQUIRED, MUST, MUST NOT, RECOMMENDED, SHOULD, SHOULD NOT, OPTIONAL, and MAY, in the context of this document and agent skills/instructions/rules, are to be interpreted as described in [IETF RFC 2119](https://www.ietf.org/rfc/rfc2119.txt).
 
-- MUST author each extension as a directory `src/<name>/` with an `index.ts` entry point that default-exports a factory function `(pi: ExtensionAPI) => void`.
+- MUST author each extension as a directory `src/extensions/<name>/` with an `index.ts` entry point that default-exports a factory function `(pi: ExtensionAPI) => void`.
 
 - MUST import Pi's types from `@earendil-works/pi-coding-agent`, and import local helper modules with their explicit `.ts` extension – both Pi and Node's type stripping require it.
 
 - MUST register a new extension in the `available_extensions` array in `run/install` and add a matching description arm to `list_available_extensions` in `run/inc/fn/extensions.sh`, or the installer will not offer it.
 
-- MUST keep tests under `test/`, never inside `src/`, because `run/install` copies each extension directory verbatim and would otherwise ship them.
+- MUST keep tests under `test/extensions/<name>/`, mirroring the `src/extensions/` layout, and never inside `src/`, because `run/install` copies each extension directory verbatim and would otherwise ship them.
+
+- MUST keep non-extension infrastructure under `src/infra/` and MUST NOT add it to the `available_extensions` array in `run/install`, nor repoint `src_dir` away from `src/extensions`. Infrastructure is not an installable Pi extension.
 
 - MUST run `./run/check` and get a clean pass before committing. CI runs the same command on every push and pull request.
 

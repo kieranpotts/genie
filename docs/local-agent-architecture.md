@@ -40,6 +40,10 @@ This architecture means the agent itself never touches the host filesystem direc
 
 Tooling is already mature in this solution space. **Docker MCP Toolkit** is a free feature in Docker Desktop that runs MCP servers in containers and handles the plumbing to your agent client – whether that be Pi, LM Studio, Claude Desktop, etc. Docker MCP Toolkit can be configured with environment environments, API keys, and other secrets required by the agent – so the agent doesn't need to hold these things itself. And it provides security checks for both tool calls and the resulting outputs.
 
+<!-- TODO: Alternative - custom TypeScript MCP server with
+path/operation allowlists + structured logging. Gives reviewable,
+version-controlled policy. -->
+
 Another piece of the jigsaw is to have some sort of proxy between the agent and the model servers. The objective here is to automatically route requests to different models, eg. local or cloud. This is an emerging pattern, and **LiteLLM** is emerging as the _de facto_ standard. It is a lightweight proxy, aka. model router, between the agent and the models. It presents a unified OpenAI-compatible API and routes to local or cloud models based on rules you define. You can even configure it with per-model token budgets and rate limits. LiteLLM runs on your host (alongside Ollama).
 
 ```
