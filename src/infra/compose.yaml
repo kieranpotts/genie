@@ -78,7 +78,26 @@ services:
     environment:
       # Localhost auth token guarding the SSE endpoint against DNS rebinding.
       MCP_GATEWAY_AUTH_TOKEN: "${MCP_GATEWAY_AUTH_TOKEN:?set MCP_GATEWAY_AUTH_TOKEN in src/infra/.env}"
+    # Hardening. The gateway is the most privileged container here (it holds the
+    # Docker socket), so it is hardened as far as that role allows:
+    #   - no-new-privileges: cannot gain privileges via setuid binaries.
+    #   - cap_drop ALL: talking to the socket is a daemon API call, so the
+    #     gateway process itself needs no Linux capabilities. If the gateway
+    #     fails to start, this is the first thing to relax (restore the minimum
+    #     it reports needing) — verify on first live bring-up.
+    #   - read_only rootfs + tmpfs: a compromised gateway cannot persist tooling
+    #     to its own filesystem; transient writes go to in-memory tmpfs only.
+    #     The Docker socket is a bind mount and unaffected by read_only.
+    # NOTE: the socket itself remains the irreducible privilege; for stricter
+    # environments, replace the raw socket bind with a docker-socket-proxy
+    # allowlisting only the container APIs the gateway needs (see architecture
+    # doc, Option C mitigation).
+    cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run
     mem_limit: 512m
     pids_limit: 256
     restart: unless-stopped

@@ -95,6 +95,7 @@ replacements are the only file tools.
 | Sensitive file refused | ask it to read `.env` in the project | refused; `audit.jsonl` shows `sensitive file refused` |
 | Write requires approval | ask it to write a file | a confirmation prompt appears; on approve, write succeeds |
 | Default-deny on timeout | ignore the prompt for 60s | the write is blocked; `permissions.jsonl` shows `timed out (default deny)` |
+| Gateway starts hardened | `docker compose ... up` then `docker compose ... ps` | `mcp-gateway` is healthy with `cap_drop: ALL` + read-only rootfs. If it fails to start, relax `cap_drop` to the minimum it reports needing (see the compose comment). |
 
 ### 6. Inspect the audit trail
 
@@ -112,8 +113,16 @@ itself, so it requires the Docker socket. The architecture confines that
 privilege to the **gateway** — the agent (`pi`) still has no socket, no keys, and
 no project mount. This is the deliberate, contained version of the Option C
 docker.sock concern from the architecture doc: the privilege exists, but on a
-component the agent cannot reach, not on the agent itself. If even that is
-unacceptable for your environment, the alternative is to run `mcp/filesystem`
+component the agent cannot reach, not on the agent itself.
+
+The gateway is still hardened as far as its role allows: `cap_drop: [ALL]`,
+`no-new-privileges`, a read-only rootfs with in-memory tmpfs, and resource
+limits. The socket is the irreducible privilege; everything else is locked down.
+For stricter environments, replace the raw socket bind with a
+[docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy)
+allowlisting only the container APIs the gateway needs.
+
+If even the proxied socket is unacceptable, the alternative is to run `mcp/filesystem`
 directly (stdio) without the Toolkit gateway and bridge it to the agent — at the
 cost of the Toolkit's catalog/secret/network controls.
 
