@@ -1,0 +1,29 @@
+# Build context is the repo root (so the Dockerfile can COPY src/extensions/).
+# Keep everything out of the image except what the build explicitly copies.
+# This also prevents stray files — and especially any local .env — from ever
+# entering an image layer.
+
+.git
+node_modules
+**/node_modules
+
+# Never let local environment files into a build context.
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+
+# Editor / tooling cruft.
+.vscode
+.zed
+.github
+
+# Docs and tests are not needed in the runtime image.
+docs
+test
+PLAN.md
+
+# The infra dir itself is not copied into the image (compose/Dockerfile live
+# here but are read by the host, not shipped inside the agent).
+src/infra

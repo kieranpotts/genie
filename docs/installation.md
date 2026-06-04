@@ -1,6 +1,6 @@
 # Installation
 
-The `./run/install` script copies extensions from this repository's `src/` directory into Pi's extensions directory in your home directory, where Pi auto-discovers them.
+The `./run/install` script copies extensions from this repository's `src/extensions/` directory into Pi's extensions directory in your home directory, where Pi auto-discovers them.
 
 ## Running the installer
 

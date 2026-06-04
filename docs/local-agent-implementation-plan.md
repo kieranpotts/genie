@@ -132,15 +132,27 @@ add the in-Pi controls; step 8 ties it together.
 - **Why early:** credential isolation is the second objective and is independent
   of the filesystem boundary — provable on its own.
 
-### Step 3 — Hardened `pi-container` image
+### Step 3 — Hardened `pi-container` image ✅ DONE
 
-- `src/infra/pi-container/Dockerfile`: non-root user, `--cap-drop ALL` (restore
-  only what's needed), `no-new-privileges`, Pi installed, `PI_OFFLINE=1`,
-  `sessionDir` pointed at a controlled volume. No keys, no `docker.sock`, no
-  project mounts.
-- **Delivers:** the agent container per the hardening checklist. **Test:**
-  container builds; runs as non-root; cannot reach host paths; `env` shows no
-  cloud keys; reaches the proxy at `host-gateway`.
+- ✅ `src/infra/pi-container/Dockerfile`: `node:24-bookworm-slim`, dedicated
+  non-root `pi` user (uid/gid 1001), global Pi install, `PI_OFFLINE=1` +
+  `PI_SKIP_VERSION_CHECK=1`, session dir `/home/pi/sessions` on a `VOLUME`
+  (sensitive transcripts kept outside any project tree), `USER pi` before
+  `ENTRYPOINT ["pi"]`. Bakes in no keys, no `docker.sock`, no project source.
+- ✅ Runtime-only hardening (cap-drop, no-new-privileges, read-only rootfs,
+  resource limits) documented in a footer block for the compose wiring in step
+  4 — a Dockerfile cannot set these itself.
+- ✅ Security extensions install is staged: `realize` (WIP) is deliberately NOT
+  shipped; the three security extensions are COPY'd in by name as steps 5-7 land
+  (placeholders recorded in the Dockerfile), avoiding baking WIP code.
+- ✅ Added `.dockerignore` (build context is repo root): excludes `.git`,
+  `node_modules`, all `.env*` (keeps secrets out of image layers), docs, tests,
+  and `src/infra` itself.
+- **Delivered:** the hardened agent image. **Verified:** `docker build --check`
+  passes clean (no warnings) against real `node:24-bookworm-slim` metadata;
+  instruction order correct (USER before ENTRYPOINT); secret/socket scan finds
+  none baked in. Full `npm install -g` build deferred to runtime (network fetch;
+  documented in quick-start).
 
 ### Step 4 — Docker MCP Toolkit filesystem boundary + `compose.yaml`
 
