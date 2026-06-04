@@ -54,6 +54,7 @@ available_extensions=(
   "pickling-penguins"
   "realize"
   "mcp-client"
+  "audited-tools"
 )
 
 #

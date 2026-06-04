@@ -71,6 +71,9 @@ list_available_extensions() {
       mcp-client)
         desc="Connects Pi to an MCP filesystem server (via the Docker MCP gateway) for mediated file access"
         ;;
+      audited-tools)
+        desc="Replaces built-in file tools with path-allowlisted, sensitive-file-refusing, audit-logged versions (use with --no-builtin-tools)"
+        ;;
       *)
         desc=""
         ;;

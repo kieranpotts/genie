@@ -208,14 +208,30 @@ add the in-Pi controls; step 8 ties it together.
   Schema where Pi types a TypeBox `TSchema`). Live wiring against a running
   gateway is exercised in the step-8 runbook.
 
-### Step 6 — `audited-tools` extension (`--no-builtin-tools` replacements)
+### Step 6 — `audited-tools` extension (`--no-builtin-tools` replacements) ✅ DONE
 
-- Replacement tools for the surface Pi needs, each enforcing a path allowlist
-  (with the `resolve()`/`relative()` traversal + prefix-collision defence from
-  the design doc), refusing sensitive filenames, and logging every invocation.
+- ✅ `src/extensions/audited-tools/`: `path-guard.ts` (pure — `resolve()` +
+  `relative()` allowlist defeating traversal AND prefix-collision, plus a
+  sensitive-filename gate: `.env*`, `id_rsa`/keys, `*.pem`/`*.key`, `.netrc`,
+  `credentials`, …), `audit-log.ts` (pure record formatting + append-only JSONL
+  sink that never throws into the caller), `index.ts` (registers `read`,
+  `write`, `ls` replacements that authorize → log → I/O), README.
+- ✅ Registered in `run/install` + `extensions.sh`; Dockerfile COPYs it; compose
+  sets `AUDITED_TOOLS_ROOT=/projects/active` and `AUDITED_TOOLS_LOG` on the
+  writable `pi-sessions` volume (outside the read-only rootfs).
 - **Delivers:** locked-down tool surface even if the MCP boundary is bypassed —
-  defence in depth. **Test:** unit tests for allowlist accept/deny, traversal,
-  prefix-collision, sensitive-filename refusal, and that each call is logged.
+  defence in depth. **Verified:** 34 new unit tests — allowed paths (root, nested,
+  relative, benign inner `..`), denied traversal (parent escape, relative escape,
+  absolute outside), **prefix-collision** (`/projects/active-evil`), the full
+  sensitive/non-sensitive filename matrix, the combined `authorize` gate, and
+  audit formatting + real append + unwritable-path resilience. Full suite
+  177/177; lint + shellcheck clean; `docker build --check` + `compose config`
+  clean; installer lists it.
+- **Note:** `read`/`write`/`ls` override Pi's built-in tool names so they take
+  effect under `--no-builtin-tools`; result/parameter shapes pass the
+  `registerTool` seam with `as never` (same no-tsc caveat as step 5). A `bash`
+  command-allowlist replacement is **not** included here — parked as an open
+  question (the plan mentions a bash allowlist; scope it before adding).
 
 ### Step 7 — `permission-gate` extension
 

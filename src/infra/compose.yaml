@@ -118,6 +118,11 @@ services:
       # Filesystem access: the MCP gateway endpoint on agent-net (used by the
       # mcp-client extension, step 5).
       MCP_GATEWAY_URL: "http://mcp-gateway:8811/sse"
+      # Defence in depth: the audited-tools extension (step 6) confines its
+      # read/write/ls replacements to this root and logs every call. The log
+      # lives on the writable pi-sessions volume, outside the read-only rootfs.
+      AUDITED_TOOLS_ROOT: "/projects/active"
+      AUDITED_TOOLS_LOG: "/home/pi/sessions/audit.jsonl"
       PI_OFFLINE: "1"
       PI_SKIP_VERSION_CHECK: "1"
       PI_CODING_AGENT_SESSION_DIR: "/home/pi/sessions"
