@@ -17,9 +17,10 @@
 # docs/local-agent-implementation-plan.md (step 3).
 # =============================================================================
 
-# Pin to a Node version Pi supports (22.18+; dev uses 24). Digest-pin in a real
-# deployment; tag-pinned here to stay legible.
-FROM node:24-bookworm-slim
+# Pin to a Node version Pi supports (22.18+; dev uses 24). Digest-pinned for
+# reproducibility; the tag is kept in the comment for legibility. Re-pin with:
+#   docker pull node:24-bookworm-slim && docker inspect --format '{{index .RepoDigests 0}}' node:24-bookworm-slim
+FROM node:24-bookworm-slim@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf
 
 # ---------------------------------------------------------------------------
 # Non-root user. Pi runs as `pi`, never root. Home is /home/pi, which also
