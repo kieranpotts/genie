@@ -68,6 +68,9 @@ list_available_extensions() {
       realize)
         desc="Hands a spec (file, directory, or URL) to the agent to implement in full"
         ;;
+      mcp-client)
+        desc="Connects Pi to an MCP filesystem server (via the Docker MCP gateway) for mediated file access"
+        ;;
       *)
         desc=""
         ;;

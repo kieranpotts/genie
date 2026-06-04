@@ -181,13 +181,32 @@ add the in-Pi controls; step 8 ties it together.
 - **Milestone reached:** a working, secure boundary using off-the-shelf pieces,
   no custom Pi code yet. ✅
 
-### Step 5 — `mcp-client` extension
+### Step 5 — `mcp-client` extension ✅ DONE
 
-- Give Pi an MCP client (Pi is not MCP-native) so it can call the Toolkit's
-  filesystem tools. Factory `(pi) => void` per `AGENTS.md`; pure logic in helper
-  modules for unit testing.
-- **Delivers:** Pi can drive the MCP boundary. **Test:** unit tests for the
-  client's request/response handling against a faked MCP endpoint.
+- **Spike outcome:** verified Pi has **no** native MCP support (extension API
+  exposes `registerTool`, `fetch`, `exec` only). Pi loads extensions via jiti
+  with a fixed set of bundled virtual modules (`typebox`, `pi-ai`, `pi-tui`);
+  the MCP SDK is not among them and the verbatim-copy installer has no
+  `node_modules` resolution — so the SDK could not be shipped. Decision:
+  **hand-roll** the MCP-over-HTTP/SSE client with `fetch`, no dependency.
+- ✅ `src/extensions/mcp-client/`: `mcp-client.ts` (pure JSON-RPC/SSE protocol —
+  `initialize`, `tools/list`, `tools/call` — with injected `fetch`),
+  `tool-mapping.ts` (pure MCP↔Pi mapping: `mcp_` prefixing, schema passthrough,
+  result flattening), `index.ts` (thin glue: on `session_start`, connect to
+  `MCP_GATEWAY_URL`, list tools, register each via `pi.registerTool`), README.
+- ✅ Registered in `run/install` (`available_extensions` + description arm in
+  `extensions.sh`) per the AGENTS.md rule; Dockerfile now COPYs it into the
+  image.
+- **Delivered:** Pi can drive the MCP boundary. **Verified:** 26 new unit tests
+  (request framing, SSE parse incl. CRLF/keep-alive/[DONE], id matching, error
+  responses, HTTP errors, incrementing ids, name round-trip, description/schema
+  mapping, content flattening) — full suite 143/143; lint + shellcheck clean;
+  `docker build --check` clean; installer lists `mcp-client`. Built against the
+  real Pi types (`registerTool`/`ToolDefinition`/`session_start`/`ExtensionContext`).
+- **Note:** the repo has no `tsc` typecheck (ESLint only), and `parameters`/the
+  tool result are passed with `as never` at the `registerTool` seam (plain JSON
+  Schema where Pi types a TypeBox `TSchema`). Live wiring against a running
+  gateway is exercised in the step-8 runbook.
 
 ### Step 6 — `audited-tools` extension (`--no-builtin-tools` replacements)
 
@@ -234,8 +253,6 @@ add the in-Pi controls; step 8 ties it together.
 - **`run_command` / exec into devcontainers** — include the runtime-execution
   path now, or ship file-only mediation first? Affects whether any
   `docker.sock`-equivalent privilege re-enters the design. Default: defer.
-- **MCP client extension — build vs. adopt** — is there prior art to adopt for
-  Step 5, or is it in-house? Spike before committing Step 5's size.
 - **`realize` interaction** — running `/realize` inside the hardened container is
   out of scope until `realize` stabilises; revisit after it lands.
 - **Egress filtering** — recommended for sensitive projects; still out of scope

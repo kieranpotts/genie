@@ -53,6 +53,7 @@ pi_extensions_dir="${HOME}/.pi/agent/extensions"
 available_extensions=(
   "pickling-penguins"
   "realize"
+  "mcp-client"
 )
 
 #

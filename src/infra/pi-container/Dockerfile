@@ -50,7 +50,7 @@ RUN npm install -g @earendil-works/pi-coding-agent \
 #   docker build -f src/infra/pi-container/Dockerfile -t pi-agent:hardened .
 # ---------------------------------------------------------------------------
 RUN mkdir -p /home/pi/.pi/agent/extensions && chown -R pi:pi /home/pi/.pi
-# Step 5: COPY --chown=pi:pi src/extensions/mcp-client/      /home/pi/.pi/agent/extensions/mcp-client/
+COPY --chown=pi:pi src/extensions/mcp-client/             /home/pi/.pi/agent/extensions/mcp-client/
 # Step 6: COPY --chown=pi:pi src/extensions/audited-tools/   /home/pi/.pi/agent/extensions/audited-tools/
 # Step 7: COPY --chown=pi:pi src/extensions/permission-gate/ /home/pi/.pi/agent/extensions/permission-gate/
 
