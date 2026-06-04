@@ -1,0 +1,134 @@
+# =============================================================================
+# Secure local agent — container wiring.
+#
+# Brings up the three-part boundary from docs/local-agent-architecture.md:
+#
+#   pi-container  ──MCP (HTTP/SSE)──▶  mcp-gateway ──▶ mcp-filesystem ──▶ volume
+#         │
+#         └────────model calls───────▶  host LiteLLM proxy (host-gateway:4000)
+#
+# The pi-container holds NO cloud keys, NO docker.sock, and NO project mount.
+# The mcp-filesystem server is the ONLY component with filesystem access, and
+# the named project volume is its single allowed directory.
+#
+# Host prerequisites (see src/infra/.env.example, copied to src/infra/.env):
+#   - Ollama bound to the bridge gateway (OLLAMA_HOST)
+#   - LiteLLM proxy running on the host (LITELLM_HOST:LITELLM_PORT)
+#   - PROJECT_PATH set to the absolute host path of the one project to expose
+#
+# Usage:
+#   docker compose -f src/infra/compose.yaml --env-file src/infra/.env up
+# =============================================================================
+
+name: pi-secure-agent
+
+networks:
+  # Private bridge network. Only these services share it; the agent reaches the
+  # host proxy via the `host-gateway` alias, not via host networking.
+  agent-net:
+    driver: bridge
+
+volumes:
+  # The single project the agent is scoped to. Backed by PROJECT_PATH on the
+  # host so work is visible/editable from outside, but the agent only ever sees
+  # it through the MCP server — never as a direct mount.
+  project:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PROJECT_PATH:?set PROJECT_PATH in src/infra/.env}
+  # Pi session transcripts, persisted outside any project tree (sensitive).
+  pi-sessions:
+
+services:
+  # ---------------------------------------------------------------------------
+  # Filesystem MCP server — the sole holder of filesystem access. The mounted
+  # path IS the security boundary: the server refuses operations outside it.
+  # Exposed to the network by the gateway below; not reachable directly.
+  # ---------------------------------------------------------------------------
+  mcp-filesystem:
+    image: mcp/filesystem:latest
+    # The allowed directory, passed as the command argument. Mounted read/write
+    # at the same path inside the container.
+    command: ["/projects/active"]
+    volumes:
+      - project:/projects/active
+    networks:
+      - agent-net
+    # Hardening — this container has FS access, so lock everything else down.
+    user: "1000:1000"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    mem_limit: 256m
+    pids_limit: 128
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # MCP gateway — fronts the stdio MCP server and exposes it over HTTP/SSE on
+  # agent-net, so the (separate) pi-container can reach it as a network service.
+  # This is the Docker MCP Toolkit gateway pattern.
+  # ---------------------------------------------------------------------------
+  mcp-gateway:
+    image: docker/mcp-gateway:latest
+    # Front the filesystem server and serve it over SSE for networked clients.
+    command:
+      - "--transport=sse"
+      - "--port=8811"
+      - "--server=mcp-filesystem"
+    networks:
+      - agent-net
+    depends_on:
+      - mcp-filesystem
+    user: "1000:1000"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    mem_limit: 256m
+    pids_limit: 128
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # The agent. No keys, no socket, no project mount. Reaches files only through
+  # the MCP gateway and models only through the host proxy. Runtime hardening
+  # here mirrors the footer of pi-container/Dockerfile.
+  # ---------------------------------------------------------------------------
+  pi:
+    build:
+      context: ../..
+      dockerfile: src/infra/pi-container/Dockerfile
+    image: pi-agent:hardened
+    networks:
+      - agent-net
+    depends_on:
+      - mcp-gateway
+    # Map host-gateway so the container can reach the host-side LiteLLM proxy.
+    extra_hosts:
+      - "host-gateway:host-gateway"
+    volumes:
+      # ONLY the session volume. No project mount, no docker.sock, no dotfiles.
+      - pi-sessions:/home/pi/sessions
+    environment:
+      # Model access: proxy endpoint + proxy token ONLY. No cloud API keys.
+      AGENT_MODEL_ENDPOINT: "http://host-gateway:${LITELLM_PORT:-4000}"
+      LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in src/infra/.env}"
+      # Filesystem access: the MCP gateway endpoint on agent-net (used by the
+      # mcp-client extension, step 5).
+      MCP_GATEWAY_URL: "http://mcp-gateway:8811/sse"
+      PI_OFFLINE: "1"
+      PI_SKIP_VERSION_CHECK: "1"
+      PI_CODING_AGENT_SESSION_DIR: "/home/pi/sessions"
+    # Runtime hardening (cannot be set in a Dockerfile).
+    user: "1001:1001"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    mem_limit: 2g
+    pids_limit: 512
+    # Interactive agent session.
+    stdin_open: true
+    tty: true

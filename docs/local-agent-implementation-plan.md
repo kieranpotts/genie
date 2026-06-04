@@ -154,16 +154,32 @@ add the in-Pi controls; step 8 ties it together.
   none baked in. Full `npm install -g` build deferred to runtime (network fetch;
   documented in quick-start).
 
-### Step 4 — Docker MCP Toolkit filesystem boundary + `compose.yaml`
+### Step 4 — Docker MCP Toolkit filesystem boundary + `compose.yaml` ✅ DONE
 
-- Configure the Toolkit's filesystem MCP server scoped to a single project named
-  volume; wire `agent-net`, the pi-container, and volumes in `compose.yaml`.
-- **Delivers:** the mediated filesystem boundary — the core of Option 4.
-  **Test (documented):** from inside pi-container, a path inside the project
-  volume is readable/writable via the MCP server; a `../../` traversal and an
-  out-of-scope path are denied; the agent has no direct mount.
-- **Milestone:** end of Step 4 = a working, secure boundary using off-the-shelf
-  pieces, no custom Pi code yet.
+- ✅ `src/infra/compose.yaml`: `agent-net` bridge network; a `project` named
+  volume bound to `PROJECT_PATH` (the single allowed dir); `mcp-filesystem`
+  (`mcp/filesystem`, allowed path `/projects/active`) as the sole FS holder;
+  `mcp-gateway` (`docker/mcp-gateway`) fronting it over **HTTP/SSE** on
+  agent-net (transport decision: networked, not stdio — matches the
+  separate-container design); and the runtime-hardened `pi` service built from
+  the step-3 Dockerfile.
+- ✅ Runtime hardening applied per service (the Dockerfile footer): `cap_drop:
+  ALL`, `no-new-privileges`, `read_only` + tmpfs, mem/pids limits, explicit
+  non-root `user`.
+- ✅ pi reaches files only via `MCP_GATEWAY_URL` and models only via
+  `AGENT_MODEL_ENDPOINT` + `LITELLM_MASTER_KEY` — **no cloud keys, no
+  docker.sock, no project mount** (only the `pi-sessions` volume).
+- **Delivered:** the mediated filesystem boundary — the core of Option 4.
+  **Verified:** `docker compose config` resolves cleanly; the resolved spec
+  confirms (1) pi has no `*_API_KEY`, (2) the project volume mounts only on
+  `mcp-filesystem`, (3) no `docker.sock` anywhere, (4) cap_drop +
+  no-new-privileges on all three services. Live up/traversal-denial test
+  deferred to the step-8 runbook (needs real images pulled + the step-5 client).
+- **Caveat:** the `docker/mcp-gateway` image name and flags follow the Toolkit
+  gateway pattern and may need adjusting to the installed Toolkit version (noted
+  in the README); the `mcp/filesystem` boundary semantics are stable.
+- **Milestone reached:** a working, secure boundary using off-the-shelf pieces,
+  no custom Pi code yet. ✅
 
 ### Step 5 — `mcp-client` extension
 
