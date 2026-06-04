@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { FileWorkspace, createFileWorkspace, newRunId } from '../../src/realize/workspace.ts'
+import { FileWorkspace, createFileWorkspace, newRunId } from '../../src/extensions/realize/workspace.ts'
 
 const execFileAsync = promisify(execFile)
 

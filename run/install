@@ -3,8 +3,8 @@
 #
 # Pi extensions installer.
 #
-# Installs Pi extensions from this repository's `src/` directory into the Pi
-# agent's extensions directory (`~/.pi/agent/extensions/`).
+# Installs Pi extensions from this repository's `src/extensions/` directory into
+# the Pi agent's extensions directory (`~/.pi/agent/extensions/`).
 #
 # Usage: ./run/install [extension-name...]
 #
@@ -41,7 +41,7 @@ inc_path="${script_dir}/inc"
 
 # Read by the sourced helpers in run/inc/fn/.
 # shellcheck disable=SC2034
-src_dir="${repo_root}/src"
+src_dir="${repo_root}/src/extensions"
 
 # Read by the sourced helpers in run/inc/fn/.
 # shellcheck disable=SC2034

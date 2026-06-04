@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildSpecifyTask } from '../../src/realize/prompt.ts'
+import { buildSpecifyTask } from '../../src/extensions/realize/prompt.ts'
 
 describe('buildSpecifyTask', () => {
   it('references a file path and tells the phase to read it', () => {

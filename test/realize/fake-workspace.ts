@@ -6,7 +6,7 @@
  * it; it is imported by the suites that need it.
  */
 
-import type { Workspace } from '../../src/realize/workspace.ts'
+import type { Workspace } from '../../src/extensions/realize/workspace.ts'
 
 /**
  * Records every artifact written and hands out a deterministic path per name.

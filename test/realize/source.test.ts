@@ -4,7 +4,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { isUrl, isFileUrl, stripWrappingQuotes, parseGitHubTarget, parseGitHubBlob, parseGitHubShorthand, resolveSource } from '../../src/realize/source.ts'
+import { isUrl, isFileUrl, stripWrappingQuotes, parseGitHubTarget, parseGitHubBlob, parseGitHubShorthand, resolveSource } from '../../src/extensions/realize/source.ts'
 
 describe('isUrl', () => {
   it('recognizes http and https URLs', () => {

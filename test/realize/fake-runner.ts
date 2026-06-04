@@ -7,7 +7,7 @@
  * execute it; it is imported by the suites that need it.
  */
 
-import type { Phase, PhaseRunner, PhaseTask, PhaseResult } from '../../src/realize/runner.ts'
+import type { Phase, PhaseRunner, PhaseTask, PhaseResult } from '../../src/extensions/realize/runner.ts'
 
 /** A single recorded invocation of {@link FakeRunner.run}. */
 export interface RecordedCall {

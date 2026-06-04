@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { gate, runPipeline, PhaseFailedError, DEFAULT_MAX_CYCLES } from '../../src/realize/pipeline.ts'
-import type { Phase, PhaseTask, PhaseResult } from '../../src/realize/runner.ts'
+import { gate, runPipeline, PhaseFailedError, DEFAULT_MAX_CYCLES } from '../../src/extensions/realize/pipeline.ts'
+import type { Phase, PhaseTask, PhaseResult } from '../../src/extensions/realize/runner.ts'
 import { FakeRunner } from './fake-runner.ts'
 import { FakeWorkspace } from './fake-workspace.ts'
 
