@@ -21,7 +21,7 @@ The architecture has two halves. The infrastructure here is the host-and-contain
 | Host env contract | `.env.example` | Documents every value the host must provide; the real `.env` is gitignored and holds the cloud keys | 1 (done) |
 | LiteLLM proxy | `proxy/litellm.config.yaml` | Host-side model router holding ALL cloud API keys; the agent gets only its endpoint and a master key | 2 (done) |
 | Hardened agent image | `pi-container/Dockerfile` | Non-root, no-keys, no-`docker.sock`, no-mounts Pi image; capability-drop and limits applied at runtime by compose | 3 (done) |
-| MCP filesystem boundary | `compose.yaml` (`mcp-gateway`) | Docker MCP Toolkit gateway; spawns and fronts the `mcp/filesystem` server (scoped to one project volume) over SSE. Sole holder of filesystem access — and of the Docker socket (see trade-off below) | 4 (done) |
+| MCP filesystem boundary | `mcp/toolkit/catalog.yaml` + `compose.yaml` (`mcp-gateway`) | Catalog defines the `mcp/filesystem` server's allowed dir + mount (the actual boundary); the gateway spawns it from the catalog and fronts it over SSE. Sole holder of filesystem access — and of the Docker socket (see trade-off below) | 4 (done) |
 | Compose wiring | `compose.yaml` | `agent-net` network, the project volume, the gateway, and the runtime-hardened pi-container | 4 (done) |
 
 ## Trust boundaries
@@ -126,11 +126,18 @@ If even the proxied socket is unacceptable, the alternative is to run `mcp/files
 directly (stdio) without the Toolkit gateway and bridge it to the agent — at the
 cost of the Toolkit's catalog/secret/network controls.
 
-> [!NOTE]
-> The gateway flags (`docker mcp gateway run --transport sse --oci-ref … --block-network`)
-> were verified against the installed Toolkit. The catalog/secret model may
-> still vary by Toolkit version; `--dry-run` is useful to validate config
-> without listening.
+> [!IMPORTANT]
+> **The boundary is defined in `mcp/toolkit/catalog.yaml`, not in `compose.yaml`.**
+> The gateway learns the filesystem server's allowed directory (its `command`
+> arg) and what it can see (its `volumes`) from that catalog entry — `--oci-ref`
+> alone does not carry them. The gateway flags
+> (`docker mcp gateway run --transport sse --catalog … --servers filesystem --block-network`)
+> and the catalog schema were checked against the installed Toolkit, but the
+> catalog format varies by Toolkit version and **must be verified on first
+> bring-up**: run with `--dry-run` to validate config without listening, and use
+> the traversal test in the verification table as the functional proof that the
+> boundary holds. All three images are digest-pinned (re-pin commands are in the
+> respective files).
 
 ## Security notes
 

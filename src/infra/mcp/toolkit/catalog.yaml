@@ -1,0 +1,38 @@
+# =============================================================================
+# Docker MCP Toolkit catalog — defines the filesystem server the gateway spawns.
+#
+# WHY THIS FILE EXISTS: the gateway does not learn a server's command arguments
+# or volume mounts from `--oci-ref` alone. A catalog entry carries them. This is
+# THE security boundary definition: the `command` arg below is the single
+# directory the filesystem server will permit, and the `volumes` entry is what
+# it can actually see. Get this wrong and the boundary is wrong.
+#
+# The gateway is pointed at this file with `--catalog` (see compose.yaml). The
+# project volume is mounted into the spawned server at /projects/active, and the
+# server is told to confine itself to exactly that path.
+#
+# ⚠️ SCHEMA CAVEAT: the catalog format is owned by the Docker MCP Toolkit and
+# varies by version. The fields below follow the documented v2 catalog shape but
+# MUST be verified against your installed Toolkit before trusting the boundary —
+# pull the official catalog for a reference:
+#     docker mcp catalog pull mcp/docker-mcp-catalog:latest
+# then compare its `filesystem` entry. The step-8 runbook's traversal test is
+# the functional check that this is correct.
+# =============================================================================
+
+version: 2
+
+registry:
+  filesystem:
+    description: "Filesystem access confined to the project workspace"
+    # Digest-pinned (tag mcp/filesystem:latest) for reproducibility. Re-pin:
+    #   docker pull mcp/filesystem:latest && docker inspect --format '{{index .RepoDigests 0}}' mcp/filesystem:latest
+    image: mcp/filesystem:latest@sha256:35fcf0217ca0d5bf7b0a5bd68fb3b89e08174676c0e0b4f431604512cf7b3f67
+    # The allowed directory, passed as the server's command argument. This IS
+    # the boundary — the server refuses operations outside it.
+    command:
+      - /projects/active
+    # What the spawned server container can see. The named project volume only;
+    # nothing else of the host or the gateway.
+    volumes:
+      - "project:/projects/active"

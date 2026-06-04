@@ -187,15 +187,22 @@ add the in-Pi controls; step 8 ties it together.
   deferred to the step-8 runbook (needs real images pulled + the step-5 client).
 - **Milestone reached:** a working, secure boundary using off-the-shelf pieces,
   no custom Pi code yet. ✅
-- **⚠️ Corrected in Step 8** (verified against `docker mcp gateway run --help`):
-  the original wiring (a sibling `mcp-filesystem` service fronted via
-  `--server`) was wrong. The real Toolkit gateway **spawns and manages** the
-  filesystem server itself (`--oci-ref mcp/filesystem`, `--transport sse`,
-  `--port`, `--block-network`; `--block-secrets`/`--log-calls` default true), so
-  it needs the **Docker socket**. compose was rewritten: the standalone service
-  removed, the socket + project volume + `MCP_GATEWAY_AUTH_TOKEN` moved onto the
-  gateway. Net security position is preserved — the socket lives on the gateway,
-  **never** on `pi` (verified: `docker.sock` resolves only under `mcp-gateway`).
+- **⚠️ Corrected across Step 8 + self-review** (verified against
+  `docker mcp gateway run --help` and the gateway's own startup output): the
+  original wiring (a sibling `mcp-filesystem` service fronted via `--server`) was
+  wrong. The real Toolkit gateway **spawns and manages** the filesystem server
+  itself and learns its command args + mounts from a **catalog** — not from
+  `--oci-ref` alone. Final wiring: a project-local
+  `mcp/toolkit/catalog.yaml` defines the `filesystem` server (allowed dir
+  `/projects/active` + the project volume — **this file is the boundary**), the
+  gateway runs with `--catalog … --servers filesystem --transport sse
+  --block-network` and mounts the catalog read-only + the project volume + the
+  Docker socket. Net security position preserved — the socket lives on the
+  gateway, **never** on `pi`. The gateway is hardened (`cap_drop: ALL`,
+  `no-new-privileges`, read-only rootfs + tmpfs, limits). All three images
+  (`mcp/filesystem`, `docker/mcp-gateway`, `node` base) are **digest-pinned**.
+  The catalog schema is version-dependent and flagged for live verification (the
+  runbook traversal test is the functional proof).
 
 ### Step 5 — `mcp-client` extension ✅ DONE
 
