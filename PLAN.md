@@ -6,6 +6,20 @@ Isolate a local coding agent (Pi) from host system and user-level filesystem, wh
 
 ---
 
+## Landscape Note (2025–2026)
+
+The tooling around agent sandboxing has consolidated this year:
+
+- **MCP has become the de facto isolation boundary.** The emerging standard is that the agent does *not* touch the filesystem directly — it calls MCP servers that expose specific, scoped operations, and the (containerised) MCP server is the gatekeeper. This is exactly **Option D** below; the wider ecosystem now treats it as the default rather than one option among four. The catch for us: Pi is not MCP-native, so Option D requires building an MCP client extension for Pi (or using `--no-builtin-tools` + audited tool extensions as the functional equivalent — see Pi Security Analysis).
+- **LiteLLM has become the de facto model proxy** for the mixed local/cloud case — keys on the host, single endpoint to the agent. Captured in Model Routing → Approach 2.
+- **Docker MCP Toolkit** is the pragmatic, batteries-included way to run MCP servers in containers. Captured as a sub-approach under Option D.
+
+**Still unsolved / immature:** granular *interactive* permission prompting (approve this write, deny that read) — most setups remain either fully open or fully closed. Promising directions like staging filesystems (copy-on-write layers you review before committing) exist but are not yet mainstream. This is the same gap the Pi Security Analysis flags: the permission-gate must be built, not configured.
+
+We keep all four options documented below rather than collapsing to D, because Pi's lack of native MCP support and the simplicity of co-location (Option A) keep A–C genuinely viable for local single-user dev.
+
+---
+
 ## Fixed Components
 
 These are constant across all four options.
@@ -18,8 +32,11 @@ These are constant across all four options.
 
 ### Cloud model API keys (host)
 - Stored in host environment or keychain only
-- Injected into containers at runtime via `remoteEnv` or `--env`
 - Never baked into container images or mounted config files
+- **Two delivery modes, applicable to every option below** (see Model Routing for detail):
+  - **Injected** — keys passed into the agent container at runtime via `remoteEnv` or `--env`. Simplest; keys live inside the container.
+  - **Proxied** — a host-side model proxy (e.g. LiteLLM) holds all keys; the container is given only the proxy endpoint and no credentials. Stronger isolation; recommended for regulated use.
+- Each option below notes how it looks under both modes.
 
 ### Devcontainer hardening (all options)
 - `workspaceMount` scoped to `${localWorkspaceFolder}` only — not `~` or any parent directory
@@ -44,7 +61,8 @@ Pi runs as a process within each project's devcontainer. The container boundary 
 Host Machine
 │
 ├── Ollama :11434 (bridge gateway only)
-├── API keys (injected at container start)
+├── API keys — injected at container start, OR held by a host-side proxy
+├── [optional] LiteLLM proxy :4000 (holds keys; container calls this instead)
 │
 └── Docker
     ├── project-a devcontainer
@@ -68,6 +86,8 @@ Host Machine
 - Cannot work across multiple projects in a single session
 - Pi's own config and session history are ephemeral unless explicitly persisted to a named volume
 - Agent tooling is coupled to the project environment
+
+**Model access:** Under *injected* mode, each devcontainer receives the cloud keys directly — simple, but every project's Pi instance holds them. Under *proxied* mode, the host runs a single LiteLLM proxy and each devcontainer is given only `http://host-gateway:4000` with no keys; this is the recommended hardening for Option A, since per-project key injection multiplies the blast radius.
 
 **Best for:** Single-project workflows, simplicity, teams already using devcontainers as their primary dev environment.
 
@@ -106,6 +126,8 @@ Pi mounts project volumes directly and operates on files natively, just as it wo
 - Named volumes are opaque on the host (harder to browse/backup than bind mounts)
 - Simultaneous writes from Pi and the developer could cause conflicts
 - Cross-project access is controlled only by which volumes are mounted — requires discipline in configuration
+
+**Model access:** The single pi-container makes proxying especially clean — only one container needs the proxy endpoint, and there is exactly one place keys could otherwise leak. Under *injected* mode the keys sit in the long-lived pi-container; under *proxied* mode they stay on the host and the pi-container holds none. Proxied is the natural fit here.
 
 **Best for:** Multi-project workflows where Pi's own environment is sufficient, and project-specific tooling is not required for the agent to operate.
 
@@ -147,6 +169,8 @@ Pi issues shell commands that run *inside* the target container and observes std
 
 **Mitigating the docker.sock risk:** Rather than mounting the full socket, run a small proxy (e.g. [docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy)) that allowlists only the `exec` API endpoint for specific container names. Pi talks to the proxy, not the real socket.
 
+**Model access:** Same as Option B — the pi-container is the only credential holder, so *proxied* mode keeps keys off it entirely. Worth noting the proxy and the docker-socket-proxy are independent host-side components solving different problems (model keys vs. exec scoping); a fully hardened Option C runs both.
+
 **Best for:** Scenarios where running commands in the correct project environment is important (e.g. tests, builds, linters), or where stricter filesystem isolation is desired.
 
 ---
@@ -181,6 +205,15 @@ Docker network: agent-net
 
 The MCP server is the only component with filesystem access to project volumes. It enforces a path allowlist (e.g. no access above `/projects/proj-a`), an operation allowlist (e.g. no `rm -rf`, no access to `.env` files), and can log every read and write for auditability.
 
+**Path enforcement must be in the server code, not just the volume mount.** A volume mount scoped to `/projects/proj-a` does *not* prevent a `../../` traversal inside the container if the server resolves paths naively. The server must canonicalise every requested path (`resolve()`) and verify it stays within the allowlisted root via a `relative()` comparison that rejects any result starting with `..` — this defeats both directory traversal and prefix-collision attacks (e.g. `/projects/proj-a-evil` vs. `/projects/proj-a`) across platforms. Allowlist, never blocklist.
+
+**Two sub-approaches, both still to explore:**
+
+- **Custom audited MCP server** — write your own server with explicit path/operation allowlists and structured logging. Maximum control; policy is version-controlled and reviewable; matches the regulated-environment requirements below. More to build and maintain.
+- **Docker MCP Toolkit** — a free feature in Docker Desktop that runs MCP servers (200+ available) in isolated containers, with per-server secret/env configuration and built-in security checks on tool calls and outputs. Fastest path to a working setup; less bespoke policy control than a custom server.
+
+These are not yet decided between — both warrant a prototype.
+
 **Pros**
 - Strongest filesystem isolation of all four options — Pi has zero direct filesystem access
 - MCP server is an explicit, auditable policy enforcement point: every file operation is a named tool call with defined parameters
@@ -197,6 +230,8 @@ The MCP server is the only component with filesystem access to project volumes. 
 - Adds a network hop (Pi → MCP server → filesystem) with associated latency
 
 **Mitigating the runtime environment gap:** If Pi needs to run project code (tests, builds), the MCP server can expose a `run_command` tool that executes inside the devcontainer via a restricted exec interface. This gives the structured mediation of Option D with the environment fidelity of Option C, at the cost of additional complexity.
+
+**Model access:** Option D pairs naturally with *proxied* mode to reach the strongest overall posture: the pi-container then holds no filesystem access (mediated by the MCP server), no `docker.sock`, and no cloud keys (held by the host proxy). This is the only configuration where a fully compromised Pi process has neither project files nor credentials nor host Docker control. *Injected* mode is still possible but undercuts the point of choosing D — if you went to the trouble of the MCP boundary, put the keys behind the proxy too.
 
 **Best for:** Scenarios requiring explicit, auditable, policy-enforced filesystem access — e.g. shared or team environments, regulated codebases, or where the agent's filesystem permissions need to be inspectable and version-controlled.
 
@@ -236,6 +271,10 @@ The MCP server is the only component with filesystem access to project volumes. 
 
 ## Model Routing (all options)
 
+There are two viable approaches. The native approach is the simpler default; the proxy approach is the regulated-environment upgrade. They are not mutually exclusive — you can start native and add a proxy later.
+
+### Approach 1 — Native multi-provider routing (simple default)
+
 Pi supports multiple providers natively. Configure per-container via environment variables:
 
 ```jsonc
@@ -250,9 +289,35 @@ Pi supports multiple providers natively. Configure per-container via environment
 ```
 
 - **Local models** via Ollama — fast, private, data never leaves the machine
-- **Cloud models** — for higher-capability tasks; keys held on host, injected at runtime
+- **Cloud models** — for higher-capability tasks; keys injected at runtime
 
-Switch models mid-session with Pi's `/model` command or `Ctrl+L`. No proxy layer required.
+Switch models mid-session with Pi's `/model` command or `Ctrl+L`. No extra infrastructure.
+
+**Tradeoff:** Cloud API keys are injected into the agent container. A compromised Pi process or extension can read them. Acceptable for non-regulated local dev; not acceptable where key isolation is a requirement.
+
+### Approach 2 — Host-side model proxy (regulated upgrade)
+
+Run a model router/proxy (e.g. [LiteLLM](https://github.com/BerriAI/litellm)) on the host. It holds all cloud API keys and presents a single OpenAI-compatible endpoint. The agent container is given exactly one endpoint to call and **no cloud credentials**.
+
+```
+Host
+├── Ollama        (bound to 172.17.0.1:11434)
+├── LiteLLM proxy (bound to 172.17.0.1:4000, holds all cloud API keys)
+│    ├── routes "fast/cheap" → Ollama local model
+│    └── routes "capable"    → Anthropic / OpenAI cloud
+│
+└── agent container → calls only http://host-gateway:4000 (no keys inside)
+```
+
+**Benefits for the threat model:**
+- The agent never holds cloud API keys — the proxy does, on the host. This is what closes the "keys enter the container" gap noted in the Pi Security Analysis for Plain Docker.
+- All model calls are logged and auditable in one place.
+- Per-model token budgets and rate limits enforced centrally.
+- Routing rules change without touching agent config.
+
+**Tradeoff:** Extra host-side component to run and keep configured; one more network hop.
+
+This is the proxy referenced in the "Honest Assessment" conclusion (hardened Docker + host-side model proxy so keys never enter the container).
 
 ---
 
