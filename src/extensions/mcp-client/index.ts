@@ -24,6 +24,8 @@ import {
 
 /** Where to reach the MCP gateway. Set by compose for the hardened container. */
 const GATEWAY_URL_ENV = 'MCP_GATEWAY_URL'
+/** Bearer token guarding the gateway's localhost SSE endpoint. */
+const GATEWAY_TOKEN_ENV = 'MCP_GATEWAY_AUTH_TOKEN'
 
 export default function (pi: ExtensionAPI): void {
   const url = process.env[GATEWAY_URL_ENV]
@@ -33,7 +35,11 @@ export default function (pi: ExtensionAPI): void {
     return
   }
 
-  const client = new McpClient({ url, fetch: globalThis.fetch as unknown as FetchLike })
+  const client = new McpClient({
+    url,
+    fetch: globalThis.fetch as unknown as FetchLike,
+    authToken: process.env[GATEWAY_TOKEN_ENV],
+  })
 
   /* Connect and register tools once the session is starting, so registration
      failures surface in the session rather than at module load. */

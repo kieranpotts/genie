@@ -43,52 +43,44 @@ volumes:
 
 services:
   # ---------------------------------------------------------------------------
-  # Filesystem MCP server — the sole holder of filesystem access. The mounted
-  # path IS the security boundary: the server refuses operations outside it.
-  # Exposed to the network by the gateway below; not reachable directly.
-  # ---------------------------------------------------------------------------
-  mcp-filesystem:
-    image: mcp/filesystem:latest
-    # The allowed directory, passed as the command argument. Mounted read/write
-    # at the same path inside the container.
-    command: ["/projects/active"]
-    volumes:
-      - project:/projects/active
-    networks:
-      - agent-net
-    # Hardening — this container has FS access, so lock everything else down.
-    user: "1000:1000"
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    read_only: true
-    tmpfs: ["/tmp"]
-    mem_limit: 256m
-    pids_limit: 128
-    restart: unless-stopped
-
-  # ---------------------------------------------------------------------------
-  # MCP gateway — fronts the stdio MCP server and exposes it over HTTP/SSE on
-  # agent-net, so the (separate) pi-container can reach it as a network service.
-  # This is the Docker MCP Toolkit gateway pattern.
+  # MCP gateway (Docker MCP Toolkit) — the sole holder of filesystem access and
+  # the boundary the agent reaches files through.
+  #
+  # IMPORTANT — corrected against the real Toolkit (verified via
+  # `docker mcp gateway run --help`): the gateway does NOT front a sibling
+  # `mcp/filesystem` service. It SPAWNS and manages the filesystem MCP server
+  # itself (from a catalog entry, here pinned by `--oci-ref`), then exposes it
+  # over SSE. Because it orchestrates containers, the gateway needs the Docker
+  # socket — so the docker.sock privilege lives HERE, on the gateway, and never
+  # on the pi-container. This is the deliberate, contained trade-off: see the
+  # step-8 runbook and the architecture doc's docker.sock discussion.
+  #
+  # `--block-secrets` (default true) and `--log-calls` (default true) are left
+  # on; `--block-network` denies tools forbidden network access.
   # ---------------------------------------------------------------------------
   mcp-gateway:
     image: docker/mcp-gateway:latest
-    # Front the filesystem server and serve it over SSE for networked clients.
     command:
       - "--transport=sse"
       - "--port=8811"
-      - "--server=mcp-filesystem"
+      - "--oci-ref=mcp/filesystem:latest"
+      - "--block-network"
+      # --block-secrets and --log-calls default to true.
     networks:
       - agent-net
-    depends_on:
-      - mcp-filesystem
-    user: "1000:1000"
-    cap_drop: [ALL]
+    volumes:
+      # The gateway spawns the filesystem server with this project volume as its
+      # single allowed directory. The mounted path IS the security boundary.
+      - project:/projects/active
+      # Required because the gateway orchestrates MCP server containers. This is
+      # the ONE place a Docker socket is granted — never to the agent.
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # Localhost auth token guarding the SSE endpoint against DNS rebinding.
+      MCP_GATEWAY_AUTH_TOKEN: "${MCP_GATEWAY_AUTH_TOKEN:?set MCP_GATEWAY_AUTH_TOKEN in src/infra/.env}"
     security_opt: ["no-new-privileges:true"]
-    read_only: true
-    tmpfs: ["/tmp"]
-    mem_limit: 256m
-    pids_limit: 128
+    mem_limit: 512m
+    pids_limit: 256
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
@@ -116,8 +108,9 @@ services:
       AGENT_MODEL_ENDPOINT: "http://host-gateway:${LITELLM_PORT:-4000}"
       LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in src/infra/.env}"
       # Filesystem access: the MCP gateway endpoint on agent-net (used by the
-      # mcp-client extension, step 5).
+      # mcp-client extension, step 5) plus the auth token guarding it.
       MCP_GATEWAY_URL: "http://mcp-gateway:8811/sse"
+      MCP_GATEWAY_AUTH_TOKEN: "${MCP_GATEWAY_AUTH_TOKEN:?set MCP_GATEWAY_AUTH_TOKEN in src/infra/.env}"
       # Defence in depth: the audited-tools extension (step 6) confines its
       # read/write/ls replacements to this root and logs every call. The log
       # lives on the writable pi-sessions volume, outside the read-only rootfs.

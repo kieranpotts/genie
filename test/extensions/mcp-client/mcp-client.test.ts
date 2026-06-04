@@ -129,4 +129,33 @@ describe('McpClient', () => {
     const client = new McpClient({ url: 'http://gw/sse', fetch: fakeFetch(() => ({}), { ok: false, status: 502 }) })
     await assert.rejects(() => client.initialize(), (e: unknown) => e instanceof McpError && e.code === 502)
   })
+
+  it('sends a Bearer authorization header when a token is given', async () => {
+    let auth: string | undefined
+    const client = new McpClient({
+      url: 'http://gw/sse',
+      authToken: 'secret-token',
+      fetch: async (_url, init) => {
+        auth = init.headers.authorization
+        const req = JSON.parse(init.body) as { id: number }
+        return { ok: true, status: 200, text: async () => `data: ${JSON.stringify({ jsonrpc: '2.0', id: req.id, result: {} })}\n\n` }
+      },
+    })
+    await client.initialize()
+    assert.equal(auth, 'Bearer secret-token')
+  })
+
+  it('omits the authorization header when no token is given', async () => {
+    let hasAuth = true
+    const client = new McpClient({
+      url: 'http://gw/sse',
+      fetch: async (_url, init) => {
+        hasAuth = 'authorization' in init.headers
+        const req = JSON.parse(init.body) as { id: number }
+        return { ok: true, status: 200, text: async () => `data: ${JSON.stringify({ jsonrpc: '2.0', id: req.id, result: {} })}\n\n` }
+      },
+    })
+    await client.initialize()
+    assert.equal(hasAuth, false)
+  })
 })

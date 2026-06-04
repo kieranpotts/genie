@@ -116,6 +116,8 @@ export interface McpClientOptions {
   /** Gateway SSE endpoint, e.g. http://mcp-gateway:8811/sse */
   url: string
   fetch: FetchLike
+  /** Optional bearer token for the gateway's localhost auth (anti-DNS-rebinding). */
+  authToken?: string
 }
 
 /**
@@ -126,20 +128,24 @@ export interface McpClientOptions {
 export class McpClient {
   private readonly url: string
   private readonly fetchImpl: FetchLike
+  private readonly authToken?: string
   private nextId = 1
 
   constructor (opts: McpClientOptions) {
     this.url = opts.url
     this.fetchImpl = opts.fetch
+    this.authToken = opts.authToken
   }
 
   /** Perform one JSON-RPC round trip and return its result payload. */
   private async rpc (method: string, params: unknown, signal?: AbortSignal): Promise<unknown> {
     const id = this.nextId++
     const req = buildRequest(id, method, params)
+    const headers: Record<string, string> = { 'content-type': 'application/json', accept: 'text/event-stream' }
+    if (this.authToken) headers.authorization = `Bearer ${this.authToken}`
     const res = await this.fetchImpl(this.url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+      headers,
       body: JSON.stringify(req),
       signal,
     })

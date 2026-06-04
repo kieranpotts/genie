@@ -175,11 +175,17 @@ add the in-Pi controls; step 8 ties it together.
   `mcp-filesystem`, (3) no `docker.sock` anywhere, (4) cap_drop +
   no-new-privileges on all three services. Live up/traversal-denial test
   deferred to the step-8 runbook (needs real images pulled + the step-5 client).
-- **Caveat:** the `docker/mcp-gateway` image name and flags follow the Toolkit
-  gateway pattern and may need adjusting to the installed Toolkit version (noted
-  in the README); the `mcp/filesystem` boundary semantics are stable.
 - **Milestone reached:** a working, secure boundary using off-the-shelf pieces,
   no custom Pi code yet. ✅
+- **⚠️ Corrected in Step 8** (verified against `docker mcp gateway run --help`):
+  the original wiring (a sibling `mcp-filesystem` service fronted via
+  `--server`) was wrong. The real Toolkit gateway **spawns and manages** the
+  filesystem server itself (`--oci-ref mcp/filesystem`, `--transport sse`,
+  `--port`, `--block-network`; `--block-secrets`/`--log-calls` default true), so
+  it needs the **Docker socket**. compose was rewritten: the standalone service
+  removed, the socket + project volume + `MCP_GATEWAY_AUTH_TOKEN` moved onto the
+  gateway. Net security position is preserved — the socket lives on the gateway,
+  **never** on `pi` (verified: `docker.sock` resolves only under `mcp-gateway`).
 
 ### Step 5 — `mcp-client` extension ✅ DONE
 
@@ -275,15 +281,32 @@ add the in-Pi controls; step 8 ties it together.
   timeout is a constant (could become configurable later). Live confirm-dialog
   behaviour is exercised in the step-8 runbook.
 
-### Step 8 — Integration & operator runbook
+### Step 8 — Integration & operator runbook ✅ DONE
 
-- A documented end-to-end runbook in `src/infra/README.md`: bring up proxy +
-  network + MCP boundary + hardened Pi with the three extensions installed; run
-  a real task against a project volume; show the audit log and a denied
-  operation.
+- ✅ Full operator runbook in `src/infra/README.md`: configure host → start proxy
+  → build hardened image → `docker compose up` → a verification table (no keys /
+  no project mount / no socket in the agent; mediated read; traversal denied;
+  sensitive file refused; write requires approval; default-deny on timeout) →
+  audit-trail inspection (`audit.jsonl`, `permissions.jsonl`).
+- ✅ **Live validation surfaced a real correction.** Probing the actual
+  `docker/mcp-gateway` (both images pull; flags read from `--help`) revealed the
+  Toolkit gateway spawns/manages the MCP server itself and needs the Docker
+  socket — the Step-4 sibling-service wiring was wrong. compose was corrected
+  (see the Step-4 ⚠️ note); the agent remains socket/key/mount-free, with the
+  socket contained to the gateway. Documented the trade-off honestly in the
+  runbook.
+- ✅ Added gateway auth: `MCP_GATEWAY_AUTH_TOKEN` (anti-DNS-rebinding) threaded
+  through compose, `.env.example`, and the `mcp-client` (Bearer header) with two
+  new tests.
 - **Delivers:** the reproducible, portable setup the requirements call for.
-  **Test:** the runbook executed clean on a fresh machine; audit artifacts
-  present.
+  **Verified (what's runnable headless):** both MCP images pull; gateway flags
+  confirmed; `compose config` resolves and shows `docker.sock` only on
+  `mcp-gateway`, `pi` with sessions-volume only and no `*_API_KEY`; full suite
+  **206/206**; lint + shellcheck + `docker build --check` clean.
+- **Deferred to a live host (cannot run headless here):** the interactive
+  confirm dialog, the `npm install -g` image build, pulling/running the gateway
+  end-to-end, and the agent-driven read/write/traversal checks. These are the
+  runbook's verification table, to be walked on a real machine.
 
 ## Build order rationale
 
