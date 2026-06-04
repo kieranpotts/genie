@@ -123,6 +123,9 @@ services:
       # lives on the writable pi-sessions volume, outside the read-only rootfs.
       AUDITED_TOOLS_ROOT: "/projects/active"
       AUDITED_TOOLS_LOG: "/home/pi/sessions/audit.jsonl"
+      # Interactive approval: the permission-gate extension (step 7) requires
+      # confirmation for mutating tool calls and logs every decision here.
+      PERMISSION_GATE_LOG: "/home/pi/sessions/permissions.jsonl"
       PI_OFFLINE: "1"
       PI_SKIP_VERSION_CHECK: "1"
       PI_CODING_AGENT_SESSION_DIR: "/home/pi/sessions"

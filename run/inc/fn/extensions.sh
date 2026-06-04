@@ -74,6 +74,9 @@ list_available_extensions() {
       audited-tools)
         desc="Replaces built-in file tools with path-allowlisted, sensitive-file-refusing, audit-logged versions (use with --no-builtin-tools)"
         ;;
+      permission-gate)
+        desc="Requires interactive confirmation for mutating tool calls (write/edit/bash), default-deny on timeout, logging every decision"
+        ;;
       *)
         desc=""
         ;;

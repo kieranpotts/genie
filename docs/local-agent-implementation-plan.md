@@ -230,16 +230,50 @@ add the in-Pi controls; step 8 ties it together.
 - **Note:** `read`/`write`/`ls` override Pi's built-in tool names so they take
   effect under `--no-builtin-tools`; result/parameter shapes pass the
   `registerTool` seam with `as never` (same no-tsc caveat as step 5). A `bash`
-  command-allowlist replacement is **not** included here — parked as an open
-  question (the plan mentions a bash allowlist; scope it before adding).
+  command-allowlist replacement is intentionally deferred to Step 6a (below) —
+  `bash` is a larger, riskier surface than file tools and warrants its own step.
 
-### Step 7 — `permission-gate` extension
+### Step 6a — `bash` command allowlist (extends `audited-tools`) — TODO
 
-- Intercept writes/exec: explicit confirmation, timeout → deny, every decision
-  logged to an append-only file outside the container.
+- Add a `bash` replacement tool to the existing `audited-tools` extension that
+  enforces a **command allowlist** (allow, never blocklist), with the same
+  audit-logging discipline as the file tools. Parse the command, match the
+  program (and optionally argument shape) against an allowed set, deny anything
+  unrecognised, and log every invocation (allowed/denied) to the same audit
+  JSONL.
+- **Why its own step:** `bash` is a far larger and riskier surface than
+  `read`/`write`/`ls` — command parsing, shell metacharacters, argument
+  injection, and the allowlist policy all need deliberate design and a thorough
+  test matrix. Folding it into Step 6 would have under-baked it.
+- **Open design points to settle first:** how to parse commands safely (avoid a
+  full shell); whether to allow pipes/redirection/`&&` at all; the initial
+  allowed-command set; how to surface a denied command to the model.
+- **Delivers:** a locked-down command surface completing the
+  `--no-builtin-tools` story. **Test:** allowlist accept/deny, metacharacter and
+  injection attempts, argument-shape checks, and audit logging.
+
+### Step 7 — `permission-gate` extension ✅ DONE
+
+- ✅ `src/extensions/permission-gate/`: `policy.ts` (pure — classifies mutating
+  vs. read-only tools incl. `mcp_*` customs; `decide()` maps confirm outcomes to
+  a **default-deny** decision), `decision-log.ts` (pure formatting + append-only
+  JSONL sink, kept local since each extension dir must be self-contained for the
+  verbatim-copy installer), `index.ts` (`tool_call` handler: classify → confirm
+  via `ui.confirm` with 60s timeout → log → `{ block, reason }`), README.
+- ✅ Registered in `run/install` + `extensions.sh`; Dockerfile COPYs it; compose
+  sets `PERMISSION_GATE_LOG` on the writable `pi-sessions` volume.
 - **Delivers:** interactive approval (the ecosystem gap the design doc notes).
-  **Test:** unit tests for approve/deny/timeout paths and that decisions are
-  logged.
+  **Verified:** 27 new unit tests — gating classification (mutating builtins +
+  `mcp_*write/edit/move/create` vs. read-only), call description (command/path/
+  truncation/fallback), and the default-deny matrix (approved allows; rejected/
+  timeout/no-ui all block with distinct reasons), plus decision-log format +
+  real append + unwritable-path resilience. Full suite 204/204; lint +
+  shellcheck clean; `docker build --check` + `compose config` clean; installer
+  lists all five extensions.
+- **Note:** uses the `tool_call` event's `block`/`reason` contract; read-only
+  calls pass silently so the gate adds no friction to inspection. The 60s
+  timeout is a constant (could become configurable later). Live confirm-dialog
+  behaviour is exercised in the step-8 runbook.
 
 ### Step 8 — Integration & operator runbook
 

@@ -55,6 +55,7 @@ available_extensions=(
   "realize"
   "mcp-client"
   "audited-tools"
+  "permission-gate"
 )
 
 #
