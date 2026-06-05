@@ -11,13 +11,13 @@
 # The mcp-filesystem server is the ONLY component with filesystem access, and
 # the named project volume is its single allowed directory.
 #
-# Host prerequisites (see src/infra/.env.example, copied to src/infra/.env):
+# Host prerequisites (see src/infrastructure/.env.example, copied to src/infrastructure/.env):
 #   - Ollama bound to the bridge gateway (OLLAMA_HOST)
 #   - LiteLLM proxy running on the host (LITELLM_HOST:LITELLM_PORT)
 #   - PROJECT_PATH set to the absolute host path of the one project to expose
 #
 # Usage:
-#   docker compose -f src/infra/compose.yaml --env-file src/infra/.env up
+#   docker compose -f src/infrastructure/compose.yaml --env-file src/infrastructure/.env up
 # =============================================================================
 
 name: pi-secure-agent
@@ -37,7 +37,7 @@ volumes:
     driver_opts:
       type: none
       o: bind
-      device: ${PROJECT_PATH:?set PROJECT_PATH in src/infra/.env}
+      device: ${PROJECT_PATH:?set PROJECT_PATH in src/infrastructure/.env}
   # Pi session transcripts, persisted outside any project tree (sensitive).
   pi-sessions:
 
@@ -89,7 +89,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       # Localhost auth token guarding the SSE endpoint against DNS rebinding.
-      MCP_GATEWAY_AUTH_TOKEN: "${MCP_GATEWAY_AUTH_TOKEN:?set MCP_GATEWAY_AUTH_TOKEN in src/infra/.env}"
+      MCP_GATEWAY_AUTH_TOKEN: "${MCP_GATEWAY_AUTH_TOKEN:?set MCP_GATEWAY_AUTH_TOKEN in src/infrastructure/.env}"
     # Hardening. The gateway is the most privileged container here (it holds the
     # Docker socket), so it is hardened as far as that role allows:
     #   - no-new-privileges: cannot gain privileges via setuid binaries.
@@ -122,7 +122,7 @@ services:
   pi:
     build:
       context: ../..
-      dockerfile: src/infra/pi-container/Dockerfile
+      dockerfile: src/infrastructure/pi-container/Dockerfile
     image: pi-agent:hardened
     networks:
       - agent-net
@@ -137,11 +137,11 @@ services:
     environment:
       # Model access: proxy endpoint + proxy token ONLY. No cloud API keys.
       AGENT_MODEL_ENDPOINT: "http://host-gateway:${LITELLM_PORT:-4000}"
-      LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in src/infra/.env}"
+      LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in src/infrastructure/.env}"
       # Filesystem access: the MCP gateway endpoint on agent-net (used by the
       # mcp-client extension, step 5) plus the auth token guarding it.
       MCP_GATEWAY_URL: "http://mcp-gateway:8811/sse"
-      MCP_GATEWAY_AUTH_TOKEN: "${MCP_GATEWAY_AUTH_TOKEN:?set MCP_GATEWAY_AUTH_TOKEN in src/infra/.env}"
+      MCP_GATEWAY_AUTH_TOKEN: "${MCP_GATEWAY_AUTH_TOKEN:?set MCP_GATEWAY_AUTH_TOKEN in src/infrastructure/.env}"
       # Defence in depth: the audited-tools extension (step 6) confines its
       # read/write/ls replacements to this root and logs every call. The log
       # lives on the writable pi-sessions volume, outside the read-only rootfs.

@@ -14,7 +14,7 @@ If `MCP_GATEWAY_URL` is unset, the extension does nothing — the agent's model 
 
 | Variable | Required | Meaning |
 |---|---|---|
-| `MCP_GATEWAY_URL` | yes (to do anything) | The gateway's SSE endpoint, e.g. `http://mcp-gateway:8811/sse`. Set by `src/infra/compose.yaml` for the hardened container. |
+| `MCP_GATEWAY_URL` | yes (to do anything) | The gateway's SSE endpoint, e.g. `http://mcp-gateway:8811/sse`. Set by `src/infrastructure/compose.yaml` for the hardened container. |
 
 ## Design notes
 

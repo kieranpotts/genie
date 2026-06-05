@@ -41,8 +41,8 @@ are present in the agent.
 ### 1. Configure the host
 
 ```sh
-cp src/infra/.env.example src/infra/.env
-# Edit src/infra/.env:
+cp src/infrastructure/.env.example src/infrastructure/.env
+# Edit src/infrastructure/.env:
 #   - ANTHROPIC_API_KEY / OPENAI_API_KEY   (held by the proxy only)
 #   - PROJECT_PATH=/absolute/path/to/the/one/project
 #   - LITELLM_MASTER_KEY      = $(openssl rand -hex 32)
@@ -54,8 +54,8 @@ Ensure Ollama is bound to the bridge gateway (`OLLAMA_HOST`), not `0.0.0.0`.
 ### 2. Start the model proxy on the host
 
 ```sh
-set -a; . src/infra/.env; set +a
-litellm --config src/infra/proxy/litellm.config.yaml \
+set -a; . src/infrastructure/.env; set +a
+litellm --config src/infrastructure/proxy/litellm.config.yaml \
         --host "$LITELLM_HOST" --port "$LITELLM_PORT"
 ```
 
@@ -66,7 +66,7 @@ never will.
 ### 3. Build the hardened agent image
 
 ```sh
-docker build -f src/infra/pi-container/Dockerfile -t pi-agent:hardened .
+docker build -f src/infrastructure/pi-container/Dockerfile -t pi-agent:hardened .
 ```
 
 No keys, no socket, no project source in the image. The three security
@@ -75,7 +75,7 @@ extensions are copied into `~/.pi/agent/extensions/` inside it.
 ### 4. Bring up the boundary
 
 ```sh
-docker compose -f src/infra/compose.yaml --env-file src/infra/.env up
+docker compose -f src/infrastructure/compose.yaml --env-file src/infrastructure/.env up
 ```
 
 This starts `agent-net`, the project volume (bound to `PROJECT_PATH`), the
@@ -87,7 +87,7 @@ replacements are the only file tools.
 
 | Check | How | Expect |
 |---|---|---|
-| Agent holds no cloud keys | `docker compose -f src/infra/compose.yaml exec pi env \| grep -i api_key` | no `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` |
+| Agent holds no cloud keys | `docker compose -f src/infrastructure/compose.yaml exec pi env \| grep -i api_key` | no `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` |
 | Agent has no project mount | `docker compose ... exec pi ls /projects 2>&1` | absent / empty — files reached only via MCP |
 | Agent has no Docker socket | `docker compose ... exec pi ls -l /var/run/docker.sock 2>&1` | no such file |
 | Mediated read works | ask the agent to read a file in the project | returns content via `mcp_*`/audited `read` |
@@ -102,8 +102,8 @@ replacements are the only file tools.
 Both logs live on the `pi-sessions` volume, outside the agent's read-only rootfs:
 
 ```sh
-docker compose -f src/infra/compose.yaml exec pi cat /home/pi/sessions/audit.jsonl       # file ops
-docker compose -f src/infra/compose.yaml exec pi cat /home/pi/sessions/permissions.jsonl # approvals
+docker compose -f src/infrastructure/compose.yaml exec pi cat /home/pi/sessions/audit.jsonl       # file ops
+docker compose -f src/infrastructure/compose.yaml exec pi cat /home/pi/sessions/permissions.jsonl # approvals
 ```
 
 ### The docker.sock trade-off (read this)

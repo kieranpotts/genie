@@ -26,4 +26,4 @@ PLAN.md
 
 # The infra dir itself is not copied into the image (compose/Dockerfile live
 # here but are read by the host, not shipped inside the agent).
-src/infra
+src/infrastructure

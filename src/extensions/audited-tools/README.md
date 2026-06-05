@@ -34,7 +34,7 @@ A denied call (either kind) returns an error to the model explaining the refusal
 | `AUDITED_TOOLS_LOG` | `/home/pi/sessions/audit.jsonl` | Append-only audit log path. Should live on a volume outside the agent's writable tree. |
 | `AUDITED_BASH_ALLOWLIST` | (built-in default) | Comma-separated program allowlist. A leading `+` extends the default (`+terraform,kubectl`); otherwise it replaces it (`ls,cat,git`). |
 
-These are set by `src/infra/compose.yaml` for the hardened container.
+These are set by `src/infrastructure/compose.yaml` for the hardened container.
 
 > There is deliberately **no** metacharacter configuration. Tracing each character showed two groups: control operators (`| & ; < > ` newline`) can never do anything useful when "allowed" (no shell runs, so they would be useless literals) — so they are permanently rejected; argument-content characters (`$ * ? ( ) { } \`) are already passed through safely as inert literals — so no toggle is needed. The only tunable is the program allowlist above.
 

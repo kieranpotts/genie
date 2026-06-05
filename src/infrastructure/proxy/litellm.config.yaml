@@ -5,13 +5,13 @@
 # given only this proxy's endpoint and a master key; it never receives an
 # ANTHROPIC_API_KEY / OPENAI_API_KEY. See:
 #   - docs/local-agent-architecture.md  (Model routing, Approach 2)
-#   - src/infra/.env.example            (the host env contract)
+#   - src/infrastructure/.env.example            (the host env contract)
 #
 # All `os.environ/NAME` values are resolved at runtime from the host `.env`
 # (loaded by the proxy process), never written literally into this file.
 #
 # Run (host side, bound to the bridge gateway — see .env LITELLM_HOST/PORT):
-#   litellm --config src/infra/proxy/litellm.config.yaml \
+#   litellm --config src/infrastructure/proxy/litellm.config.yaml \
 #           --host "$LITELLM_HOST" --port "$LITELLM_PORT"
 # =============================================================================
 

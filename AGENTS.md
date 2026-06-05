@@ -6,7 +6,7 @@ Personal and experimental extensions for the [Pi coding agent](https://pi.dev) (
 
 Extensions live under `src/extensions/<name>/` and are installed into Pi's extensions directory (`~/.pi/agent/extensions/`) by `run/install`, which copies each extension directory verbatim. Pi runs the TypeScript directly – there is no build step.
 
-Non-extension infrastructure for the secure local agent architecture (Docker images, compose files, the model proxy, MCP server wiring) lives under `src/infra/`. This is **not** installable and `run/install` MUST NOT copy it into Pi's extensions directory. See [docs/local-agent-architecture.md](./docs/local-agent-architecture.md).
+Non-extension infrastructure for the secure local agent architecture (Docker images, compose files, the model proxy, MCP server wiring) lives under `src/infrastructure/`. This is **not** installable and `run/install` MUST NOT copy it into Pi's extensions directory. See [docs/local-agent-architecture.md](./docs/local-agent-architecture.md).
 
 The repository ships two extensions: `pickling-penguins`, which replaces the default "Working…" status with randomly composed nonsense; and `realize`, a `/realize` command that hands a specification (a file, directory, or URL) to the agent to implement in full.
 
@@ -22,7 +22,7 @@ The repository ships two extensions: `pickling-penguins`, which replaces the def
 ## Repository structure
 
 - `src/extensions/<name>/index.ts`: An extension's entry point, with a default-exported factory `(pi: ExtensionAPI) => void`. Helper modules (eg. `messages.ts`) sit alongside it and are imported with explicit `.ts` extensions.
-- `src/infra/`: Non-extension infrastructure for the secure local agent architecture (Docker, compose, model proxy, MCP server wiring). Not installable – see the rule below.
+- `src/infrastructure/`: Non-extension infrastructure for the secure local agent architecture (Docker, compose, model proxy, MCP server wiring). Not installable – see the rule below.
 - `test/extensions/<name>/`: Tests for the Node test runner, mirroring the `src/extensions/` layout (`*.test.ts`). Kept out of `src/` so the installer never ships them.
 - `run/`: Dev scripts – `install`, `lint`, `fix`, `typecheck`, `test`, `check`.
 - `tsconfig.json`: TypeScript config for the `noEmit` type-check (NodeNext, strict, `.ts` import extensions allowed). Not a build config.
@@ -56,7 +56,7 @@ The capitalized words REQUIRED, MUST, MUST NOT, RECOMMENDED, SHOULD, SHOULD NOT,
 
 - MUST keep tests under `test/extensions/<name>/`, mirroring the `src/extensions/` layout, and never inside `src/`, because `run/install` copies each extension directory verbatim and would otherwise ship them.
 
-- MUST keep non-extension infrastructure under `src/infra/` and MUST NOT add it to the `available_extensions` array in `run/install`, nor repoint `src_dir` away from `src/extensions`. Infrastructure is not an installable Pi extension.
+- MUST keep non-extension infrastructure under `src/infrastructure/` and MUST NOT add it to the `available_extensions` array in `run/install`, nor repoint `src_dir` away from `src/extensions`. Infrastructure is not an installable Pi extension.
 
 - MUST run `./run/check` and get a clean pass before committing. CI runs the same command on every push and pull request. `check` now includes `typecheck`, so the build must type-check as well as lint and test.
 
