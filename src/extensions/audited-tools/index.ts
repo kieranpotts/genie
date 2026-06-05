@@ -1,39 +1,51 @@
 /**
- * Audited replacements for Pi's built-in file tools.
+ * Audited replacements for Pi's built-in file and command tools.
  *
- * Started with `--no-builtin-tools`, Pi has no file access at all; this
- * extension provides `read`, `write`, and `ls` back — each gated by a path
- * allowlist and a sensitive-filename refusal, and each logged to an append-only
- * audit file. This is the defence-in-depth layer described in the architecture
- * doc: even if the MCP boundary is bypassed, no file operation occurs without
- * passing the guard and being recorded.
+ * Started with `--no-builtin-tools`, Pi has no file or shell access at all; this
+ * extension provides `read`, `write`, `ls`, and `bash` back — the file tools
+ * gated by a path allowlist and sensitive-filename refusal, and `bash` gated by
+ * a command allowlist with all shell metacharacters rejected by default. Every
+ * invocation is logged to an append-only audit file. This is the defence-in-
+ * depth layer described in the architecture doc: even if the MCP boundary is
+ * bypassed, no file or command operation occurs without passing a guard and
+ * being recorded.
  *
- * The guard (`path-guard.ts`) and the log format (`audit-log.ts`) are pure and
- * unit-tested; this entry point wires them to the filesystem and the
- * `ExtensionAPI`.
+ * The guards (`path-guard.ts`, `bash-policy.ts`) and the log format
+ * (`audit-log.ts`) are pure and unit-tested; this entry point wires them to the
+ * filesystem, the process spawner, and the `ExtensionAPI`.
  */
 
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { readFile, writeFile, readdir, mkdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { execFile } from 'node:child_process'
 import { authorize } from './path-guard.ts'
 import { AuditLog, makeEntry } from './audit-log.ts'
+import { buildPolicy, vetCommand, type BashPolicy } from './bash-policy.ts'
 
 /** Allowlist root the tools are confined to. Set by compose for the container. */
 const ROOT_ENV = 'AUDITED_TOOLS_ROOT'
 /** Where the append-only audit log is written (outside the writable tree). */
 const AUDIT_ENV = 'AUDITED_TOOLS_LOG'
+/** Comma-separated bash allowlist; a leading `+` extends the built-in default. */
+const BASH_ALLOWLIST_ENV = 'AUDITED_BASH_ALLOWLIST'
 
 const DEFAULT_ROOT = '/projects/active'
 const DEFAULT_LOG = '/home/pi/sessions/audit.jsonl'
+/** A bash command may run for at most this long before being killed. */
+const BASH_TIMEOUT_MS = 30_000
+/** Cap captured output so a runaway command cannot flood the model context. */
+const BASH_MAX_BUFFER = 1024 * 1024
 
 export default function (pi: ExtensionAPI): void {
   const root = process.env[ROOT_ENV] ?? DEFAULT_ROOT
   const audit = new AuditLog(process.env[AUDIT_ENV] ?? DEFAULT_LOG)
+  const bashPolicy: BashPolicy = buildPolicy(process.env[BASH_ALLOWLIST_ENV])
 
   registerRead(pi, root, audit)
   registerWrite(pi, root, audit)
   registerLs(pi, root, audit)
+  registerBash(pi, root, audit, bashPolicy)
 }
 
 /** Authorize a path, logging the decision. Returns the canonical path or null. */
@@ -119,5 +131,56 @@ function registerLs (pi: ExtensionAPI, root: string, audit: AuditLog): void {
         return fail(`List failed: ${String(err)}`)
       }
     }) as never,
+  })
+}
+
+function registerBash (pi: ExtensionAPI, root: string, audit: AuditLog, policy: BashPolicy): void {
+  pi.registerTool({
+    name: 'bash',
+    label: 'bash',
+    description:
+      'Run a single allowlisted program with literal arguments, in the project workspace. ' +
+      'No shell is invoked: pipes, redirection, substitution, globs, and chaining are rejected. ' +
+      'Only allowlisted programs run; everything else is denied.',
+    parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } as never,
+    execute: (async (_id: string, params: { command: string }) => {
+      const decision = vetCommand(params.command, policy)
+      if (!decision.allowed) {
+        await audit.record(makeEntry('bash', 'denied', { command: params.command, reason: decision.reason }))
+        return fail(`Denied: ${decision.reason}`)
+      }
+      await audit.record(makeEntry('bash', 'allowed', { command: params.command }))
+      try {
+        const output = await runProgram(decision.program, decision.args, root)
+        return ok(output)
+      } catch (err) {
+        await audit.record(makeEntry('bash', 'error', { command: params.command, reason: String(err) }))
+        return fail(`Command failed: ${String(err)}`)
+      }
+    }) as never,
+  })
+}
+
+/**
+ * Spawn a vetted program with `execFile` — NOT a shell — so the already-checked
+ * argument vector cannot be reinterpreted. Runs in the workspace root, with a
+ * timeout and a bounded output buffer. Resolves to combined stdout+stderr.
+ */
+function runProgram (program: string, args: string[], cwd: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      program,
+      args,
+      { cwd, timeout: BASH_TIMEOUT_MS, maxBuffer: BASH_MAX_BUFFER, shell: false },
+      (err, stdout, stderr) => {
+        const combined = `${stdout ?? ''}${stderr ?? ''}`
+        if (err) {
+          // Surface the program's own output alongside the failure.
+          reject(new Error(combined.trim() === '' ? err.message : combined))
+          return
+        }
+        resolve(combined)
+      }
+    )
   })
 }

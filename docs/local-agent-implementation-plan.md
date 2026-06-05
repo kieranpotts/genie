@@ -256,24 +256,35 @@ add the in-Pi controls; step 8 ties it together.
   command-allowlist replacement is intentionally deferred to Step 6a (below) —
   `bash` is a larger, riskier surface than file tools and warrants its own step.
 
-### Step 6a — `bash` command allowlist (extends `audited-tools`) — TODO
+### Step 6a — `bash` command allowlist (extends `audited-tools`) ✅ DONE
 
-- Add a `bash` replacement tool to the existing `audited-tools` extension that
-  enforces a **command allowlist** (allow, never blocklist), with the same
-  audit-logging discipline as the file tools. Parse the command, match the
-  program (and optionally argument shape) against an allowed set, deny anything
-  unrecognised, and log every invocation (allowed/denied) to the same audit
-  JSONL.
-- **Why its own step:** `bash` is a far larger and riskier surface than
-  `read`/`write`/`ls` — command parsing, shell metacharacters, argument
-  injection, and the allowlist policy all need deliberate design and a thorough
-  test matrix. Folding it into Step 6 would have under-baked it.
-- **Open design points to settle first:** how to parse commands safely (avoid a
-  full shell); whether to allow pipes/redirection/`&&` at all; the initial
-  allowed-command set; how to surface a denied command to the model.
-- **Delivers:** a locked-down command surface completing the
-  `--no-builtin-tools` story. **Test:** allowlist accept/deny, metacharacter and
-  injection attempts, argument-shape checks, and audit logging.
+- ✅ `bash-policy.ts` (pure): rejects all shell metacharacters by default,
+  tokenises honouring quotes, requires the program on an allowlist; `buildPolicy`
+  composes the effective policy from env + config. `index.ts` adds a `bash` tool
+  that vets → logs → runs via `execFile` (`shell: false`, 30s timeout, 1 MB
+  output cap) in the workspace root. Audit log extended with a `command` field.
+- ✅ **Design points settled:** (1) **no shell** — reject all metacharacters by
+  default (the secure option). (2) Allowlist = read-only inspection **+** common
+  dev tools (`git`/`node`/`npm`/`python`/`make`/…). (3) Allowlist configurable
+  via `AUDITED_BASH_ALLOWLIST` (leading `+` extends, else replaces). (4) Denials
+  return a clear reason to the model.
+- ✅ **Metacharacter handling reworked** after tracing each character. Two
+  groups: control operators (`| & ; < > ` newline`) are **always rejected** (they
+  mean nothing without a shell, so "allowing" them could only ever be an
+  injection attempt or a useless literal); argument-content characters
+  (`$ * ? ( ) { } \`) are **allowed as inert literals** (verified: no shell means
+  no expansion/glob/substitution — `$(whoami)` reaches the program as text),
+  which is required for `grep`/`find`/regex commands. The earlier
+  `bash-policy.json` metacharacter-toggle was **removed** as a footgun — it could
+  only relax the gate, never change execution. The sole tunable is now the
+  program allowlist.
+- **Verified:** 34 new unit tests (tokenising incl. quotes/unbalanced; the
+  injection matrix — `;`, `&&`, `|`, `$()`, backticks, redirection, globs,
+  newline; non-allowlisted program; env replace/extend; config metachar
+  behaviour). Full suite 240/240; lint + typecheck (0 errors) + shellcheck clean.
+- **Note:** `bash-policy.json` ships via the verbatim `cp -R` install and the
+  Dockerfile COPY. The `as never` `registerTool` seam is unchanged. Live
+  execution behaviour is exercised in the step-8 runbook.
 
 ### Step 7 — `permission-gate` extension ✅ DONE
 

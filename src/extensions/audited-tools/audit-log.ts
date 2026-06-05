@@ -17,6 +17,8 @@ export interface AuditEntry {
   status: 'allowed' | 'denied' | 'error'
   /** The path argument, when the tool operates on one. */
   path?: string
+  /** The command string, when the tool runs a command (bash). */
+  command?: string
   /** Denial or error reason. */
   reason?: string
 }
@@ -32,6 +34,7 @@ export function formatEntry (entry: AuditEntry): string {
     tool: entry.tool,
     status: entry.status,
     ...(entry.path !== undefined ? { path: entry.path } : {}),
+    ...(entry.command !== undefined ? { command: entry.command } : {}),
     ...(entry.reason !== undefined ? { reason: entry.reason } : {}),
   }
   return JSON.stringify(ordered) + '\n'
@@ -41,7 +44,7 @@ export function formatEntry (entry: AuditEntry): string {
 export function makeEntry (
   tool: string,
   status: AuditEntry['status'],
-  fields: { path?: string, reason?: string } = {},
+  fields: { path?: string, command?: string, reason?: string } = {},
   now: Date = new Date()
 ): AuditEntry {
   return {
@@ -49,6 +52,7 @@ export function makeEntry (
     tool,
     status,
     ...(fields.path !== undefined ? { path: fields.path } : {}),
+    ...(fields.command !== undefined ? { command: fields.command } : {}),
     ...(fields.reason !== undefined ? { reason: fields.reason } : {}),
   }
 }
