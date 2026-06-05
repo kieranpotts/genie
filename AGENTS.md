@@ -6,7 +6,7 @@ Personal and experimental extensions for the [Pi coding agent](https://pi.dev) (
 
 Extensions live under `src/extensions/<name>/` and are installed into Pi's extensions directory (`~/.pi/agent/extensions/`) by `run/install`, which copies each extension directory verbatim. Pi runs the TypeScript directly – there is no build step.
 
-Non-extension infrastructure for the secure local agent architecture (Docker images, compose files, the model proxy, MCP server wiring) lives under `src/infra/`. This is **not** installable and `run/install` MUST NOT copy it into Pi's extensions directory. See [docs/local-agent-architecture.md](./docs/local-agent-architecture.md) and [docs/local-agent-implementation-plan.md](./docs/local-agent-implementation-plan.md).
+Non-extension infrastructure for the secure local agent architecture (Docker images, compose files, the model proxy, MCP server wiring) lives under `src/infra/`. This is **not** installable and `run/install` MUST NOT copy it into Pi's extensions directory. See [docs/local-agent-architecture.md](./docs/local-agent-architecture.md).
 
 The repository ships two extensions: `pickling-penguins`, which replaces the default "Working…" status with randomly composed nonsense; and `realize`, a `/realize` command that hands a specification (a file, directory, or URL) to the agent to implement in full.
 

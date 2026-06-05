@@ -2,7 +2,7 @@
 
 Gives Pi an MCP (Model Context Protocol) client so it can reach a filesystem MCP server through the Docker MCP Toolkit gateway. Pi has no native MCP support, so this extension is the in-Pi half of the secure local agent architecture: the agent gets project file access only through mediated MCP tools, never a direct filesystem mount.
 
-See [docs/local-agent-architecture.md](../../../docs/local-agent-architecture.md) and [docs/local-agent-implementation-plan.md](../../../docs/local-agent-implementation-plan.md) (step 5).
+See [docs/local-agent-architecture.md](../../../docs/local-agent-architecture.md).
 
 ## What it does
 

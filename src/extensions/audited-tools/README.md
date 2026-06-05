@@ -2,7 +2,7 @@
 
 Audited replacements for Pi's built-in file **and command** tools, for use with `--no-builtin-tools`. Started that way, Pi has no file or shell access; this extension provides `read`, `write`, `ls`, and `bash` back — the file tools confined to an allowlisted workspace root and refusing sensitive filenames, and `bash` confined to a command allowlist with shell metacharacters rejected. Every call is logged to an append-only audit file.
 
-This is the defence-in-depth layer of the secure local agent architecture: even if the MCP filesystem boundary is bypassed, no file or command operation happens without passing a guard and being recorded. See [docs/local-agent-architecture.md](../../../docs/local-agent-architecture.md) and [docs/local-agent-implementation-plan.md](../../../docs/local-agent-implementation-plan.md) (steps 6 and 6a).
+This is the defence-in-depth layer of the secure local agent architecture: even if the MCP filesystem boundary is bypassed, no file or command operation happens without passing a guard and being recorded. See [docs/local-agent-architecture.md](../../../docs/local-agent-architecture.md).
 
 ## What it does
 
@@ -36,7 +36,7 @@ A denied call (either kind) returns an error to the model explaining the refusal
 
 These are set by `src/infra/compose.yaml` for the hardened container.
 
-> There is deliberately **no** metacharacter configuration. Tracing each character showed two groups: control operators (`| & ; < > ` newline`) can never do anything useful when "allowed" (no shell runs, so they would be useless literals) — so they are permanently rejected; argument-content characters (`$ * ? ( ) { } \`) are already passed through safely as inert literals — so no toggle is needed. The only tunable is the program allowlist above. (A deprecated, inert `bash-policy.json` may remain on disk; it is not read.)
+> There is deliberately **no** metacharacter configuration. Tracing each character showed two groups: control operators (`| & ; < > ` newline`) can never do anything useful when "allowed" (no shell runs, so they would be useless literals) — so they are permanently rejected; argument-content characters (`$ * ? ( ) { } \`) are already passed through safely as inert literals — so no toggle is needed. The only tunable is the program allowlist above.
 
 ## Audit record format
 

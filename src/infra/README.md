@@ -1,6 +1,6 @@
 # Secure local agent infrastructure
 
-Infrastructure for running the Pi coding agent inside the secure local architecture decided in [docs/local-agent-architecture.md](../../docs/local-agent-architecture.md) and sequenced in [docs/local-agent-implementation-plan.md](../../docs/local-agent-implementation-plan.md). Those documents are the source of truth; this README is the operator's entry point to the runnable pieces.
+Infrastructure for running the Pi coding agent inside the secure local architecture decided in [docs/local-agent-architecture.md](../../docs/local-agent-architecture.md). That document is the source of truth; this README is the operator's entry point to the runnable pieces.
 
 > [!IMPORTANT]
 > This directory is **not** a Pi extension and is **not** installable. `run/install` installs only the directories under `src/extensions/`. Nothing here is ever copied into `~/.pi/agent/extensions/`.

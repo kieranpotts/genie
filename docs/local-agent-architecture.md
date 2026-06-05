@@ -347,6 +347,7 @@ Chosen with eyes open; the costs are real and accepted because the objective is 
 - **MCP client extension for Pi** — build in-house, or is there existing prior art to adopt? Scope and timeline unknown until investigated.
 - **Egress filtering** — recommended for sensitive projects; currently out of scope for the baseline. Decide whether to make it part of the standard build.
 - **Interactive permission prompting** is still immature across the ecosystem (most setups are fully open or fully closed). The permission-gate extension is our stopgap; staging-filesystem (copy-on-write review) approaches are emerging but not yet mainstream — worth tracking.
+- **`realize` interaction** — running the (WIP) `/realize` command inside the hardened container is out of scope until `realize` stabilises; revisit after it lands. The security artifacts deliberately do not depend on it.
 
 ## Additional notes
 

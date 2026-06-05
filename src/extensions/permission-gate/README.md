@@ -2,7 +2,7 @@
 
 Requires explicit, interactive user confirmation before any mutating tool call runs — writes, edits, and shell execution. Confirmation defaults to **deny**: a timeout or a missing interactive UI blocks the operation. Every decision, approved or denied, is logged to an append-only file.
 
-This is the interactive-approval layer the architecture doc flags as the immature gap across the ecosystem (most setups are fully open or fully closed). See [docs/local-agent-architecture.md](../../../docs/local-agent-architecture.md) and [docs/local-agent-implementation-plan.md](../../../docs/local-agent-implementation-plan.md) (step 7).
+This is the interactive-approval layer the architecture doc flags as the immature gap across the ecosystem (most setups are fully open or fully closed). See [docs/local-agent-architecture.md](../../../docs/local-agent-architecture.md).
 
 ## What it does
 
