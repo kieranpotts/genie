@@ -11,7 +11,7 @@ It is predictable because reliable agentic workflows — ones that produce artif
 The key design goal is to make outcomes primarily a property of the deterministic engineering around the agent, rather than of any single prompt or the capabilities of any particular language model.
 
 > [!WARNING]
-> These artifacts are built for my personal use and they are volatile — they may change, break, or be removed at any time. They carry no support or stability guarantees. You are, however, welcome to fork this repository and use it as a basis for developing your own Pi extensions.
+> These artifacts are built for my personal use and they are volatile — they may change, break, or be removed at any time. They carry no support or stability guarantees. You are, however, welcome to fork this repository and use it as a basis for engineering your own agent harness.
 
 ## 📓 Documentation
 
