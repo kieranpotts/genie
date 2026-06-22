@@ -2,7 +2,7 @@
 # Validate commit message formats.
 #
 
-name: Validate commit messages
+name: Validate Commit Messages
 
 on:
   push:
