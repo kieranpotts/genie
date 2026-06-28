@@ -6,7 +6,7 @@ Infrastructure for running the Pi coding agent inside the secure local architect
 > This directory is **not** a Pi extension and is **not** installable. `run/install` installs only the directories under `src/extensions/`. Nothing here is ever copied into `~/.pi/agent/extensions/`.
 
 > [!WARNING]
-> Work in progress. This is the Step 1 skeleton from the implementation plan. The subdirectories below are placeholders until their respective steps land — only this README and `.env.example` exist so far.
+> Work in progress. This is the Step 1 skeleton from the delivery plan. The subdirectories below are placeholders until their respective steps land — only this README and `.env.example` exist so far.
 
 ## What this provides
 
