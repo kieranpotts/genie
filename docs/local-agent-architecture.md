@@ -25,7 +25,7 @@ This document records my own choices in the design of a secure local agent archi
 I explored a number of possible architectures to _securely_ run agents locally, and models either locally or in-the-cloud.
 
 The preferred solution involves running the Pi coding agent in its own dedicated, hardened container, which has no direct filesystem access, no Docker socket, and not even the cloud credentials needed to access remote models.
-
+continue
 Access to project files is mediated by a separate containerized MCP server. This is responsible for enforcing path and operation allowlists, and it logs every call – useful in the context of regulated industries.
 
 All model traffic is routed through a host-side proxy that holds the API keys.
