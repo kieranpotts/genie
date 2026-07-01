@@ -8,7 +8,7 @@ Extensions live under `src/extensions/<name>/` and are installed into Pi's exten
 
 Non-extension infrastructure for the secure local agent architecture (Docker images, compose files, the model proxy, MCP server wiring) lives under `src/infrastructure/`. This is **not** installable and `run/install` MUST NOT copy it into Pi's extensions directory. See [docs/local-agent-architecture.md](./docs/local-agent-architecture.md).
 
-The repository ships two extensions: `pickling-penguins`, which replaces the default "Working…" status with randomly composed nonsense; and `realize`, a `/realize` command that hands a specification (a file, directory, or URL) to the agent to implement in full.
+The repository ships several extensions, including `pickling-penguins`, which replaces the default "Working…" status with randomly composed nonsense, and `foreach`, a `/foreach` command that applies an instruction or skill to each item of a list. See each extension's own README under `src/extensions/<name>/` for details.
 
 ## Tech stack
 

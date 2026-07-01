@@ -4,7 +4,7 @@ How to use this repository day to day: getting the extensions installed, running
 
 ## Two ways to use this repository
 
-- **Extensions only.** Install one or more extensions into a local (unsandboxed) Pi and use them as-is. This is the quick path — good for `pickling-penguins` and `realize` on their own machine, or for trying `audited-tools` / `permission-gate` without the container.
+- **Extensions only.** Install one or more extensions into a local (unsandboxed) Pi and use them as-is. This is the quick path — good for `pickling-penguins` and `foreach` on their own machine, or for trying `audited-tools` / `permission-gate` without the container.
 - **The hardened container.** Run Pi inside the full secure local agent architecture — no filesystem or Docker access on the agent, credentials held by a host-side proxy, mediated file access via MCP, and every operation audited. This is the setup for regulated or higher-trust-boundary work. See [local-agent-architecture.md](./local-agent-architecture.md) for the design and [`src/infrastructure/README.md`](../src/infrastructure/README.md) for the operator runbook.
 
 The two are complementary: the container is the outer boundary; the extensions (`mcp-client`, `audited-tools`, `permission-gate`) are the in-Pi controls that the container's image bakes in.
@@ -27,17 +27,16 @@ Full detail, including manual installation and how to register a new extension: 
 
 Cosmetic only. Replaces the "Working…" status line with randomly composed nonsense ("Flambéing the singularity..."). No configuration, no commands — install it and it just runs. [README](../src/extensions/pickling-penguins/README.md).
 
-### realize
+### foreach
 
-Adds a `/realize <source>` command that takes a specification through a full delivery pipeline — `specify → design → elaborate → plan → code → test → review → summary` — each phase in its own isolated Pi process, handing off through artifacts on disk under `.pi/realize/<run-id>/`.
+Adds a `/foreach <instruction | /skill-name> <list-file>` command that applies one instruction — freeform text, or a `/skill-name` reference to an installed skill — to each item of a plain-text list file, one isolated `pi -p` subagent per item. Every item runs regardless of prior failures; output per item and a final pass/fail summary are written under `.pi/foreach/<run-id>/`.
 
 ```text
-/realize ./docs/spec.md
-/realize https://github.com/owner/repo/issues/42
-/realize ./docs/spec.md owner/repo#42
+/foreach Summarize this changelog entry in one sentence ./entries.txt
+/foreach /review ./prs.txt
 ```
 
-Requires the [workflow skills](https://github.com/kieranpotts/skills) (`specify`, `design`, `elaborate`, `plan`, `code`, `test`, `review`) installed under `~/.pi/agent/skills/`; remote sources (URLs, GitHub issues/PRs) are classified but not yet fetched by the `specify` phase. [README](../src/extensions/realize/README.md) · [SPEC.md](../src/extensions/realize/SPEC.md).
+[README](../src/extensions/foreach/README.md).
 
 ### audited-tools
 
@@ -76,6 +75,6 @@ Run Pi inside the container with `--no-builtin-tools` so the audited replacement
 ## Where to look next
 
 - Design rationale for the whole architecture: [local-agent-architecture.md](./local-agent-architecture.md)
-- Requirements per extension (e.g. `realize`'s skill dependency): [requirements.md](./requirements.md)
+- Requirements per extension: [requirements.md](./requirements.md)
 - Installing extensions in detail: [installation.md](./installation.md)
 - Contributing, linting, testing: [CONTRIBUTING.md](../CONTRIBUTING.md)

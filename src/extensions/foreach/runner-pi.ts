@@ -52,10 +52,9 @@ export function resolveSkillDir (skill: string, skillsDir?: string): string {
  * running one list item. Pure and side-effect free, so the flag translation is
  * unit-tested without spawning anything.
  *
- * Unlike a `realize` phase, an item carries no restricted tool set — a
- * `/foreach` instruction is a general-purpose task, not a specialized
- * lifecycle role — so no `-t` allowlist is passed and `pi` keeps its default
- * tools.
+ * An item carries no restricted tool set — a `/foreach` instruction is a
+ * general-purpose task, not a specialized lifecycle role — so no `-t`
+ * allowlist is passed and `pi` keeps its default tools.
  *
  * @param instruction - The classified instruction for this run.
  * @param task - The message to hand to the subagent (built by {@link buildItemTask}).

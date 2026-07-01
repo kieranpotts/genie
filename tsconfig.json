@@ -19,8 +19,7 @@
     "noImplicitOverride": true,
     // NOTE: `noUncheckedIndexedAccess` is intentionally OFF for now. Enabling it
     // surfaces ~20 latent `T | undefined` index-access findings across existing
-    // code (incl. WIP `realize`); adopt it as a separate cleanup once those are
-    // addressed.
+    // code; adopt it as a separate cleanup once those are addressed.
 
     // Skip checking declaration files in node_modules (Pi ships a large surface;
     // we type-check our own code against it, not it against itself).

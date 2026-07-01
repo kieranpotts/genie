@@ -2,11 +2,11 @@
  * The deterministic orchestrator for the `/foreach` loop.
  *
  * Applies one instruction (or skill) to each item of a list, sequentially, each
- * in its own isolated subagent via an {@link ItemRunner}. Unlike `realize`'s
- * pipeline, there is no handoff between steps and no gate: every item runs
- * regardless of how the previous one went, and the loop reports a final
- * pass/fail tally rather than blocking on the first failure. This is a map, not
- * a pipeline — items are independent by design (see the README).
+ * in its own isolated subagent via an {@link ItemRunner}. There is no handoff
+ * between steps and no gate: every item runs regardless of how the previous
+ * one went, and the loop reports a final pass/fail tally rather than blocking
+ * on the first failure. This is a map, not a pipeline — items are independent
+ * by design (see the README).
  */
 
 import type { ItemRunner } from './runner.ts'

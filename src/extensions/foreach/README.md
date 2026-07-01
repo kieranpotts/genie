@@ -23,7 +23,7 @@ owner/repo#104
 owner/repo#109
 ```
 
-Each item runs in its own fresh, ephemeral `pi -p` subagent — no memory of any other item, no shared session. **This is a map over the list, not a pipeline**: unlike `realize`'s phases, items do not hand off to one another, and one item's outcome never affects another's. Every item runs regardless of prior failures. Progress is shown in the status line as each item runs; when the run finishes, a pass/fail tally is reported. Each item's output, plus a `summary.md`, are written under `.pi/foreach/<run-id>/`.
+Each item runs in its own fresh, ephemeral `pi -p` subagent — no memory of any other item, no shared session. **This is a map over the list, not a pipeline**: items do not hand off to one another, and one item's outcome never affects another's. Every item runs regardless of prior failures. Progress is shown in the status line as each item runs; when the run finishes, a pass/fail tally is reported. Each item's output, plus a `summary.md`, are written under `.pi/foreach/<run-id>/`.
 
 ## Configuration
 
@@ -32,12 +32,8 @@ None. Once installed, invoke it as `/foreach <instruction | /skill-name> <list-f
 ## Design notes
 
 - **Pure, tested core.** Argument splitting (`args.ts`), list parsing (`list.ts`), instruction classification and per-item task building (`instruction.ts`), the `pi` argv translation (`runner-pi.ts`'s `buildPiArgs`), the loop itself (`loop.ts`), and the summary format (`summary.ts`) are all pure and unit-tested. `index.ts` is thin glue to the `ExtensionAPI`, the filesystem, and the process spawner.
-- **No restricted tool set per item.** Unlike a `realize` phase, an item is a general-purpose instruction, not a specialized lifecycle role, so no tool allowlist is imposed — each subagent keeps `pi`'s default tools.
-- **Continue on failure.** A failed item (non-zero exit, timeout, or spawn fault) does not stop the loop; it is recorded and the next item still runs. There is no gate or rework loop — that is `realize`'s job, for a different kind of workflow.
-
-## Relationship to `realize`
-
-Both spawn isolated `pi -p` subagents and write artifacts to `.pi/<name>/<run-id>/`, but they solve different problems: `realize` drives a fixed sequence of *dependent* lifecycle phases toward one verified change; `foreach` applies one *independent* instruction across many items, sequentially, with no phase depending on another's output.
+- **No restricted tool set per item.** An item is a general-purpose instruction, not a specialized lifecycle role, so no tool allowlist is imposed — each subagent keeps `pi`'s default tools.
+- **Continue on failure.** A failed item (non-zero exit, timeout, or spawn fault) does not stop the loop; it is recorded and the next item still runs. There is no gate or rework loop.
 
 ## Files
 

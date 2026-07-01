@@ -2,8 +2,8 @@
  * The artifact workspace for a `/foreach` run.
  *
  * Each item's output is written as a numbered artifact, and the run finishes
- * with a summary artifact. Kept behind a {@link Workspace} port, as in
- * `realize`, so the loop is tested without touching disk.
+ * with a summary artifact. Kept behind a {@link Workspace} port so the loop is
+ * tested without touching disk.
  */
 
 import { mkdir, writeFile } from 'node:fs/promises'

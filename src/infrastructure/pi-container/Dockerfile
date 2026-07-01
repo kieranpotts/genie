@@ -41,11 +41,9 @@ RUN npm install -g @earendil-works/pi-coding-agent \
 # `audited-tools`, and `permission-gate` extensions) is installed here so the
 # hardened controls ship WITH the image rather than being added ad hoc.
 #
-# These extensions do not exist yet (steps 5-7), and the `realize` extension is
-# WIP and deliberately NOT shipped in this image. Rather than copy `src/extensions/`
-# wholesale (which would bake in WIP code), the build copies only the named
-# security extensions once they exist. Each name is appended below as its step
-# lands; until then the agent's extension directory is created empty.
+# Rather than copy `src/extensions/` wholesale, the build copies only the named
+# security extensions. Each name is appended below as its step lands; until
+# then the agent's extension directory is created empty.
 #
 # Build context is the repo root:
 #   docker build -f src/infra/pi-container/Dockerfile -t pi-agent:hardened .

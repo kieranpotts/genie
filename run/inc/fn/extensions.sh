@@ -65,9 +65,6 @@ list_available_extensions() {
       pickling-penguins)
         desc="Replaces the \"Working...\" status with randomly composed nonsense"
         ;;
-      realize)
-        desc="Hands a spec (file, directory, or URL) to the agent to implement in full"
-        ;;
       foreach)
         desc="Applies an instruction or /skill-name to each line of a list file, one isolated subagent per item"
         ;;

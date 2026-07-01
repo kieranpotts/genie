@@ -12,9 +12,7 @@ The `./run/install` script requires Bash. If you don't have this, no worries, yo
 
 ## Per-extension requirements
 
-Some extensions expect more than Pi itself:
-
-- [`realize`](../src/extensions/realize/README.md) delegates to a set of software-development [workflow skills][skills] — `specify`, `design`, `elaborate`, `plan`, `code`, `test`, and `review`. Install them into Pi's skills directory (`~/.pi/agent/skills/`) so the agent can invoke each phase. Without them, `realize` still runs, but the agent performs each phase unaided rather than following the skills – output will be less predictable.
+None of the current extensions require more than Pi itself. [`foreach`](../src/extensions/foreach/README.md) can optionally invoke an installed [workflow skill][skills] (`~/.pi/agent/skills/`) when its instruction argument is a `/skill-name` reference, but this is optional — a freeform instruction requires nothing further.
 
 [pi]: https://pi.dev
 [pi-docs]: https://pi.dev/docs/latest/extensions#extension-locations
