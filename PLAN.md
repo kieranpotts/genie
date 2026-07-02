@@ -6,6 +6,16 @@ Isolate a local coding agent (Pi) from host system and user-level filesystem, wh
 
 ---
 
+## Extensions
+
+- Checkpoints
+- Plan mode
+- TODO list
+- Background bash?
+- Sub-agents
+- Built-in MCP
+- A2A
+
 ## Landscape Note (2025–2026)
 
 The tooling around agent sandboxing has consolidated this year:
