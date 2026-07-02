@@ -12,8 +12,7 @@ The `./run/install` script requires Bash. If you don't have this, no worries, yo
 
 ## Per-extension requirements
 
-None of the current extensions require more than Pi itself. [`foreach`](../src/extensions/foreach/README.md) can optionally invoke an installed [workflow skill][skills] (`~/.pi/agent/skills/`) when its instruction argument is a `/skill-name` reference, but this is optional — a freeform instruction requires nothing further.
+None of the current extensions require more than Pi itself.
 
 [pi]: https://pi.dev
 [pi-docs]: https://pi.dev/docs/latest/extensions#extension-locations
-[skills]: https://github.com/kieranpotts/skills

@@ -65,9 +65,6 @@ list_available_extensions() {
       pickling-penguins)
         desc="Replaces the \"Working...\" status with randomly composed nonsense"
         ;;
-      foreach)
-        desc="Applies an instruction or /skill-name to each line of a list file, one isolated subagent per item"
-        ;;
       mcp-client)
         desc="Connects Pi to an MCP filesystem server (via the Docker MCP gateway) for mediated file access"
         ;;
