@@ -8,6 +8,7 @@ Isolate a local coding agent (Pi) from host system and user-level filesystem, wh
 
 ## Extensions
 
+- Session transcripts (for auditability)
 - Checkpoints
 - Plan mode
 - TODO list
