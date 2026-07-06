@@ -8,6 +8,8 @@ Isolate a local coding agent (Pi) from host system and user-level filesystem, wh
 
 ## Extensions
 
+- GitHub self-hosted action runners
+
 - Session transcripts (for auditability)
 - Checkpoints
 - Plan mode
