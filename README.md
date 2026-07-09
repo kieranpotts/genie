@@ -21,7 +21,7 @@ for Ollama, this is my custom AI agent harness.
 > use it as a basis for engineering your own agent harness around Pi. But I
 > don't recommend you use these tools as-is.
 
-## 📋 Requirements
+## ☑️ Requirements
 
 The core requirement, of course, is the [Pi coding agent][pi], installed locally
 and in your `PATH`:
