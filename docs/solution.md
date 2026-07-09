@@ -72,9 +72,9 @@ Thus, the MCP server becomes the gatekeeper to the host system. Access is
 mediated using scoped allowlists. Every call is logged.
 
 This aligns with emerging best practices for secure agent harnesses. MCP
-(Model Context Protocol) has emerged as the _de facto_ standard for
-controlling an agent's access to filesystems, tools, and data, instead of an
-agent having direct filesystem access.
+(Model Context Protocol) has emerged as the _de facto_ isolation boundary for
+agents, controlling an agent's access to filesystems, tools, and data, instead
+of an agent having direct filesystem access.
 
 Tooling in this solution space is mature. [Docker MCP Toolkit][docker-mcp-toolkit]
 is a free feature of Docker Desktop that runs MCP servers in containers and

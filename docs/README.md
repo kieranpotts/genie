@@ -8,6 +8,4 @@ and its supporting infrastructure.
 - [**The solution**](./solution.md)
 - [**Hardening**](./hardening.md)
 - [**Trade-offs**](./trade-offs.md)
-- [**Alternatives considered**](./alternatives.md)
-- [**Open questions**](./open-questions.md)
-- [**References and notes**](./references.md)
+- [**Alternatives**](./alternatives.md)
