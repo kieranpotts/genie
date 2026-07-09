@@ -24,7 +24,9 @@ Isolate a local coding agent (Pi) from host system and user-level filesystem, wh
 The tooling around agent sandboxing has consolidated this year:
 
 - **MCP has become the de facto isolation boundary.** The emerging standard is that the agent does *not* touch the filesystem directly — it calls MCP servers that expose specific, scoped operations, and the (containerised) MCP server is the gatekeeper. This is exactly **Option D** below; the wider ecosystem now treats it as the default rather than one option among four. The catch for us: Pi is not MCP-native, so Option D requires building an MCP client extension for Pi (or using `--no-builtin-tools` + audited tool extensions as the functional equivalent — see Pi Security Analysis).
+
 - **LiteLLM has become the de facto model proxy** for the mixed local/cloud case — keys on the host, single endpoint to the agent. Captured in Model Routing → Approach 2.
+
 - **Docker MCP Toolkit** is the pragmatic, batteries-included way to run MCP servers in containers. Captured as a sub-approach under Option D.
 
 **Still unsolved / immature:** granular *interactive* permission prompting (approve this write, deny that read) — most setups remain either fully open or fully closed. Promising directions like staging filesystems (copy-on-write layers you review before committing) exist but are not yet mainstream. This is the same gap the Pi Security Analysis flags: the permission-gate must be built, not configured.
