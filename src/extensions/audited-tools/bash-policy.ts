@@ -131,15 +131,14 @@ export function vetCommand (command: string, policy: BashPolicy): BashDecision {
 
 /**
  * Build the effective policy from the optional `AUDITED_BASH_ALLOWLIST` env
- * value: comma-separated programs, a leading `+` extending the default,
- * otherwise replacing it. Defaults to the built-in allowlist. Pure.
+ * value: a comma-separated list of programs that, when non-empty, fully replaces
+ * the built-in default. An unset or blank value leaves the default in place.
+ * Pure.
  */
 export function buildPolicy (envAllowlist?: string): BashPolicy {
   let allowlist: readonly string[] = DEFAULT_ALLOWLIST
   if (envAllowlist && envAllowlist.trim() !== '') {
-    const extend = envAllowlist.trimStart().startsWith('+')
-    const names = envAllowlist.replace(/^\s*\+/, '').split(',').map((s) => s.trim()).filter(Boolean)
-    allowlist = extend ? [...DEFAULT_ALLOWLIST, ...names] : names
+    allowlist = envAllowlist.split(',').map((s) => s.trim()).filter(Boolean)
   }
   return { allowlist }
 }

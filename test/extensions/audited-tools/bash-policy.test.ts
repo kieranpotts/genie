@@ -145,15 +145,18 @@ describe('buildPolicy', () => {
     assert.deepEqual(buildPolicy().allowlist, DEFAULT_ALLOWLIST)
   })
 
-  it('replaces the allowlist when the env var has no leading +', () => {
+  it('fully replaces the default when the env var is non-empty', () => {
     assert.deepEqual(buildPolicy('ls,cat').allowlist, ['ls', 'cat'])
   })
 
-  it('extends the default allowlist with a leading +', () => {
-    const p = buildPolicy('+terraform,kubectl')
-    assert.equal(p.allowlist.includes('ls'), true) // default retained
-    assert.equal(p.allowlist.includes('terraform'), true)
-    assert.equal(p.allowlist.includes('kubectl'), true)
+  it('does not retain any default programs when replacing', () => {
+    const p = buildPolicy('terraform,kubectl')
+    assert.deepEqual(p.allowlist, ['terraform', 'kubectl'])
+    assert.equal(p.allowlist.includes('ls'), false) // default NOT retained
+  })
+
+  it('trims whitespace and drops empty entries', () => {
+    assert.deepEqual(buildPolicy(' ls , cat ,').allowlist, ['ls', 'cat'])
   })
 
   it('ignores blank env allowlist', () => {

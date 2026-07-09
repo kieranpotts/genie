@@ -105,7 +105,7 @@ process is running — so, in the guest environment, if the agent is containeriz
 |---|---|---|
 | `AUDITED_TOOLS_ROOT` | `/projects/active` | The single directory the tools are confined to. |
 | `AUDITED_TOOLS_LOG` | `/var/log/pi/audited-tools/audit.jsonl` | Append-only audit log path. |
-| `AUDITED_BASH_ALLOWLIST` | Built-in defaults, see above | Comma-separated program allowlist. A leading `+` extends the default (`+terraform,kubectl`); otherwise it replaces it (`ls,cat,git`). |
+| `AUDITED_BASH_ALLOWLIST` | Built-in defaults, see above | Comma-separated program allowlist. When set to a non-empty value, it fully replaces the default (eg. `ls,cat,git`). Leave unset to keep the default. |
 
 These are set in the `compose.yaml` file for the hardened container.
 
