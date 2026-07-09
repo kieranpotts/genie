@@ -1,4 +1,4 @@
-# permission-gate
+# `permission-gate`
 
 Requires explicit, interactive user confirmation before any mutating tool call runs — writes, edits, and shell execution. Confirmation defaults to **deny**: a timeout or a missing interactive UI blocks the operation. Every decision, approved or denied, is logged to an append-only file.
 

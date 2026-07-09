@@ -1,4 +1,4 @@
-# mcp-client
+# `mcp-client`
 
 Gives Pi an MCP (Model Context Protocol) client so it can reach a filesystem MCP server through the Docker MCP Toolkit gateway. Pi has no native MCP support, so this extension is the in-Pi half of the secure local agent architecture: the agent gets project file access only through mediated MCP tools, never a direct filesystem mount.
 

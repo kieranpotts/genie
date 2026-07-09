@@ -1,4 +1,4 @@
-# audited-tools
+# `audited-tools`
 
 Audited replacements for Pi's built-in file **and command** tools, for use with `--no-builtin-tools`. Started that way, Pi has no file or shell access; this extension provides `read`, `write`, `ls`, and `bash` back — the file tools confined to an allowlisted workspace root and refusing sensitive filenames, and `bash` confined to a command allowlist with shell metacharacters rejected. Every call is logged to an append-only audit file.
 

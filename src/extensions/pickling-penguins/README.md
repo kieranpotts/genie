@@ -1,8 +1,7 @@
-# pickling-penguins
+# `pickling-penguins`
 
-A Pi extension that replaces the default "Working..." status with a stream of
-randomly-composed nonsense, like "Pickling penguins...", so waiting for the
-agent is a little more entertaining!
+A just-for-fun Pi extension that replaces the default "Working..." status with
+a stream of randomly-composed nonsense, like "Pickling penguins...".
 
 ## What it does
 
@@ -19,7 +18,8 @@ twice while it runs. When the agent finishes, the default status is restored.
 ## Configuration
 
 None. There are no settings, no commands, and nothing to invoke. Once installed,
-the extension just does its thing. Give Pi a prompt and watch the status line.
+the extension just does its thing. Give Pi a prompt and keep an eye on the
+status line while it works.
 
 ## Installing
 
@@ -28,5 +28,3 @@ From this repository's root directory, run:
 ```sh
 ./run/install pickling-penguins
 ```
-
-See the [installation guide](../../docs/installation.md) for more details.
