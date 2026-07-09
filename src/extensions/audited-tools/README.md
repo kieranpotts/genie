@@ -31,7 +31,7 @@ A denied call (either kind) returns an error to the model explaining the refusal
 | Variable | Default | Meaning |
 |---|---|---|
 | `AUDITED_TOOLS_ROOT` | `/projects/active` | The single directory the tools are confined to. |
-| `AUDITED_TOOLS_LOG` | `/home/pi/sessions/audit.jsonl` | Append-only audit log path. Should live on a volume outside the agent's writable tree. |
+| `AUDITED_TOOLS_LOG` | `/var/log/pi/audited-tools/audit.jsonl` | Append-only audit log path. Should live on a volume outside the read-only rootfs; the extension creates the parent directory on first write. |
 | `AUDITED_BASH_ALLOWLIST` | (built-in default) | Comma-separated program allowlist. A leading `+` extends the default (`+terraform,kubectl`); otherwise it replaces it (`ls,cat,git`). |
 
 These are set by `src/infrastructure/compose.yaml` for the hardened container.

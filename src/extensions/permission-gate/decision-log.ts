@@ -11,7 +11,8 @@
  * self-contained (no cross-directory imports survive installation).
  */
 
-import { appendFile } from 'node:fs/promises'
+import { appendFile, mkdir } from 'node:fs/promises'
+import { dirname } from 'node:path'
 
 export interface DecisionRecord {
   ts: string
@@ -54,15 +55,25 @@ export function makeDecision (
 /** Append-only sink for permission decisions. */
 export class DecisionLog {
   private readonly filePath: string
+  private dirEnsured = false
 
   constructor (filePath: string) {
     this.filePath = filePath
+  }
+
+  /** Create the log's parent directory if absent. Idempotent; the recursive
+   * mkdir is a no-op once the directory exists, so we only attempt it once. */
+  private async ensureDir (): Promise<void> {
+    if (this.dirEnsured) return
+    await mkdir(dirname(this.filePath), { recursive: true })
+    this.dirEnsured = true
   }
 
   /** Append one decision. Never throws into the caller — a failed write must
    * not change the gate outcome (which has already been decided). */
   async record (record: DecisionRecord): Promise<void> {
     try {
+      await this.ensureDir()
       await appendFile(this.filePath, formatDecision(record), { encoding: 'utf8' })
     } catch {
       /* Best-effort logging. */

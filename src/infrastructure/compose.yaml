@@ -40,6 +40,10 @@ volumes:
       device: ${PROJECT_PATH:?set PROJECT_PATH in src/infrastructure/.env}
   # Pi session transcripts, persisted outside any project tree (sensitive).
   pi-sessions:
+  # Audit trails (permission-gate + audited-tools). A separate volume from
+  # sessions so the accountability logs have their own lifecycle and can be
+  # retained/shipped independently of transcripts.
+  pi-logs:
 
 services:
   # ---------------------------------------------------------------------------
@@ -132,8 +136,12 @@ services:
     extra_hosts:
       - "host-gateway:host-gateway"
     volumes:
-      # ONLY the session volume. No project mount, no docker.sock, no dotfiles.
+      # Two named volumes only. No project mount, no docker.sock, no dotfiles.
+      # Pi's own session transcripts.
       - pi-sessions:/home/pi/sessions
+      # Audit trails. The agent can append but the volume outlives the
+      # container, so a compromised session cannot erase its own history.
+      - pi-logs:/var/log/pi
     environment:
       # Model access: proxy endpoint + proxy token ONLY. No cloud API keys.
       AGENT_MODEL_ENDPOINT: "http://host-gateway:${LITELLM_PORT:-4000}"
@@ -144,12 +152,13 @@ services:
       MCP_GATEWAY_AUTH_TOKEN: "${MCP_GATEWAY_AUTH_TOKEN:?set MCP_GATEWAY_AUTH_TOKEN in src/infrastructure/.env}"
       # Defence in depth: the audited-tools extension (step 6) confines its
       # read/write/ls replacements to this root and logs every call. The log
-      # lives on the writable pi-sessions volume, outside the read-only rootfs.
+      # lives on the dedicated pi-logs volume, outside the read-only rootfs; the
+      # extension creates its subdirectory on first write.
       AUDITED_TOOLS_ROOT: "/projects/active"
-      AUDITED_TOOLS_LOG: "/home/pi/sessions/audit.jsonl"
+      AUDITED_TOOLS_LOG: "/var/log/pi/audited-tools/audit.jsonl"
       # Interactive approval: the permission-gate extension (step 7) requires
       # confirmation for mutating tool calls and logs every decision here.
-      PERMISSION_GATE_LOG: "/home/pi/sessions/permissions.jsonl"
+      PERMISSION_GATE_LOG: "/var/log/pi/permission-gate/audit.jsonl"
       PI_OFFLINE: "1"
       PI_SKIP_VERSION_CHECK: "1"
       PI_CODING_AGENT_SESSION_DIR: "/home/pi/sessions"

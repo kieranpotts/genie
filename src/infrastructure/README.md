@@ -101,18 +101,18 @@ audited replacements are the only file tools.
 | Agent has no Docker socket | `docker compose ... exec pi ls -l /var/run/docker.sock 2>&1` | no such file |
 | Mediated read works | ask the agent to read a file in the project | returns content via `mcp_*`/audited `read` |
 | Traversal denied | ask it to read `../../etc/passwd` | denied at the boundary; `audit.jsonl` shows a `denied` line |
-| Sensitive file refused | ask it to read `.env` in the project | refused; `audit.jsonl` shows `sensitive file refused` |
+| Sensitive file refused | ask it to read `.env` in the project | refused; the audited-tools log shows `sensitive file refused` |
 | Write requires approval | ask it to write a file | a confirmation prompt appears; on approve, write succeeds |
-| Default-deny on timeout | ignore the prompt for 60s | the write is blocked; `permissions.jsonl` shows `timed out (default deny)` |
+| Default-deny on timeout | ignore the prompt for 60s | the write is blocked; the permission-gate log shows `timed out (default deny)` |
 | Gateway starts hardened | `docker compose ... up` then `docker compose ... ps` | `mcp-gateway` is healthy with `cap_drop: ALL` + read-only rootfs. If it fails to start, relax `cap_drop` to the minimum it reports needing (see the compose comment). |
 
 **6. Inspect the audit trail**
 
-Both logs live on the `pi-sessions` volume, outside the agent's read-only rootfs:
+Both logs live on the `pi-logs` volume, outside the agent's read-only rootfs:
 
 ```sh
-docker compose -f src/infrastructure/compose.yaml exec pi cat /home/pi/sessions/audit.jsonl       # file ops
-docker compose -f src/infrastructure/compose.yaml exec pi cat /home/pi/sessions/permissions.jsonl # approvals
+docker compose -f src/infrastructure/compose.yaml exec pi cat /var/log/pi/audited-tools/audit.jsonl    # file ops
+docker compose -f src/infrastructure/compose.yaml exec pi cat /var/log/pi/permission-gate/audit.jsonl  # approvals
 ```
 
 ## The docker.sock trade-off (read this)

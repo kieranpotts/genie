@@ -27,7 +27,7 @@ describe('makeDecision', () => {
 describe('DecisionLog.record', () => {
   it('appends one JSON line per decision', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'permgate-'))
-    const file = join(dir, 'permissions.jsonl')
+    const file = join(dir, 'audit.jsonl')
     try {
       const log = new DecisionLog(file)
       await log.record(makeDecision('write', 'approved', 'user approved', 'write: /p/a', new Date('2026-01-01T00:00:00Z')))
@@ -41,8 +41,21 @@ describe('DecisionLog.record', () => {
     }
   })
 
+  it('creates the parent directory if it does not exist', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'permgate-'))
+    const file = join(dir, 'nested', 'deeper', 'audit.jsonl')
+    try {
+      const log = new DecisionLog(file)
+      await log.record(makeDecision('write', 'approved', 'user approved'))
+      const lines = (await readFile(file, 'utf8')).trimEnd().split('\n')
+      assert.equal(lines.length, 1)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('does not throw when the target path is unwritable', async () => {
-    const log = new DecisionLog('/nonexistent-dir/permissions.jsonl')
+    const log = new DecisionLog('/nonexistent-dir/permission-gate/audit.jsonl')
     await log.record(makeDecision('write', 'denied', 'x'))
     assert.ok(true)
   })

@@ -22,7 +22,7 @@ import { DecisionLog, makeDecision } from './decision-log.ts'
 
 /** Where decisions are logged. Outside the writable tree (see compose). */
 const LOG_ENV = 'PERMISSION_GATE_LOG'
-const DEFAULT_LOG = '/home/pi/sessions/permissions.jsonl'
+const DEFAULT_LOG = '/var/log/pi/permission-gate/audit.jsonl'
 
 /** Confirmation timeout in milliseconds; on expiry the call is denied. */
 const CONFIRM_TIMEOUT_MS = 60_000

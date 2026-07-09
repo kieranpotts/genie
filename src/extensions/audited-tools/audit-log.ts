@@ -8,7 +8,8 @@
  * agent's writable tree (see the architecture doc's audit-trail section).
  */
 
-import { appendFile } from 'node:fs/promises'
+import { appendFile, mkdir } from 'node:fs/promises'
+import { dirname } from 'node:path'
 
 /** One audit record. `status` distinguishes allowed/denied/errored calls. */
 export interface AuditEntry {
@@ -60,15 +61,25 @@ export function makeEntry (
 /** Append-only sink writing audit lines to a file. */
 export class AuditLog {
   private readonly filePath: string
+  private dirEnsured = false
 
   constructor (filePath: string) {
     this.filePath = filePath
+  }
+
+  /** Create the log's parent directory if absent. Idempotent; the recursive
+   * mkdir is a no-op once the directory exists, so we only attempt it once. */
+  private async ensureDir (): Promise<void> {
+    if (this.dirEnsured) return
+    await mkdir(dirname(this.filePath), { recursive: true })
+    this.dirEnsured = true
   }
 
   /** Append one entry. Never throws into the caller — logging must not break a
    * tool; a failed write is swallowed (the operation's own result still stands). */
   async record (entry: AuditEntry): Promise<void> {
     try {
+      await this.ensureDir()
       await appendFile(this.filePath, formatEntry(entry), { encoding: 'utf8' })
     } catch {
       /* Best-effort audit; do not fail the tool because logging failed. */

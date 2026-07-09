@@ -31,7 +31,7 @@ const AUDIT_ENV = 'AUDITED_TOOLS_LOG'
 const BASH_ALLOWLIST_ENV = 'AUDITED_BASH_ALLOWLIST'
 
 const DEFAULT_ROOT = '/projects/active'
-const DEFAULT_LOG = '/home/pi/sessions/audit.jsonl'
+const DEFAULT_LOG = '/var/log/pi/audited-tools/audit.jsonl'
 /** A bash command may run for at most this long before being killed. */
 const BASH_TIMEOUT_MS = 30_000
 /** Cap captured output so a runaway command cannot flood the model context. */

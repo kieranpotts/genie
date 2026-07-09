@@ -43,8 +43,21 @@ describe('AuditLog.record', () => {
     }
   })
 
+  it('creates the parent directory if it does not exist', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'audit-'))
+    const file = join(dir, 'nested', 'deeper', 'audit.jsonl')
+    try {
+      const log = new AuditLog(file)
+      await log.record(makeEntry('read', 'allowed', { path: '/p/a' }))
+      const lines = (await readFile(file, 'utf8')).trimEnd().split('\n')
+      assert.equal(lines.length, 1)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('does not throw when the target path is unwritable', async () => {
-    const log = new AuditLog('/nonexistent-dir/audit.jsonl')
+    const log = new AuditLog('/nonexistent-dir/audited-tools/audit.jsonl')
     await log.record(makeEntry('read', 'allowed', { path: '/p/a' }))
     // Reaching here without throwing is the assertion.
     assert.ok(true)
