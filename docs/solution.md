@@ -1,15 +1,11 @@
 # The solution
 
-A combination of containerization plus Pi extensions can be used to strengthen
-the security profile of Pi agents.
-
-I settled on an architecture that revolves around three components:
+I settled on an architecture that revolves around four components:
 
 * A containerized Pi instance.
 * A containerized MCP server.
-* A proxy for routing traffic to remote and local models.
-
-A dedicated Docker network connects the components.
+* A proxy for routing traffic to both remote and local models.
+* A dedicated Docker network connecting the above.
 
 ```mermaid
 flowchart LR
@@ -25,24 +21,26 @@ flowchart LR
         end
 
         Proxy["Model proxy\n(holds API keys)"]
+        LocalModel[("Local model\nmanager")]
     end
 
-    Model[("Remote model\nhosting provider")]
+    RemoteModel[("Remote model\nhosting provider")]
 
     Pi -- "scoped file ops" --> MCP
     MCP -- "allowlisted access" --> FS
     Pi -- "model requests" --> Proxy
-    Proxy -- "authenticated requests" --> Model
+    Proxy -- "requests" --> LocalModel
+    Proxy -- "authenticated requests" --> RemoteModel
 ```
 
 ## Containerized Pi agent
 
-Pi runs in its own dedicated, hardened container — one that has no direct access
-to the host filesystem, no Docker socket, and not even the cloud credentials
-the harness needs to access remote model hosting providers.
+Pi runs in its own dedicated, hardened container — one that has no direct
+access to the host filesystem, no project mounts, no Docker socket
+(`docker.sock`), and no cloud API keys or other secrets.
 
-Users interact with Pi the same as normal. Only the plumbing beneath the agent
-changes.
+The user experience is unchanged. Users interact with Pi in the normal way.
+Only the plumbing beneath the agent changes.
 
 ## Containerized MCP server
 
@@ -80,7 +78,12 @@ the models it uses. It presents a unified OpenAI-compatible API and dynamically
 routes to local or cloud models based on rules you define. You can even
 configure it with per-model token budgets and rate limits.
 
-LiteLLM runs directly on the host (alongside Ollama).
+LiteLLM runs directly on the host (alongside Ollama), rather than in its own
+container like Pi and the MCP server. This is a deliberate trade-off: the
+proxy needs host-level access to reach local model servers such as Ollama,
+and it is the only component trusted to hold cloud credentials. It is,
+therefore, the one part of the architecture that sits outside the
+containerized isolation boundary.
 
 ```
 agent
