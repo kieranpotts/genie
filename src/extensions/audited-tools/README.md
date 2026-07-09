@@ -1,81 +1,105 @@
 # `audited-tools`
 
-This extension swaps Pi's built-in file and command tools for audited alternatives.
+This extension swaps Pi's built-in file and command tools for audited, safer
+alternatives.
 
-For this extension to work, Pi MUST be run with the `--no-builtin-tools` option.
-Started this way, Pi has no file or shell access. This extension will then
-provide its own `read`, `write`, `ls`, and `bash` — this time with the
-filesystem tools confined to an allowlisted workspace root and rejecting
-sensitive filenames, and `bash` confined to a command allowlist with shell
-metacharacters rejected.
+The extension then provides its own `read`, `write`, `ls`, and `bash` tools,
+replacing Pi's built-in tools with the same names. The replacement filesystem
+tools are confined to an allowlisted workspace root and they reject sensitive
+filenames. The replacement `bash` tools is confined to a command allowlist with
+dangerous shell metacharacters rejected.
 
 Every call through the replacement tools is logged to an append-only audit file.
 
-This extension provide a defense-in-depth layer to the agent harness architecture.
-Even if the MCP filesystem boundary is bypassed, no file or command operation
-happens inside the Pi agent, hardened by this extension, without passing a guard
-and being logged.
+This extension provides a defense-in-depth layer to the agent harness
+architecture. Even if the MCP filesystem boundary is bypassed, no file or
+command operation happens inside the Pi agent without passing a guard and
+being logged.
+
+> [!IMPORTANT]
+>
+> Pi MUST be run with the `--no-builtin-tools` option for this extension to be
+> effective. Started this way, Pi has no file or shell access of its own.
+> This extension then makes its own audited tools available.
+>
+> `--no-builtin-tools` is required for security, not for the extension to
+> function. If Pi is run without this flag, the extension still loads and its
+> four tools still override Pi's built-in `read`, `write`, `ls`, and `bash`
+> tools of the same name (though Pi shows a warning about the collision).
+>
+> All good. But without the `--no-builtin-tools` option, Pi's other built-in
+> tools — `edit`, `grep`, and `find` — have no audited replacement, so they
+> remain active. This means a misbehaving model could use these tools to edit
+> files outside the workspace, read sensitive files, or search arbitrary paths —
+> with no audit trail.
+>
+> Therefore, a full security profile requires `pi --no-builtin-tools`.
 
 ## What it does
 
 ### File tools (`read`, `write`, `ls`)
 
-Each of the three filesystem tools authorizes its `path` argument before any
-I/O. It works like this:
+Each filesystem tool checks its `path` argument before doing any I/O, and
+refuses it in two cases:
 
-1.  **Path allowlist.** \
-    The path is canonicalized (`resolve`) and confirmed to lie within the
-    configured root via a `relative()` check, which rejects any result
-    starting with `..`. This defeats directory traversal (eg.
-    `../../etc/passwd`) and prefix-collision attacks (`/projects/active-evil`
-    vs. `/projects/active`).
+- **Outside the workspace.** The path must resolve to somewhere within the
+  configured root — see the `AUDITED_TOOLS_ROOT` environment variable, below.
+  This blocks upwards directory traversal, eg. `../../etc/passwd`.
 
-2.  **Sensitive-file refusal.** \
-    Regardless of path, basenames matching secrets/key material (eg. `.env*`,
-    `id_rsa`, `*.pem`, `*.key`, `.netrc`, `credentials`, …) are refused.
+- **A sensitive file.** Names matching well-known secrets or key material —
+  eg. `.env*`, `id_rsa`, `*.pem`, `*.key`, `.netrc`, `credentials` —
+  are always refused, regardless where those files live in the filesystem.
 
 ### Command tool (`bash`)
 
-This vets the `command` string before running anything. It works like this:
+The replacement `bash` tool vets the `command` argument and refuses it in
+two cases:
 
-1.  **No shell, ever.** \
-    The command is never handed to a shell. **Control operators**
-    (`| & ; < > ` newline`) cause outright denial — these have meaning only
-    to a shell, so their only purpose here would be injection.
-    There is no good reason to allow these in commands, so there is no
-    configuration option to allow some control operators and not others.
-    This is the core defense.
+- **It contains shell control operators.** The only reason the characters
+  `|`, `&, `;`, `<`, and `>` would exist in a command is to attempt injection.
+  So command containing these characters are always rejected.
 
-2.  **Argument-content characters pass through.** \
-    `$ * ? ( ) { } \` are NOT rejected. These routinely appear inside a single
-    argument the program interprets itself (eg. `grep 'a.*b'`,
-    `find -name '*.ts'`, regexes, literal `$`). Because no shell runs, they
-    cannot expand, glob, or substitute — `$(whoami)` and `${HOME}` reach
-    the program as literal text. Rejecting them would needlessly
-    break common commands. Passing them is both safe and necessary.
+- **Its program is not on the allowlist.** The command's first token must be an
+  allowed program, which is then run directly with its remaining tokens as
+  literal arguments.
 
-3.  **Command allowlist.** \
-    After the control-operator check, the command is tokenized (honouring
-    quotes) and its first token (the program) must be on the allowlist.
-    The program then runs via `execFile` with `shell: false` and the remaining
-    tokens as literal arguments, so a vetted argument vector cannot be
-    reinterpreted.
+The replacement `bash` tool never invokes a shell. Instead, the vetted program
+is run via Node's `execFile` with the `shell: false` option. This passes the
+argument vector straight to the operating system rather than through `sh -c`.
+This matters because a shell is a full interpreter. Give it a string and it
+looks for pipes, semi-colons (`;`), `$(…)`, globs, and variable expansion —
+all of which make command injection possible.
 
-4.  **Bounded execution.** \
-    Runs in the workspace root with a 30s timeout and a 1 MB output cap.
+With no shell in the loop, there is nothing to interpret those constructs.
+Thus, the defensive here is structural, swapping the execution environment,
+rather than relying on effective sanitization of the input string.
 
-Default allowlist: read-only inspection (`ls`, `cat`, `head`, `tail`, `grep`,
-`find`, `wc`, `file`, `pwd`, `echo`, `which`, `stat`, `diff`, `tree`, `sort`,
-`uniq`, `cut`, `basename`, `dirname`) plus common dev tools (`git`, `node`,
-`npm`, `npx`, `python`, `python3`, `pip`, `make`, `cargo`, `go`).
+Characters like `$`, `*`, `?`, `(`, `)`, `{`, and `}` pass through as inert text.
+For example, `$(whoami)` reaches the program literally rather than expanding.
+So commands such as `grep 'a.*b'` work without being a risk.
 
-Each dev tool carries some surface (eg. `git` can run hooks, `npm` can run
-scripts) — narrow the set per deployment if that matters.
+Commands run only within the workspace root, with a 30s timeout, and a
+1 MB output cap.
 
-A denied call (either kind) returns an error to the model explaining the
-refusal. It never performs the operation.
+The following commands are allow-listed by default:
+
+- Read-only inspection commands:
+    `ls`, `cat`, `head`, `tail`, `grep`,
+    `find`, `wc`, `file`, `pwd`, `echo`,
+    `which`, `stat`, `diff`, `tree`, `sort`,
+    `uniq`, `cut`, `basename`, `dirname`
+
+- Common dev tools:
+    `git`, `node`, `npm`, `npx`, `python`,
+    `python3`, `pip`, `make`, `cargo`, `go`
+
+A denied call returns an error to the model explaining the refusal.
 
 ## Configuration
+
+The following environment variables can be used to adjust the behavior of this
+extension. The variables must be exported into the environment in which the Pi
+process is running — so, in the guest environment, if the agent is containerized.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -83,9 +107,7 @@ refusal. It never performs the operation.
 | `AUDITED_TOOLS_LOG` | `/var/log/pi/audited-tools/audit.jsonl` | Append-only audit log path. |
 | `AUDITED_BASH_ALLOWLIST` | Built-in defaults, see above | Comma-separated program allowlist. A leading `+` extends the default (`+terraform,kubectl`); otherwise it replaces it (`ls,cat,git`). |
 
-These are set in the `compose.yaml` file for the hardened container, so
-making these environment variables available to the guest environment in which
-Pi runs.
+These are set in the `compose.yaml` file for the hardened container.
 
 If running Pi inside the hardened container, the `AUDITED_TOOLS_LOG` path MUST
 be within a **writable volume** mounted from the host. Without this, the write
@@ -109,7 +131,10 @@ per line, in fixed key order, for grep-ability. The values for `status` are:
 
 ## Extension structure
 
-- `index.ts`: Thin glue to Pi's `ExtensionAPI`. Registers the `read`, `write`, `ls`, and `bash` replacements.
+- `index.ts`: Thin glue to Pi's `ExtensionAPI`. Reads the environment and wires the two halves together.
+- `register-fs.ts`: Registers the `read`, `write`, and `ls` replacements (uses `path-guard.ts`).
+- `register-bash.ts`: Registers the `bash` replacement (uses `bash-policy.ts`).
 - `path-guard.ts`: Path allowlist + sensitive-filename gate.
-- `bash-policy.ts`: Command vetting (control-operator rejection, tokenizing, program allowlist, policy building).
+- `bash-policy.ts`: Command vetting (control-operator rejection, tokenizing, program allowlist).
 - `audit-log.ts`: Record formatting and writing.
+- `tool-result.ts`: Shared success/error result shapes.
