@@ -59,9 +59,3 @@ via the `pi-logs` volume, mounted from `/var/log/pi`.
 
 The log file path does not need to exist, because the extension will create it,
 and its parent directory, on first write.
-
-## Extension structure
-
-- `index.ts`: The `tool_call` handler. iT handles the classify → confirm → log → block/allow sequence.
-- `policy.ts`: Defines which tools are gated. Applies deny-by-default logic.
-- `decision-log.ts`: Formats audit log entries, and writes them to disk.

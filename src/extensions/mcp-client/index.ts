@@ -6,9 +6,15 @@
  * as a Pi tool. The agent then reaches project files only through these
  * mediated tools — never via a direct filesystem mount.
  *
+ * Mediation, not bypass: this client only forwards `tools/call` requests to the
+ * MCP server, which is what enforces the path and operation allowlist. The
+ * client itself never touches the filesystem, so it adds no way around that
+ * boundary.
+ *
  * The wire protocol and the MCP↔Pi mapping live in pure, unit-tested helpers
  * (`mcp-client.ts`, `tool-mapping.ts`); this entry point is the thin glue to
- * the `ExtensionAPI`.
+ * the `ExtensionAPI`. Each registered tool passes the MCP input schema straight
+ * through and flattens MCP result content back into Pi's tool-result shape.
  */
 
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'

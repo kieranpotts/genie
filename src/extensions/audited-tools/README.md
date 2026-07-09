@@ -132,13 +132,3 @@ per line, in fixed key order, for grep-ability. The values for `status` are:
 {"ts":"2026-06-04T12:00:02.000Z","tool":"bash","status":"allowed","command":"git status"}
 {"ts":"2026-06-04T12:00:03.000Z","tool":"bash","status":"denied","command":"ls; rm -rf /","reason":"command contains disallowed shell operators: ;"}
 ```
-
-## Extension structure
-
-- `index.ts`: Thin glue to Pi's `ExtensionAPI`. Reads the environment and wires the two halves together.
-- `register-fs.ts`: Registers the `read`, `write`, and `ls` replacements (uses `path-guard.ts`).
-- `register-bash.ts`: Registers the `bash` replacement (uses `bash-policy.ts`).
-- `path-guard.ts`: Path allowlist + sensitive-filename gate.
-- `bash-policy.ts`: Command vetting (control-operator rejection, tokenizing, program allowlist).
-- `audit-log.ts`: Record formatting and writing.
-- `tool-result.ts`: Shared success/error result shapes.
