@@ -31,10 +31,24 @@ A denied call (either kind) returns an error to the model explaining the refusal
 | Variable | Default | Meaning |
 |---|---|---|
 | `AUDITED_TOOLS_ROOT` | `/projects/active` | The single directory the tools are confined to. |
-| `AUDITED_TOOLS_LOG` | `/var/log/pi/audited-tools/audit.jsonl` | Append-only audit log path. Should live on a volume outside the read-only rootfs; the extension creates the parent directory on first write. |
+| `AUDITED_TOOLS_LOG` | `/var/log/pi/audited-tools/audit.jsonl` | Append-only audit log path. Optional — when unset, the default above is used. The extension creates the parent directory on first write. |
 | `AUDITED_BASH_ALLOWLIST` | (built-in default) | Comma-separated program allowlist. A leading `+` extends the default (`+terraform,kubectl`); otherwise it replaces it (`ls,cat,git`). |
 
 These are set by `src/infrastructure/compose.yaml` for the hardened container.
+
+### Deployment requirement
+
+The default log path lives under `/var/log/pi/`, which **must be a writable
+volume**. The hardened container runs with a read-only rootfs, so without a
+volume mounted there the log writes fail — and because logging is best-effort
+(a failed write never blocks a tool), the failure is **silent**: calls proceed
+but are not recorded.
+
+`src/infrastructure/compose.yaml` provides this via the `pi-logs` volume mounted
+at `/var/log/pi`. If you deploy this extension elsewhere, either mount a writable
+volume at `/var/log/pi/` or set `AUDITED_TOOLS_LOG` to a path that is writable.
+Setting the env var is optional — it overrides the default; mounting a writable
+location for the log is not.
 
 > There is deliberately **no** metacharacter configuration. Tracing each character showed two groups: control operators (`| & ; < > ` newline`) can never do anything useful when "allowed" (no shell runs, so they would be useless literals) — so they are permanently rejected; argument-content characters (`$ * ? ( ) { } \`) are already passed through safely as inert literals — so no toggle is needed. The only tunable is the program allowlist above.
 

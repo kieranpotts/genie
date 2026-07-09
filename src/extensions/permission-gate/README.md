@@ -6,23 +6,18 @@ timeout or a missing interactive UI blocks the operation.
 
 Every decision, whether approved or denied, is logged to an append-only file.
 
-
-
-## Relationship to `audited-tools`
-
-The two are complementary and independent:
-
-- `audited-tools` enforces *where* and *what* (path allowlist, sensitive-file refusal) — a non-interactive, policy gate.
-- `permission-gate` enforces *whether the human agrees* — an interactive gate on mutating calls.
-
-Run both for layered control. Each keeps its own decision/audit log (and its own copy of the small log helper, since the verbatim-copy installer requires each extension directory to be self-contained).
-
+This extension complements the [`audited-tools`](../audited-tools/) extension.
+The permission gate enables an interactive dialog in the UI to get user
+confirmation of potentially dangerous or mutating tool calls. The audited tools
+extension implements another gate, this one non-interactive and defined in
+hard-coded policies. Each extension keeps its own separate audit log.
 
 ## What it does
 
-On every `tool_call` event, which fires before a tool executes:
+This extension runs the following logic sequence on every `tool_call` event,
+which fires before a tool is invoked:
 
-1.  **Classify.** \
+1.  **Classify the tool: read-only versus mutating/dangerous** \
     Read-only tools (`read`, `ls`, `grep`, `find`, and their MCP equivalents)
     pass through silently. Mutating tools (`write`, `edit`, `bash`, and
      custom `*_write_file` / `*_edit_file` / etc.) are gated.
@@ -30,16 +25,16 @@ On every `tool_call` event, which fires before a tool executes:
 2.  **Confirm.** \
     The user is shown the tool name and a summary of the operation
     (the path, or a truncated command) and asked to approve.
-    The dialog has a timeout of 60s, after which the call is denied.
 
 3.  **Deny by default.** \
-    The confirmation dialog has a timeout of 60s, after which the call is
+    The confirmation dialog has a timeout of 60s, after which time the call is
     denied. A non-interactive UI will also block the call. Only an explicit
     approval by the user will allow the call.
 
 4.  **Log.** \
-    The decision, whether approved or denied,  is appended as one JSON line
-    to the decision log. A representative sample is shown below.
+    The decision, whether approved or denied, is appended as one JSON line
+    to a decision log, which lives on a volume mounted from `/var/log/pi/`
+    on the host system. A representative sample of log entries is shown below.
 
 ```json
 {"ts":"2026-06-04T12:00:00.000Z","tool":"write","status":"approved","reason":"user approved","detail":"write: /projects/active/x.ts"}
@@ -48,12 +43,25 @@ On every `tool_call` event, which fires before a tool executes:
 
 ## Configuration
 
+The following environment variables can be used to adjust the behavior of this
+extension. The variables must be exported into the environment in which the Pi
+process is running — so, in the guest environment, if the agent is containerized.
+
 | Variable | Default | Description |
 |---|---|---|
-| `PERMISSION_GATE_LOG` | `/var/log/pi/permission-gate/audit.jsonl` | Append-only decision log path. Should live on a volume outside the read-only rootfs; the extension creates the parent directory on first write. |
+| `PERMISSION_GATE_LOG` | `/var/log/pi/permission-gate/audit.jsonl` | Append-only decision log path. |
 
-## Structure
+If running Pi inside the hardened container, the `PERMISSION_GATE_LOG` path MUST
+be within a **writable volume** mounted from the host. Without this, the write
+operation will fail silently, because the hardened container runs with a
+read-only rootfs. The hardened container's `compose.yaml` file provides this
+via the `pi-logs` volume, mounted from `/var/log/pi`.
+
+The log file path does not need to exist, because the extension will create it,
+and its parent directory, on first write.
+
+## Extension structure
 
 - `index.ts`: The `tool_call` handler. iT handles the classify → confirm → log → block/allow sequence.
-- `policy.ts`: Defines which tool are gated. Applies deny-by-default logic.
-- `decision-log.ts`: Formats audit entries and writes them to the decision log.
+- `policy.ts`: Defines which tools are gated. Applies deny-by-default logic.
+- `decision-log.ts`: Formats audit log entries, and writes them to disk.
