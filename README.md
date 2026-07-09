@@ -91,7 +91,7 @@ their READMEs, which provide detailed usage instructions.
 - [**`pickling-penguins`**](../src/extensions/pickling-penguins/README.md): \
   Cosmetic-only replacement for Pi's "Working..." status line. Just for fun.
 
-An install script is provided to automated the installation of these extensions
+An install script is provided to automate the installation of these extensions
 into Pi. First, make the script executable:
 
 ```sh

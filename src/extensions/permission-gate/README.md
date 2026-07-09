@@ -1,16 +1,16 @@
 # `permission-gate`
 
-Requires explicit, interactive user confirmation before any mutating tool call
-runs — writes, edits, and shell execution. Confirmation defaults to deny, so a
-timeout or a missing interactive UI blocks the operation.
+Out-of-the-box, Pi has no permission popups. Every tool call requested by a
+model is honored by the harness.
+
+This extension changes that. With this extension installed, Pi requires explicit,
+interactive user confirmation before any mutating tool call runs — writes,
+edits, and shell execution.
+
+Confirmation defaults to deny, so a timeout or a missing interactive UI blocks
+the operation.
 
 Every decision, whether approved or denied, is logged to an append-only file.
-
-This extension complements the [`audited-tools`](../audited-tools/) extension.
-The permission gate enables an interactive dialog in the UI to get user
-confirmation of potentially dangerous or mutating tool calls. The audited tools
-extension implements another gate, this one non-interactive and defined in
-hard-coded policies. Each extension keeps its own separate audit log.
 
 ## What it does
 
