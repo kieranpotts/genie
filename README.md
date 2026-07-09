@@ -108,19 +108,19 @@ extensions, skills, etc.:
 
 The `./run/install` script enables the following Pi extensions:
 
-- [`pickling-penguins`](../src/extensions/pickling-penguins/README.md):
+- [**`pickling-penguins`**](../src/extensions/pickling-penguins/README.md): \
   Cosmetic-only replacement for Pi's "Working..." status line.
 
-- [`audited-tools`](../src/extensions/audited-tools/README.md):
+- [**`audited-tools`**](../src/extensions/audited-tools/README.md): \
   Audited, allowlisted replacements for Pi's `read`, `write`, `ls`, and `bash`
   tools, for use with `--no-builtin-tools`. Part of the security hardening
   infrastructure (see below)
 
-- [`permission-gate`](../src/extensions/permission-gate/README.md):
+- [**`permission-gate`**](../src/extensions/permission-gate/README.md): \
   Interactive, default-deny confirmation gate on mutating tool calls. Part
   of the security hardening infrastructure (see below).
 
-- [`mcp-client`](../src/extensions/mcp-client/README.md):
+- [**`mcp-client`**](../src/extensions/mcp-client/README.md): \
   MCP client giving Pi mediated filesystem access through the Docker MCP Toolkit
   gateway. Part of the security hardening infrastructure (see below)
 
@@ -138,8 +138,8 @@ Plus every model request, tool call, and filesystem action an agent performs
 is logged.
 
 These components are installed and managed separately from the Pi extension.
-See [src/infrastructure/README.md](./src/infrastructure/README.md) for the
-full operator runbook.
+See the [**infrastructure runbook**](./src/infrastructure/README.md) for
+instructions.
 
 ## 📓 Developer documentation
 
