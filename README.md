@@ -8,7 +8,8 @@ Pi is a minimal coding agent, a baseline framework for building your own
 harness, rather a finished product. Out of the box it runs with full system
 permissions and zero security controls. This project ships a suite of Pi
 extensions, plus supporting infrastructure including a hardened container
-and a gated MCP server, to compose a safe environment in which to run agents.
+and a gated MCP server, to compose a safe, controlled environment in which
+to run agents.
 
 Together which my [agent skills][agent-skills] and [Modelfiles](ollama-modelfiles)
 for Ollama, this is my custom AI agent harness.
@@ -29,37 +30,81 @@ and in your `PATH`:
 npm install -g @earendil-works/pi-coding-agent
 ```
 
-The installer warns if `pi` is not found, but still stages the extensions so
-they are ready once Pi is installed.
+## 🧭 Usage
 
-The `./run/install` script requires Bash. If you don't have this, no worries,
-you can just copy the extensions into `~/.pi/agent/extensions/` yourself.
-See the manual installation instructions in the section below.
+There are two parts to this project:
 
-## 📦 Installation
+* A suite of extensions for the Pi coding agent harness.
 
-make the `./run/instal` script executable:
+* Configurations for other tools with which Pi interacts, including an MCP
+  server and a model proxy, creating a secure infrastructure within which AI
+  agents operate.
+
+Together, both sets of components form a cohesive, robust agent harness
+architecture.
+
+```mermaid
+flowchart LR
+  subgraph Container["<b>Hardened container</b>"]
+    subgraph Pi["<b>Pi</b>"]
+      Core["Pi core"]
+      MC["mcp-client"]
+      AT["audited-tools"]
+      PG["permission-gate"]
+    end
+  end
+
+  MCP["Gated MCP server"]
+  Proxy["Model proxy<br/>(holds API keys)"]
+  FS[("Project files")]
+  Models[("Local &amp; cloud models")]
+
+  MC -->|"tool &amp; file calls"| MCP
+  MCP -->|"allowlisted access"| FS
+  Core -->|"model requests<br/>(no API keys)"| Proxy
+  Proxy -->|"authenticated"| Models
+
+  classDef guard fill:#f0fff4,stroke:#27ae60,color:#000;
+  classDef agent fill:#f5f7ff,stroke:#2c5fb3,color:#000;
+  class MCP,Proxy,Container guard;
+  class Core,MC,AT,PG agent;
+```
+
+### Pi extensions
+
+This repository packages the following Pi extensions. Click the links to see
+their READMEs, which provide detailed usage instructions.
+
+- [**`audited-tools`**](../src/extensions/audited-tools/README.md): \
+  Audited, allowlisted replacements for Pi's `read`, `write`, `ls`, and `bash`
+  tools, for use with `--no-builtin-tools`. Part of the security hardening
+  infrastructure (see below)
+
+- [**`permission-gate`**](../src/extensions/permission-gate/README.md): \
+  Interactive, default-deny confirmation gate on mutating tool calls. Part
+  of the security hardening infrastructure (see below).
+
+- [**`mcp-client`**](../src/extensions/mcp-client/README.md): \
+  MCP client giving Pi mediated filesystem access through the Docker MCP Toolkit
+  gateway. Part of the security hardening infrastructure (see below)
+
+- [**`pickling-penguins`**](../src/extensions/pickling-penguins/README.md): \
+  Cosmetic-only replacement for Pi's "Working..." status line. Just for fun.
+
+An install script is provided to automated the installation of these extensions
+into Pi. First, make the script executable:
 
 ```sh
 chmod +x run/install
 ```
 
-Then run it from the root of this repository:
+Then run the script from the root of this repository:
 
 ```sh
 ./run/install
 ```
 
-It copies extensions from this repository's `src/extensions/` directory into
-Pi's extensions directory, `~/.pi/agent/extensions/`, where Pi will
-auto-discover them next time it starts.
-
-The same command can be used to update the installed extensions to the latest
-versions. If an extension is already installed, it is first backed up to
-`~/.pi/agent/extensions/<name>.backup.<timestamp>/` before overwriting.
-
-With no arguments, every available extension is installed. You can target
-specific extensions to install. Other options are:
+The available options are:
 
 | Invocation              | Effect                                |
 | ----------------------- | ------------------------------------- |
@@ -79,50 +124,30 @@ Examples:
 ./run/install --list                      # See what's available to install.
 ```
 
+Extensions are installed into `~/.pi/agent/extensions/`, where Pi will
+auto-discover them next time it starts.
+
+The same script can be used to update the installed extensions to the latest
+versions in this repository. If an extension is already installed, it is first
+backed-up to `~/.pi/agent/extensions/<name>.backup.<timestamp>/`.
+
 Alternatively, you can manually install extensions simply by copying them
-over:
+over. There is no build step.
 
 ```sh
 cp -R src/extensions/pickling-penguins ~/.pi/agent/extensions/pickling-penguins
 ```
 
-After installing, start a fresh Pi session:
-
-```sh
-pi
-```
-
-Or, if you're already in Pi, use the `/reload` prompt to reload all
-extensions, skills, etc.:
+New and updates extensions will be loaded next time you run `pi`. If you're
+already in Pi, use the `/reload` prompt to reload all extensions, skills, etc.:
 
 ```sh
 /reload
 ```
 
 > [!TIP]
-> `/reload` is also useful for hot-reloading extensions during their development.
-
-## 🧭 Usage
-
-### Extensions
-
-The `./run/install` script enables the following Pi extensions:
-
-- [**`pickling-penguins`**](../src/extensions/pickling-penguins/README.md): \
-  Cosmetic-only replacement for Pi's "Working..." status line.
-
-- [**`audited-tools`**](../src/extensions/audited-tools/README.md): \
-  Audited, allowlisted replacements for Pi's `read`, `write`, `ls`, and `bash`
-  tools, for use with `--no-builtin-tools`. Part of the security hardening
-  infrastructure (see below)
-
-- [**`permission-gate`**](../src/extensions/permission-gate/README.md): \
-  Interactive, default-deny confirmation gate on mutating tool calls. Part
-  of the security hardening infrastructure (see below).
-
-- [**`mcp-client`**](../src/extensions/mcp-client/README.md): \
-  MCP client giving Pi mediated filesystem access through the Docker MCP Toolkit
-  gateway. Part of the security hardening infrastructure (see below)
+> `/reload` is a useful for hot-reloading extensions
+> during their development.
 
 ### Security hardening infrastructure
 
@@ -145,9 +170,7 @@ instructions.
 
 See the [contributing guidelines](./CONTRIBUTING.md).
 
-## 🎨 Design docs
-
-See the [docs/](./docs/) directory for design decisions and trade-offs.
+See also the [docs/](./docs/) directory for design decisions and trade-offs.
 
 -----
 
