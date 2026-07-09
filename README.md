@@ -86,19 +86,21 @@ over:
 cp -R src/extensions/pickling-penguins ~/.pi/agent/extensions/pickling-penguins
 ```
 
-After installing, start or restart Pi:
+After installing, start a fresh Pi session:
 
 ```sh
 pi
 ```
 
-Or, if you're already in Pi, use the `/reload` prompt to reload the installed
-extensions (this is also useful for hot-reloading extensions during their
-development):
+Or, if you're already in Pi, use the `/reload` prompt to reload all
+extensions, skills, etc.:
 
 ```sh
 /reload
 ```
+
+> [!TIP]
+> `/reload` is also useful for hot-reloading extensions during their development.
 
 ## 🧭 Usage
 

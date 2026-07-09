@@ -9,28 +9,28 @@ I settled on an architecture that revolves around four components:
 
 ```mermaid
 flowchart LR
-    subgraph Host["Host machine"]
-        FS[("Project filesystem")]
+  subgraph Host["Host machine"]
+    FS[("Project filesystem")]
 
-        subgraph AgentContainer["Hardened container"]
-            Pi["Pi agent"]
-        end
-
-        subgraph MCPContainer["MCP server container"]
-            MCP["MCP server\n(path & operation allowlists,\ncall logging)"]
-        end
-
-        Proxy["Model proxy\n(holds API keys)"]
-        LocalModel[("Local model\nmanager")]
+    subgraph AgentContainer["Hardened container"]
+      Pi["Pi agent"]
     end
 
-    RemoteModel[("Remote model\nhosting provider")]
+    subgraph MCPContainer["MCP server container"]
+      MCP["MCP server\n(path & operation allowlists,\ncall logging)"]
+    end
 
-    Pi -- "scoped file ops" --> MCP
-    MCP -- "allowlisted access" --> FS
-    Pi -- "model requests" --> Proxy
-    Proxy -- "requests" --> LocalModel
-    Proxy -- "authenticated requests" --> RemoteModel
+    Proxy["Model proxy\n(holds API keys)"]
+    LocalModel[("Local model\nmanager")]
+  end
+
+  RemoteModel[("Remote model\nhosting provider")]
+
+  Pi -- "scoped file ops" --> MCP
+  MCP -- "allowlisted access" --> FS
+  Pi -- "model requests" --> Proxy
+  Proxy -- "requests" --> LocalModel
+  Proxy -- "authenticated requests" --> RemoteModel
 ```
 
 The security profile offered by this architecture meets my
@@ -71,6 +71,28 @@ tool calls. The containerized MCP server enforces what tool calls are allowed.
 Thus, the MCP server becomes the gatekeeper to the host system. Access is
 mediated using scoped allowlists. Every call is logged.
 
+```mermaid
+sequenceDiagram
+  participant Pi as pi-container
+  participant MCP as mcp-server (gatekeeper)
+  participant FS as project-a volume
+
+  Note over Pi,FS: Legitimate file write.
+  Pi->>MCP: write_file("/projects/proj-a/src/x.ts", …)
+  MCP->>MCP: resolve() + relative() within root? ✓
+  MCP->>MCP: append audit log entry
+  MCP->>FS: write bytes
+  FS-->>MCP: ok
+  MCP-->>Pi: { ok: true }
+
+  Note over Pi,FS: Traversal attempt — denied at boundary.
+  Pi->>MCP: read_file("/projects/project-a/../../etc/passwd")
+  MCP->>MCP: resolve() escapes root → relative() starts with ".."
+  MCP->>MCP: log denial
+  MCP-->>Pi: { error: "path outside allowlist" }
+  Note right of FS: filesystem not touched
+```
+
 This aligns with emerging best practices for secure agent harnesses. MCP
 (Model Context Protocol) has emerged as the _de facto_ isolation boundary for
 agents, controlling an agent's access to filesystems, tools, and data, instead
@@ -99,21 +121,93 @@ This is an emerging pattern, and [LiteLLM][lite-llm] is emerging as the
 _de facto_ standard. It is a lightweight model router, sitting between the agent
 and the models the agent uses. LiteLLM presents a unified OpenAI-compatible API.
 
+```mermaid
+sequenceDiagram
+  participant Pi as pi-container
+  participant Proxy as LiteLLM proxy
+  participant Cloud as cloud model
+
+  Note over Pi,Cloud: Model call — credential never reaches agent
+  Pi->>Proxy: completion request (no API key)
+  Proxy->>Cloud: request + injected key
+  Cloud-->>Proxy: completion
+  Proxy-->>Pi: completion
+```
+
 Moreover, LiteLLM can route requests to different local or cloud models based
 on rules you define, allowing for the configuration of dynamic model routing
 in response to the task at hand. You can also configure LiteLLM with per-model
 token budgets and rate limits.
-
-LiteLLM runs directly on the host, rather than in its own container like Pi and
-the MCP server. This is because the proxy needs host-level access to reach local
-model servers such as Ollama. It holds all cloud API keys and other model
-credentials, so they stay out of reach of the model, too.
 
 ```
 agent
   └── model router - eg. LiteLLM, Ollama proxy
         ├── local: ollama - low latency, no data leaves machine
         └── cloud: Anthropic API - for frontier model access
+```
+
+LiteLLM runs directly on the host, rather than in its own container like Pi and
+the MCP server. This is because the proxy needs host-level access to reach local
+model servers such as Ollama. It holds all cloud API keys and other model
+credentials, so they stay out of reach of the model, too.
+
+## High-level design
+
+The diagram below shows the trust boundaries and what crosses each.
+
+```mermaid
+flowchart TB
+  subgraph Host["Host machine"]
+    Ollama["<b>Ollama :11434</b><br/>(bridge gateway only)"]
+    Proxy["<b>LiteLLM proxy :4000</b><br/>(holds cloud model API keys)"]
+    Cloud["<b>Anthropic / OpenAI</b><br/>(cloud)"]
+    Proxy -->|"capable"| Cloud
+    Proxy -->|"fast / cheap"| Ollama
+  end
+
+  subgraph Net["Docker network: agent-net"]
+    Pi["<b>pi-container</b><br/>Pi + MCP client extension<br/>(no FS, no docker.sock, no keys)"]
+    MCP["<b>mcp-server-container</b><br/>path + operation allowlist, logging<br/>(only component with FS access)"]
+    VolA[("proj-a volume")]
+    VolB[("proj-b volume")]
+
+    Pi -->|"MCP tool calls<br/>(HTTP/SSE or stdio)"| MCP
+    MCP --> VolA
+    MCP --> VolB
+  end
+
+  Pi -->|"model calls<br/>host-gateway:4000"| Proxy
+
+  classDef danger fill:#fff0f0,stroke:#c0392b,color:#000;
+  classDef guard fill:#f0fff4,stroke:#27ae60,color:#000;
+  classDef agent fill:#f5f7ff,stroke:#2c5fb3,color:#000;
+  class Proxy,MCP guard;
+  class Pi agent;
+  class Cloud danger;
+```
+
+The view below adds some concrete mount/volume detail:
+
+```
+Host Machine
+│
+├── Ollama :11434 - bound to bridge gateway only, not 0.0.0.0
+├── LiteLLM proxy :4000 - holds cloud model API keys, dynamic routing
+│     ├── routes "fast/cheap" → Ollama local model
+│     └── routes "capable"    → Anthropic / OpenAI cloud
+│
+└── Docker network: agent-net
+    │
+    ├── pi-container
+    │   ├── Pi process + MCP client extension
+    │   └── /home/pi - Pi config + session history (named volume)
+    │                  No project mounts, no docker.sock, no keys
+    │
+    └── mcp-server-container
+        ├── MCP server process
+        │   Enforces: path allowlist, operation allowlist, per-project perms, logging
+        ├── /projects/proj-a - scoped named volume (read/write)
+        └── /projects/proj-b - scoped named volume (read/write)
 ```
 
 [docker-mcp-toolkit]: https://docs.docker.com/ai/mcp-catalog-and-toolkit/toolkit/
