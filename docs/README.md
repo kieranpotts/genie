@@ -7,5 +7,4 @@ and its supporting infrastructure.
 - [**Requirements**](./requirements.md)
 - [**The solution**](./solution.md)
 - [**Hardening**](./hardening.md)
-- [**Trade-offs**](./trade-offs.md)
 - [**Alternatives**](./alternatives.md)
