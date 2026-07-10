@@ -1,7 +1,8 @@
 # The solution
 
-I settled on an architecture that revolves around four components:
+I settled on an architecture that revolves around five components:
 
+* Pi extensions.
 * A containerized Pi instance.
 * A containerized MCP server.
 * A proxy for routing traffic to both remote and local models.
@@ -36,6 +37,47 @@ flowchart LR
 The security profile offered by this architecture meets my
 [requirements](./requirements.md). It suits the regulated industries
 I work in, and it travels well between different development environments.
+
+## Pi extensions
+
+Out-of-the-box, Pi is a minimal coding agent harness with full system privileges
+and no security controls. For example, Pi's built-in tools are run without any
+permissions gates — so models can use them however they like, no restrictions.
+
+Instead of building security controls into the core, Pi provides n extension
+system that allows users to customize the harness's security profile to their
+own specific requirements.
+
+Extensions are TypeScript modules that can intercept every tool call, block
+operations, modify results, and interact with the user.
+
+The key security hooks available to extensions are:
+
+- **`tool_call` event.** Fires before any tool executes. Can block with
+  `{ block: true, reason: string }`. Receives the full tool name and input
+  parameters, which are mutable. An extension can both inspect and modify
+  arguments before execution. This is the place to implement path allowlists,
+  command blocklists, and confirmation prompts.
+
+- **`tool_result` event.** Fires after tool execution, before the result is
+  returned to the model. Can modify the result. Handlers chain as middleware.
+  Can be used to redact sensitive content from tool output before it enters
+  the model context.
+
+- **`before_provider_request` event.** Fires after the provider payload is
+  built, immediately before the outbound model API call. Can inspect or replace
+  the full payload. The correct hook for auditing all outbound model traffic.
+
+- **`before_agent_start` event.** Fires before each agent turn. Can inject
+  context, modify the system prompt, and record that a turn is beginning —
+  useful for audit trail entries.
+
+- **Tool overriding.** Extensions can replace built-in tools (`read`, `bash`,
+  `edit`, `write`, `grep`, `find`, `ls`) entirely by registering a tool with
+  the same name. Combined with `--no-builtin-tools` (which starts Pi with no
+  built-in tools at all), this allows constructing a fully locked-down, audited
+  tool surface from scratch, rather than layering restrictions on top of
+  unrestricted defaults.
 
 ## Containerized Pi agent
 
