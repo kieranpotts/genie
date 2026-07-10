@@ -9,9 +9,14 @@ harness, rather a finished product. Out of the box it runs with full system
 permissions and zero security controls. This project ships a suite of Pi
 extensions, plus supporting infrastructure including a hardened container
 and a gated MCP server, to compose a safe, controlled environment in which
-to run agents.
+to run agents in Pi.
 
-Together which my [agent skills][agent-skills] and [Modelfiles](ollama-modelfiles)
+The objective of this project is to compose a secure coding agent framework,
+isolated from the host system, with full audit trails for every action
+performed by agents, and seamlessly supporting a mix of both local
+and cloud models.
+
+Together with my [agent skills][agent-skills] and [Modelfiles](ollama-modelfiles)
 for Ollama, this is my custom AI agent harness.
 
 > [!WARNING]
@@ -29,6 +34,12 @@ and in your `PATH`:
 ```sh
 npm install -g @earendil-works/pi-coding-agent
 ```
+
+To use the full hardened agent infrastructure, the following tools are required,
+too:
+
+- [Docker][docker] and the [Docker MCP Toolkit][docker-mcp-toolkit]
+- [LiteLLM][lite-llm]
 
 ## 🧭 Usage
 
@@ -138,7 +149,7 @@ over. There is no build step.
 cp -R src/extensions/pickling-penguins ~/.pi/agent/extensions/pickling-penguins
 ```
 
-New and updates extensions will be loaded next time you run `pi`. If you're
+New and updated extensions will be loaded next time you run `pi`. If you're
 already in Pi, use the `/reload` prompt to reload all extensions, skills, etc.:
 
 ```sh
@@ -186,6 +197,9 @@ are another useful reference point.
 [agent-skills]: https://github.com/kieranpotts/skills
 [ci-badge]: https://github.com/kieranpotts/pi/actions/workflows/check.yaml/badge.svg
 [ci-workflow]: https://github.com/kieranpotts/pi/actions/workflows/check.yaml
+[docker]: https://docker.com/
+[docker-mcp-toolkit]: https://docs.docker.com/ai/mcp-catalog-and-toolkit/toolkit/
+[lite-llm]: https://www.litellm.ai/
 [ollama-modelfiles]: https://github.com/kieranpotts/modelfiles
 [owain-pi-extensions]: https://github.com/owainlewis/pi-extensions/
 [pi]: https://pi.dev/
