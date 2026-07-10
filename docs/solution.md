@@ -46,7 +46,8 @@ permissions gates — so models can use them however they like, no restrictions.
 
 Instead of building security controls into the core, Pi provides n extension
 system that allows users to customize the harness's security profile to their
-own specific requirements.
+own specific requirements. This is the first layer of defense in a hardened
+agent harness.
 
 Extensions are TypeScript modules that can intercept every tool call, block
 operations, modify results, and interact with the user.
@@ -96,6 +97,12 @@ cannot reach host files, cloud credentials, or sibling projects.
 The user experience is unchanged. Users interact with Pi in the normal way.
 Only the plumbing beneath the agent changes.
 
+An alternative to Docker would be to use **OpenShell**. This provides a
+sandboxed environment that keeps API credentials outside of the agent process.
+However, Docker is acceptable if you have another strategy for handling secrets,
+one that doesn't involve injecting them into the model's environment. A model
+proxy solves this problem (see below).
+
 ## Containerized MCP server
 
 Access to files, data, and tools is mediated by a containerized MCP server.
@@ -143,7 +150,8 @@ of an agent having direct filesystem access.
 Tooling in this solution space is mature. [Docker MCP Toolkit][docker-mcp-toolkit]
 is a free feature of Docker Desktop that runs MCP servers in containers and
 handles the plumbing to the agent client (whether that be Pi, LM Studio,
-Claude Desktop, etc.).
+Claude Desktop, etc.). It is the pragmatic, batteries-included way to run
+MCP servers in containers.
 
 Docker MCP Toolkit can be configured with environment variables, API keys, and
 other secret credentials required by the agent, so the agent doesn't need to
@@ -158,6 +166,13 @@ MCP server solution.
 Another piece of the jigsaw is to have some sort of proxy between the agent
 and the model servers. This proxy holds the access credentials required to
 access the model provider, whether that provider is remote or local.
+
+This design means that credentials and secrets are never injected into running
+containers via environment variables, mounted into them via config files, or
+baked into container images – and so are never read directly by models.
+Instead, agent harnesses make inference calls to models via  a proxy that
+holds all requires keys. The container is given only the proxy endpoint, and
+no credentials.
 
 This is an emerging pattern, and [LiteLLM][lite-llm] is emerging as the
 _de facto_ standard. It is a lightweight model router, sitting between the agent
