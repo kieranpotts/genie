@@ -15,9 +15,9 @@
   "editor.wordWrapColumn": 120,
 
   "[markdown]": {
-    /* Wrap Markdown files at 160 characters. */
-    "editor.wordWrap": "bounded",
-    "editor.wordWrapColumn": 160,
+    /* Wrap documentation files at the viewport width. Hard-wrapping
+    should be applied at 80 characters, except for tables and long URLs. */
+    "editor.wordWrap": "on",
 
     /* Enable auto-formatting for Markdown files. */
     "editor.formatOnPaste": true,

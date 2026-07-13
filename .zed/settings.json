@@ -8,9 +8,13 @@
   "preferred_line_length": 120,
 
   "languages": {
+
+    /* Wrap documentation files at the viewport width. Most AsciiDoc and
+    Markdown lines should be hard-wrapped at 80, anyway. Exceptions allowed
+    for tables and long URLs.  */
     "Markdown": {
-      "soft_wrap": "bounded",
-      "preferred_line_length": 160 /* IGNORED - MUST be set in .editorconfig, which takes precedence. */,
-    },
-  },
+      "soft_wrap": "editor_width"
+    }
+
+  }
 }
