@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  buildNotification,
   buildRequest,
   McpClient,
   McpError,
@@ -18,6 +19,18 @@ describe('buildRequest', () => {
     assert.deepEqual(buildRequest(2, 'tools/call', { name: 'x' }), {
       jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'x' },
     })
+  })
+})
+
+describe('buildNotification', () => {
+  it('builds a JSON-RPC notification with no id', () => {
+    assert.deepEqual(buildNotification('notifications/initialized'), {
+      jsonrpc: '2.0', method: 'notifications/initialized',
+    })
+  })
+
+  it('includes params when given', () => {
+    assert.deepEqual(buildNotification('x', { a: 1 }), { jsonrpc: '2.0', method: 'x', params: { a: 1 } })
   })
 })
 
@@ -68,15 +81,24 @@ describe('selectResponse', () => {
   })
 })
 
+/** A minimal `Headers`-like object exposing a case-insensitive `get()`. */
+function headersWith (sessionId?: string): { get: (name: string) => string | null } {
+  return { get: (name) => (name.toLowerCase() === 'mcp-session-id' ? (sessionId ?? null) : null) }
+}
+
 /** Build a fake fetch returning a single SSE-framed JSON-RPC response. */
-function fakeFetch (responseFor: (req: { id: number, method: string, params?: unknown }) => unknown, opts: { ok?: boolean, status?: number } = {}): FetchLike {
+function fakeFetch (
+  responseFor: (req: { id?: number, method: string, params?: unknown }) => unknown,
+  opts: { ok?: boolean, status?: number, sessionId?: string } = {},
+): FetchLike {
   return async (_url, init) => {
-    const req = JSON.parse(init.body) as { id: number, method: string, params?: unknown }
+    const req = JSON.parse(init.body) as { id?: number, method: string, params?: unknown }
     const result = responseFor(req)
     const frame = `data: ${JSON.stringify({ jsonrpc: '2.0', id: req.id, result })}\n\n`
     return {
       ok: opts.ok ?? true,
       status: opts.status ?? 200,
+      headers: headersWith(opts.sessionId),
       text: async () => frame,
     }
   }
@@ -84,25 +106,25 @@ function fakeFetch (responseFor: (req: { id: number, method: string, params?: un
 
 describe('McpClient', () => {
   it('initialize performs a round trip without throwing', async () => {
-    const client = new McpClient({ url: 'http://gw/sse', fetch: fakeFetch(() => ({})) })
+    const client = new McpClient({ url: 'http://gw/mcp', fetch: fakeFetch(() => ({})) })
     await client.initialize()
   })
 
   it('listTools returns the tools array', async () => {
     const tools = [{ name: 'read_file', inputSchema: { type: 'object' } }]
-    const client = new McpClient({ url: 'http://gw/sse', fetch: fakeFetch(() => ({ tools })) })
+    const client = new McpClient({ url: 'http://gw/mcp', fetch: fakeFetch(() => ({ tools })) })
     assert.deepEqual(await client.listTools(), tools)
   })
 
   it('listTools tolerates a missing tools field', async () => {
-    const client = new McpClient({ url: 'http://gw/sse', fetch: fakeFetch(() => ({})) })
+    const client = new McpClient({ url: 'http://gw/mcp', fetch: fakeFetch(() => ({})) })
     assert.deepEqual(await client.listTools(), [])
   })
 
   it('callTool forwards name and arguments and returns the result', async () => {
     let seen: unknown
     const client = new McpClient({
-      url: 'http://gw/sse',
+      url: 'http://gw/mcp',
       fetch: fakeFetch((req) => { seen = req.params; return { content: [{ type: 'text', text: 'hi' }] } }),
     })
     const out = await client.callTool('read_file', { path: '/projects/active/x' })
@@ -110,14 +132,57 @@ describe('McpClient', () => {
     assert.deepEqual(out, { content: [{ type: 'text', text: 'hi' }] })
   })
 
-  it('assigns incrementing request ids across calls', async () => {
+  it('sends both Accept types on every request', async () => {
+    const accepts: string[] = []
+    const client = new McpClient({
+      url: 'http://gw/mcp',
+      fetch: async (_url, init) => {
+        accepts.push(init.headers.accept)
+        const req = JSON.parse(init.body) as { id?: number }
+        return { ok: true, status: 200, headers: headersWith(), text: async () => `data: ${JSON.stringify({ jsonrpc: '2.0', id: req.id, result: {} })}\n\n` }
+      },
+    })
+    await client.initialize()
+    await client.listTools()
+    assert.ok(accepts.length >= 3)
+    assert.ok(accepts.every((a) => a === 'application/json, text/event-stream'))
+  })
+
+  it('initialize follows the response with a notifications/initialized notification', async () => {
+    const methods: string[] = []
+    const client = new McpClient({
+      url: 'http://gw/mcp',
+      fetch: fakeFetch((req) => { methods.push(req.method); return {} }),
+    })
+    await client.initialize()
+    assert.deepEqual(methods, ['initialize', 'notifications/initialized'])
+  })
+
+  it('captures the Mcp-Session-Id from initialize and echoes it on later requests', async () => {
+    const seenSession: Array<string | undefined> = []
+    const client = new McpClient({
+      url: 'http://gw/mcp',
+      fetch: async (_url, init) => {
+        seenSession.push(init.headers['mcp-session-id'])
+        const req = JSON.parse(init.body) as { id?: number }
+        return { ok: true, status: 200, headers: headersWith('SID-XYZ'), text: async () => `data: ${JSON.stringify({ jsonrpc: '2.0', id: req.id, result: { tools: [] } })}\n\n` }
+      },
+    })
+    await client.initialize()
+    await client.listTools()
+    // The initialize request precedes the session id; every request after it carries it.
+    assert.equal(seenSession[0], undefined)
+    assert.ok(seenSession.slice(1).every((s) => s === 'SID-XYZ'))
+  })
+
+  it('assigns incrementing request ids across rpc calls (notifications consume no id)', async () => {
     const ids: number[] = []
     const client = new McpClient({
-      url: 'http://gw/sse',
+      url: 'http://gw/mcp',
       fetch: async (_url, init) => {
-        const req = JSON.parse(init.body) as { id: number }
-        ids.push(req.id)
-        return { ok: true, status: 200, text: async () => `data: ${JSON.stringify({ jsonrpc: '2.0', id: req.id, result: {} })}\n\n` }
+        const req = JSON.parse(init.body) as { id?: number }
+        if (typeof req.id === 'number') ids.push(req.id)
+        return { ok: true, status: 200, headers: headersWith(), text: async () => `data: ${JSON.stringify({ jsonrpc: '2.0', id: req.id, result: {} })}\n\n` }
       },
     })
     await client.initialize()
@@ -126,19 +191,19 @@ describe('McpClient', () => {
   })
 
   it('throws McpError on a non-ok HTTP status', async () => {
-    const client = new McpClient({ url: 'http://gw/sse', fetch: fakeFetch(() => ({}), { ok: false, status: 502 }) })
+    const client = new McpClient({ url: 'http://gw/mcp', fetch: fakeFetch(() => ({}), { ok: false, status: 502 }) })
     await assert.rejects(() => client.initialize(), (e: unknown) => e instanceof McpError && e.code === 502)
   })
 
   it('sends a Bearer authorization header when a token is given', async () => {
     let auth: string | undefined
     const client = new McpClient({
-      url: 'http://gw/sse',
+      url: 'http://gw/mcp',
       authToken: 'secret-token',
       fetch: async (_url, init) => {
         auth = init.headers.authorization
-        const req = JSON.parse(init.body) as { id: number }
-        return { ok: true, status: 200, text: async () => `data: ${JSON.stringify({ jsonrpc: '2.0', id: req.id, result: {} })}\n\n` }
+        const req = JSON.parse(init.body) as { id?: number }
+        return { ok: true, status: 200, headers: headersWith(), text: async () => `data: ${JSON.stringify({ jsonrpc: '2.0', id: req.id, result: {} })}\n\n` }
       },
     })
     await client.initialize()
@@ -148,11 +213,11 @@ describe('McpClient', () => {
   it('omits the authorization header when no token is given', async () => {
     let hasAuth = true
     const client = new McpClient({
-      url: 'http://gw/sse',
+      url: 'http://gw/mcp',
       fetch: async (_url, init) => {
         hasAuth = 'authorization' in init.headers
-        const req = JSON.parse(init.body) as { id: number }
-        return { ok: true, status: 200, text: async () => `data: ${JSON.stringify({ jsonrpc: '2.0', id: req.id, result: {} })}\n\n` }
+        const req = JSON.parse(init.body) as { id?: number }
+        return { ok: true, status: 200, headers: headersWith(), text: async () => `data: ${JSON.stringify({ jsonrpc: '2.0', id: req.id, result: {} })}\n\n` }
       },
     })
     await client.initialize()

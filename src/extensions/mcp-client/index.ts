@@ -30,7 +30,7 @@ import {
 
 /** Where to reach the MCP gateway. Set by compose for the hardened container. */
 const GATEWAY_URL_ENV = 'MCP_GATEWAY_URL'
-/** Bearer token guarding the gateway's localhost SSE endpoint. */
+/** Bearer token guarding the gateway's localhost endpoint (anti-DNS-rebinding). */
 const GATEWAY_TOKEN_ENV = 'MCP_GATEWAY_AUTH_TOKEN'
 
 export default function (pi: ExtensionAPI): void {

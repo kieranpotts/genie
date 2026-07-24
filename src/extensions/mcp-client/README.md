@@ -9,9 +9,10 @@ infrastructure.
 ## What it does
 
 On `session_start`, the extension connects to the MCP gateway named in the
-`MCP_GATEWAY_URL` environment variable, runs the MCP `initialize` handshake,
-lists the tools the server exposes (`tools/list`), and registers each one as a
-Pi tool (`tools/call` on invocation).
+`MCP_GATEWAY_URL` environment variable, runs the MCP `initialize` handshake
+(latching the gateway's `Mcp-Session-Id` and sending the follow-up
+`notifications/initialized`), lists the tools the server exposes (`tools/list`),
+and registers each one as a Pi tool (`tools/call` on invocation).
 
 Tools are namespaced with an `mcp_` prefix (`read_file` → `mcp_read_file`) so
 they cannot collide with Pi's built-ins or other extensions.
@@ -28,4 +29,4 @@ containerized. The `compose.yaml` file for the hardened container does this.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `MCP_GATEWAY_URL` | Unset | The gateway's SSE endpoint, eg. `http://mcp-gateway:8811/sse`. |
+| `MCP_GATEWAY_URL` | Unset | The gateway's streamable-HTTP endpoint, eg. `http://mcp-gateway:8811/mcp`. |

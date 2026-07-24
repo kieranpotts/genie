@@ -155,9 +155,11 @@ services:
       # with LITELLM_PORT if you change the proxy port. This token is interpolated
       # into models.json's `apiKey` at runtime (`$LITELLM_MASTER_KEY`).
       LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in src/infrastructure/.env}"
-      # Filesystem access: the MCP gateway endpoint on agent-net (used by the
-      # mcp-client extension, step 5) plus the auth token guarding it.
-      MCP_GATEWAY_URL: "http://mcp-gateway:8811/sse"
+      # Filesystem access: the MCP gateway's streamable-HTTP endpoint on
+      # agent-net (used by the mcp-client extension, step 5) plus the auth token
+      # guarding it. The path is /mcp because the gateway runs
+      # --transport=streaming (above); the old /sse path only 307-redirects here.
+      MCP_GATEWAY_URL: "http://mcp-gateway:8811/mcp"
       MCP_GATEWAY_AUTH_TOKEN: "${MCP_GATEWAY_AUTH_TOKEN:?set MCP_GATEWAY_AUTH_TOKEN in src/infrastructure/.env}"
       # Defence in depth: the audited-tools extension (step 6) confines its
       # read/write/ls replacements to this root and logs every call. The log
