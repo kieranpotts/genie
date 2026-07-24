@@ -54,6 +54,20 @@ COPY --chown=pi:pi src/extensions/audited-tools/          /home/pi/.pi/agent/ext
 COPY --chown=pi:pi src/extensions/permission-gate/        /home/pi/.pi/agent/extensions/permission-gate/
 
 # ---------------------------------------------------------------------------
+# Model routing. Pi has no built-in knowledge of the host LiteLLM proxy; it
+# discovers the `capable`/`fast` routes ONLY through this models.json, which
+# declares the proxy as an OpenAI-compatible provider. Without it Pi falls back
+# to its default provider (google) with no key and reports "No models
+# available". The proxy token is interpolated at runtime from
+# $LITELLM_MASTER_KEY (compose env) — NO cloud key is baked into the image.
+#
+# CAVEAT: Pi does NOT interpolate env vars in `baseUrl`, so the proxy host:port
+# is a literal in models.json and MUST match the host proxy's LITELLM_PORT
+# (default 4000). Change one, change the other.
+# ---------------------------------------------------------------------------
+COPY --chown=pi:pi src/infrastructure/pi-container/models.json /home/pi/.pi/agent/models.json
+
+# ---------------------------------------------------------------------------
 # Network posture: no telemetry, no version check, no startup network calls.
 # All model traffic goes through the host proxy endpoint and nothing else.
 # ---------------------------------------------------------------------------

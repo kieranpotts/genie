@@ -128,6 +128,11 @@ services:
       context: ../..
       dockerfile: src/infrastructure/pi-container/Dockerfile
     image: pi-agent:hardened
+    # Launch on the `capable` route (the proxy falls back to `fast` when the
+    # cloud model is unreachable — see litellm.config.yaml). The route is
+    # declared in the image's models.json; without an explicit --model Pi starts
+    # on its default provider (google) and reports "No models available".
+    command: ["--model", "litellm/capable"]
     networks:
       - agent-net
     depends_on:
@@ -143,8 +148,12 @@ services:
       # container, so a compromised session cannot erase its own history.
       - pi-logs:/var/log/pi
     environment:
-      # Model access: proxy endpoint + proxy token ONLY. No cloud API keys.
-      AGENT_MODEL_ENDPOINT: "http://host-gateway:${LITELLM_PORT:-4000}"
+      # Model access: proxy token ONLY. No cloud API keys. The proxy ENDPOINT is
+      # declared in the image's models.json (pi-container/models.json) — Pi reads
+      # that to expose the `capable`/`fast` routes; it does not read a bare
+      # endpoint env var. models.json pins host-gateway:4000, so keep it in sync
+      # with LITELLM_PORT if you change the proxy port. This token is interpolated
+      # into models.json's `apiKey` at runtime (`$LITELLM_MASTER_KEY`).
       LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in src/infrastructure/.env}"
       # Filesystem access: the MCP gateway endpoint on agent-net (used by the
       # mcp-client extension, step 5) plus the auth token guarding it.

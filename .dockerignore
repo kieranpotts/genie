@@ -25,5 +25,8 @@ test
 PLAN.md
 
 # The infra dir itself is not copied into the image (compose/Dockerfile live
-# here but are read by the host, not shipped inside the agent).
+# here but are read by the host, not shipped inside the agent)...
 src/infrastructure
+# ...except the one file the image explicitly bakes in: Pi's model routing
+# config, COPY'd by the Dockerfile to /home/pi/.pi/agent/models.json.
+!src/infrastructure/pi-container/models.json
