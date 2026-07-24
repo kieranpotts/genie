@@ -72,7 +72,7 @@ services:
     #   docker pull docker/mcp-gateway:latest && docker inspect --format '{{index .RepoDigests 0}}' docker/mcp-gateway:latest
     image: docker/mcp-gateway:latest@sha256:e3d667226b5a58ddf5b12cb357085a71f5f5e63383915a19e6ff4c983c92b34a
     command:
-      - "--transport=sse"
+      - "--transport=streaming"
       - "--port=8811"
       - "--catalog=/etc/mcp/catalog.yaml"
       - "--servers=filesystem"

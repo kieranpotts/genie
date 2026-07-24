@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+
+#
+# Bring up the security hardening infrastructure.
+#
+# Automates steps 2-4 of the operator runbook in
+# `src/infrastructure/README.md`: start the host LiteLLM proxy, build the
+# hardened agent image, then bring up the docker compose boundary
+# (agent-net, the mcp-gateway, and the pi container).
+#
+# Step 1 of the runbook (populating `src/infrastructure/.env`) is not
+# automated — it requires the operator's own cloud API keys and generated
+# secrets — but is validated here before anything is started.
+#
+# Steps 5-6 (verifying the boundary, inspecting the audit trail) remain
+# manual; see the runbook.
+#
+# Usage: ./run/startup
+#
+#   -h, --help    Show this help and exit.
+#
+# Ctrl-C (or any exit) tears the compose boundary back down and stops the
+# LiteLLM proxy this script started. A proxy already running on the
+# configured host/port is left alone.
+#
+
+set -euo pipefail
+
+# Use this instead for debugging problems with the script.
+#set -euxo pipefail
+
+for arg in "$@"; do
+  case "${arg}" in
+    -h|--help)
+      sed -n '4,20p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: ${arg}" >&2
+      echo "Run \`./run/startup --help\` to see available options." >&2
+      exit 1
+      ;;
+  esac
+done
+
+#
+# Global variables.
+#
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/.." && pwd)"
+inc_path="${script_dir}/inc"
+
+# shellcheck disable=SC2034
+infra_dir="${repo_root}/src/infrastructure"
+# shellcheck disable=SC2034
+env_file="${infra_dir}/.env"
+# shellcheck disable=SC2034
+proxy_log="$(mktemp -t litellm-proxy.XXXXXX.log)"
+
+#
+# Includes.
+#
+
+. "${inc_path}/var/ansi-codes.sh"
+. "${inc_path}/fn/statuses.sh"
+. "${inc_path}/fn/startup.sh"
+
+#
+# Main script.
+#
+
+trap cleanup EXIT INT TERM
+
+check_env
+start_proxy
+build_image
+bring_up_boundary

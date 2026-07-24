@@ -140,7 +140,7 @@ cost of the Toolkit's catalog/secret/network controls.
 > The gateway learns the filesystem server's allowed directory (its `command`
 > arg) and what it can see (its `volumes`) from that catalog entry — `--oci-ref`
 > alone does not carry them. The gateway flags
-> (`docker mcp gateway run --transport sse --catalog … --servers filesystem --block-network`)
+> (`docker mcp gateway run --transport streaming --catalog … --servers filesystem --block-network`)
 > and the catalog schema were checked against the installed Toolkit, but the
 > catalog format varies by Toolkit version and **must be verified on first
 > bring-up**: run with `--dry-run` to validate config without listening, and use
