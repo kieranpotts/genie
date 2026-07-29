@@ -22,9 +22,9 @@ const BASH_TIMEOUT_MS = 30_000
 /** Cap captured output so a runaway command cannot flood the model context. */
 const BASH_MAX_BUFFER = 1024 * 1024
 
-/** Register the audited `bash` tool against `pi`. `cwd` is the directory vetted
- * commands run in; it must exist. */
-export function registerBashTool (pi: ExtensionAPI, cwd: string, audit: AuditLog, policy: BashPolicy): void {
+/** Register the audited `bash` tool against `pi`. The working directory comes
+ * from the policy, so vetting and execution cannot resolve paths differently. */
+export function registerBashTool (pi: ExtensionAPI, audit: AuditLog, policy: BashPolicy): void {
   pi.registerTool({
     name: 'bash',
     label: 'bash',
@@ -42,7 +42,7 @@ export function registerBashTool (pi: ExtensionAPI, cwd: string, audit: AuditLog
       }
       await audit.record(makeEntry('bash', 'allowed', { command: params.command }))
       try {
-        const output = await runProgram(decision.program, decision.args, cwd)
+        const output = await runProgram(decision.program, decision.args, policy.cwd)
         return ok(output)
       } catch (err) {
         await audit.record(makeEntry('bash', 'error', { command: params.command, reason: String(err) }))

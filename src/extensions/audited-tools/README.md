@@ -27,12 +27,15 @@ every call is logged to an append-only audit file.
 
 Read this before assuming this extension guards project files. **It does not.**
 
-In the hardened container, the agent has no project mount at all: the project is
-reachable only through the `mcp_*` tools, which the MCP filesystem server
-mediates on the far side of the boundary. The `bash` tool here runs inside the
-agent container, so it can see the container's own filesystem and nothing of the
-project. It is a guard on what the agent may **execute locally** — not a second
-gate in front of the MCP boundary.
+The project is reachable by the agent only through the `mcp_*` tools, which the
+MCP filesystem server mediates on the far side of the boundary. The `bash` tool
+here is a guard on what the agent may **execute locally** — not a second gate in
+front of the MCP boundary.
+
+The hardened container *does* mount the project, read-only, at
+`/projects/active`. That mount exists for the **human operator**, who needs to
+see what they are working with when they land in a shell. It is not for the
+agent, and the [path fence](#the-path-fence) is what keeps that true.
 
 This extension used to also provide audited `read`, `write`, and `ls` tools,
 described as a defence-in-depth layer behind MCP. They were removed, because
@@ -47,9 +50,58 @@ refusing sensitive filenames such as `.env` and `*.pem` — now lives in the
 every tool call including the `mcp_*` ones. That is a strictly wider guarantee
 than the one it replaced.
 
+## The path fence
+
+The container mounts the project read-only so an operator can browse it. Left
+alone, that would also hand the **agent** an unmediated route to every project
+file — `cat /projects/active/src/x.ts` would simply work, with no MCP server in
+the loop and none of its logging.
+
+The fence closes that. Every token of a vetted command is resolved (relative
+arguments against the working directory) and refused if it lands inside a fenced
+root:
+
+```
+cat /projects/active/.env          → denied
+ls /projects/active                → denied
+cat ../../projects/active/src/x.ts → denied  (resolves into the fence)
+cat /home/pi/.bashrc               → allowed
+find . -name "*.ts"                → allowed (not paths into the fence)
+ls /projects/active-evil           → allowed (prefix collision, not inside)
+```
+
+A denial tells the model to use the `mcp_*` tools instead, which is the route
+that is mediated and logged.
+
+> [!WARNING]
+> **What the fence does not guarantee.** It is worth being precise, because it
+> is easy to read more into this than it delivers:
+>
+> - It is **lexical**. Paths are resolved without following symlinks, so a
+>   symlink into a fenced root would not be caught. Nothing the agent can execute
+>   creates one today — the rootfs is read-only and `ln` is not allowlisted — but
+>   that is an assumption, not a guarantee.
+>
+> - It is **self-enforced**. Unlike the MCP server's containment, which runs in
+>   another container, this check runs in the agent's own process. It guards a
+>   cooperative tool; it is not a boundary.
+>
+> - It is only as strong as the **allowlist**. `node`, `python`, `npm`, and
+>   `make` are general-purpose interpreters — `node -e "…"` can read anything the
+>   uid can, and the fence sees only an inert script string. With those
+>   allowlisted, the fence stops accidents and casual paths, and the operator
+>   confirmation in [`permission-gate`](../permission-gate/) (every `bash` call is
+>   confirmed) is what stops the rest. Trim `AUDITED_BASH_ALLOWLIST` if you need
+>   the fence to hold on its own.
+>
+> The `:ro` on the mount is the control that does not depend on any of this: the
+> agent cannot write to the project through that path however the fence fares, so
+> the MCP server remains the only writable route and the change trail stays
+> complete.
+
 ## What it does
 
-The `bash` tool vets the `command` argument and refuses it in two cases:
+The `bash` tool vets the `command` argument and refuses it in three cases:
 
 - **It contains shell control operators.** The only reason the characters `|`,
   `&`, `;`, `<`, `>`, and backtick would exist in a command is to attempt
@@ -58,6 +110,9 @@ The `bash` tool vets the `command` argument and refuses it in two cases:
 - **Its program is not on the allowlist.** The command's first token must be an
   allowed program, which is then run directly with its remaining tokens as
   literal arguments.
+
+- **It reaches into a fenced path.** See [the path fence](#the-path-fence),
+  above.
 
 The `bash` tool never invokes a shell. Instead, the vetted program is run via
 Node's `execFile` with the `shell: false` option. This passes the argument vector
@@ -103,21 +158,29 @@ process is running — so, in the guest environment, if the agent is containeriz
 | Variable | Default | Meaning |
 |---|---|---|
 | `AUDITED_BASH_CWD` | `/home/pi` | Working directory vetted commands run in. Must exist. |
+| `AUDITED_BASH_FENCE` | `/projects/active` | Comma-separated directories no command may reach into. `none` disables fencing. |
 | `AUDITED_TOOLS_LOG` | `/var/log/pi/audited-tools/audit.jsonl` | Append-only audit log path. |
 | `AUDITED_BASH_ALLOWLIST` | Built-in defaults, see above | Comma-separated program allowlist. |
 
 These are set in the `compose.yaml` file for the hardened container.
 
-`AUDITED_BASH_CWD` is a working directory, not a security boundary — the command
-allowlist is the boundary. It defaults to the agent's home because that is the
-one directory guaranteed to exist in the hardened image. A command that names an
-absolute path elsewhere still reaches it, subject to the allowlist, the
-sensitive-filename refusal in `permission-gate`, and the container's own
-filesystem permissions.
+`AUDITED_BASH_CWD` is a working directory, not a security boundary. It defaults
+to the agent's home because that is the one directory guaranteed to exist in the
+hardened image, and because it sits outside the default fence. It doubles as the
+base that relative arguments are resolved against when fencing — deliberately one
+value for both, since vetting and executing against different directories would
+make the fence bypassable with a relative path.
 
 When `AUDITED_BASH_ALLOWLIST` is set to a non-empty value, it fully replaces the
 built-in default allowlist. For example, `ls,cat,git` would restrict bash calls
 to these three commands.
+
+`AUDITED_BASH_FENCE` replaces the default fence the same way, with one
+asymmetry: a **blank** value keeps the default rather than clearing it. Emptying
+the allowlist would be a tightening, but emptying the fence would be a loosening,
+and a loosening should not be something a stray empty environment variable can
+do. To genuinely run without a fence, set it to the explicit string `none` —
+greppable, and impossible to arrive at by accident.
 
 If running Pi inside the hardened container, the `AUDITED_TOOLS_LOG` path MUST be
 within a **writable volume** mounted from the host. Without this, the write

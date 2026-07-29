@@ -1,11 +1,12 @@
 # TODO
 
 Findings from an audit of the implementation against the design described in
-[docs/solution.md](./docs/solution.md).
+[docs/solution.md](./docs/solution.md), plus items raised since.
 
 The container, MCP, and proxy layers conform closely. The Pi-extensions layer
-does not, and there are three places where the deployed configuration silently
-does not do what the design says.
+was where the deployed configuration silently did not do what the design said;
+the remaining open items are listed below, each stating the gap between what is
+claimed and what is enforced.
 
 ## Code fixes — the real posture is weaker than the design asserts
 
@@ -16,10 +17,29 @@ does not do what the design says.
   and `start-pi` is the supported way in — so `--model` and
   `--no-builtin-tools` can no longer be lost to an override.
 
+- [x] **Give the operator sight of the project.**
+  The no-mount rule was written for the agent, but it took the operator's
+  visibility with it — a shell in the container could see only `/home/pi`, so
+  "is the project loaded correctly?" was unanswerable from inside the boundary.
+  The project is now mounted READ-ONLY at `/projects/active` for the operator,
+  and a path fence in the bash policy (`AUDITED_BASH_FENCE`) refuses any agent
+  command reaching into it, so the agent's route to project files is still the
+  MCP server. `:ro` means the MCP server keeps the only writable handle, so the
+  change trail stays complete regardless of how the fence fares.
+
+  The fence's limits are stated where they are enforced
+  (`src/extensions/audited-tools/bash-policy.ts`) and in that extension's README:
+  it is lexical (no symlink resolution), self-enforced (in the agent's own
+  process, unlike the MCP server's containment), and only as strong as the
+  allowlist — `node -e` defeats it, which is why every `bash` call is also
+  operator-confirmed. Trim `AUDITED_BASH_ALLOWLIST` if the fence needs to hold on
+  its own.
+
 - [x] **Resolve the `AUDITED_TOOLS_ROOT` mismatch.**
-  Resolved by reclassifying the extension rather than giving it a project mount,
-  which would have contradicted the design's central claim that the agent never
-  holds one. The audited `read`/`write`/`ls` and their path guard were removed:
+  Resolved by reclassifying the extension rather than making its file tools work,
+  which would have meant a writable project mount and contradicted the design's
+  central claim. The audited `read`/`write`/`ls` and their path guard were
+  removed:
   they were rooted at a path that exists only in the MCP filesystem server's
   container, so every call failed while being audited as *allowed*. MCP is now
   the sole, honest route to files. `bash` remains, re-rooted to `AUDITED_BASH_CWD`

@@ -7,9 +7,11 @@
 #         │
 #         └────────model calls───────▶  host LiteLLM proxy (host-gateway:4000)
 #
-# The pi-container holds NO cloud keys, NO docker.sock, and NO project mount.
-# The mcp-filesystem server is the ONLY component with filesystem access, and
-# the named project volume is its single allowed directory.
+# The pi-container holds NO cloud keys and NO docker.sock. It mounts the project
+# READ-ONLY, for the human operator's benefit only: the agent's own access is
+# fenced out of that mount (AUDITED_BASH_FENCE) so every agent read and ALL
+# writes still go through the mcp-filesystem server, which is the only component
+# with a writable handle on the project.
 #
 # Host prerequisites (see src/infrastructure/.env.example, copied to src/infrastructure/.env):
 #   - Ollama bound to the bridge gateway (OLLAMA_HOST)
@@ -164,12 +166,31 @@ services:
     extra_hosts:
       - "host-gateway:host-gateway"
     volumes:
-      # Two named volumes only. No project mount, no docker.sock, no dotfiles.
+      # No docker.sock, no host dotfiles.
       # Pi's own session transcripts.
       - pi-sessions:/home/pi/sessions
       # Audit trails. The agent can append but the volume outlives the
       # container, so a compromised session cannot erase its own history.
       - pi-logs:/var/log/pi
+      # The project, READ-ONLY, and FOR THE OPERATOR — not for the agent.
+      #
+      # An operator who lands in this container (`exec pi bash`, or /quit out of
+      # the agent) needs to see what they are working with; being unable to was a
+      # real usability failure, and "look at it on the host instead" does not
+      # answer "what can the agent actually see?".
+      #
+      # The agent's own route to these files remains the MCP server, which
+      # mediates and logs every access. What keeps this mount from becoming a
+      # second, unmediated route is the PATH FENCE in the audited-tools bash
+      # policy (AUDITED_BASH_FENCE, below): any command reaching into
+      # /projects/active is refused and the model is pointed at the mcp_* tools.
+      #
+      # `:ro` is load-bearing in two ways. It stops the agent writing here even
+      # if the fence is defeated, and it means the ONLY writable route to the
+      # project is the MCP server — so the audit trail of changes stays complete.
+      # Do not drop it without re-reading the fence's stated limits in
+      # src/extensions/audited-tools/bash-policy.ts.
+      - project:/projects/active:ro
     environment:
       # Model access: proxy token ONLY. No cloud API keys. The proxy ENDPOINT is
       # declared in the image's models.json (pi-container/models.json) — Pi reads
@@ -184,11 +205,17 @@ services:
       # --transport=streaming (above); the old /sse path only 307-redirects here.
       # No auth token — see the note on the gateway service.
       MCP_GATEWAY_URL: "http://mcp-gateway:8811/mcp"
-      # Working directory for the audited-tools `bash` replacement. NOT a project
-      # path: this container has no project mount, so bash cannot reach project
-      # files and is a guard on local execution only. /home/pi is used because it
-      # is the one directory guaranteed to exist here.
+      # Working directory for the audited-tools `bash` replacement, and the base
+      # that relative arguments are resolved against when fencing. Outside the
+      # fence by construction.
       AUDITED_BASH_CWD: "/home/pi"
+      # Directories the agent's `bash` may not reach. This is what keeps the
+      # read-only project mount an OPERATOR convenience rather than an agent
+      # back door: the mount is visible in this container, but every bash
+      # command naming a path inside it is refused. Set to `none` to disable
+      # fencing entirely — which, with the project mounted, hands the agent
+      # unmediated read access to it.
+      AUDITED_BASH_FENCE: "/projects/active"
       AUDITED_TOOLS_LOG: "/var/log/pi/audited-tools/audit.jsonl"
       # Interactive approval: the permission-gate extension requires confirmation
       # for mutating tool calls, refuses sensitive filenames outright on every

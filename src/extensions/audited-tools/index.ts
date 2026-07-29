@@ -8,11 +8,14 @@
  * is logged to an append-only audit file.
  *
  * SCOPE — read this before assuming a defence-in-depth guarantee. This extension
- * guards command execution INSIDE THE AGENT CONTAINER, which deliberately has no
- * project mount (see compose.yaml). `bash` therefore cannot reach project files
- * at all: it runs in the container's own filesystem, and the only route to the
- * project is the `mcp_*` tools. It is a guard on what the agent can execute
- * locally, not a second gate in front of the MCP boundary.
+ * guards command execution INSIDE THE AGENT CONTAINER. The container mounts the
+ * project READ-ONLY so a human operator can browse it from a shell, but the
+ * agent's own route to those files stays the `mcp_*` tools: the path fence in
+ * `bash-policy.ts` refuses any command reaching into the mounted project. So
+ * this is a guard on what the agent may execute locally, plus the rule that
+ * keeps the operator's convenience from becoming the agent's back door — not a
+ * second gate in front of the MCP boundary. See `bash-policy.ts` for what the
+ * fence does and does not guarantee.
  *
  * The filesystem half of this extension was removed for exactly that reason: its
  * audited `read`/`write`/`ls` were rooted at a path that does not exist in this
@@ -37,19 +40,20 @@ import { registerBashTool } from './register-bash.ts'
 const CWD_ENV = 'AUDITED_BASH_CWD'
 /** Where the append-only audit log is written (outside the writable tree). */
 const AUDIT_ENV = 'AUDITED_TOOLS_LOG'
-/** Comma-separated bash allowlist; a leading `+` extends the built-in default. */
+/** Comma-separated bash allowlist; replaces the built-in default entirely. */
 const BASH_ALLOWLIST_ENV = 'AUDITED_BASH_ALLOWLIST'
+/** Comma-separated directories bash may not reach; `none` disables fencing. */
+const BASH_FENCE_ENV = 'AUDITED_BASH_FENCE'
 
-/** The agent's home. Chosen because it is the one directory guaranteed to exist
- * and be readable in the hardened image; the rootfs is read-only, so commands
- * that write need a tmpfs or volume path passed explicitly. */
-const DEFAULT_CWD = '/home/pi'
 const DEFAULT_LOG = '/var/log/pi/audited-tools/audit.jsonl'
 
 export default function (pi: ExtensionAPI): void {
-  const cwd = process.env[CWD_ENV] ?? DEFAULT_CWD
   const audit = new AuditLog(process.env[AUDIT_ENV] ?? DEFAULT_LOG)
-  const bashPolicy: BashPolicy = buildPolicy(process.env[BASH_ALLOWLIST_ENV])
+  const bashPolicy: BashPolicy = buildPolicy(
+    process.env[BASH_ALLOWLIST_ENV],
+    process.env[BASH_FENCE_ENV],
+    process.env[CWD_ENV]
+  )
 
-  registerBashTool(pi, cwd, audit, bashPolicy)
+  registerBashTool(pi, audit, bashPolicy)
 }

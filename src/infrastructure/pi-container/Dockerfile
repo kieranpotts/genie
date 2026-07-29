@@ -5,7 +5,8 @@
 # surface. The image itself bakes in NONE of the dangerous things:
 #   - no cloud API keys (held by the host proxy; see src/infra/proxy/)
 #   - no Docker socket
-#   - no project source (mounted at runtime by the MCP server, never here)
+#   - no project source (compose mounts it read-only at runtime, for the
+#     operator to browse; the agent's bash is fenced out of it)
 #   - runs as a non-root user
 #
 # Capability dropping, no-new-privileges, read-only rootfs, and resource limits
@@ -156,6 +157,8 @@ CMD ["bash"]
 #     AGENT_MODEL_ENDPOINT: http://host-gateway:4000
 #     LITELLM_MASTER_KEY:   (proxy token only — not a cloud key)
 #   NO bind of /var/run/docker.sock
-#   NO bind of any project path or host dotfiles
-#   project files reached ONLY via the MCP server over agent-net
+#   NO bind of host dotfiles
+#   project bound READ-ONLY at /projects/active, for the operator to browse;
+#     the agent's bash is fenced out of it (AUDITED_BASH_FENCE), so the agent
+#     reaches project files ONLY via the MCP server over agent-net
 # ===========================================================================
