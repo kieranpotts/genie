@@ -116,6 +116,43 @@ claimed and what is enforced.
   enforced (`src/extensions/audited-tools/bash-policy.ts`) and in that
   extension's README — those need updating to match the decision.
 
+- [ ] **Record read-only tool calls in the audit trail.**
+  `docs/requirements.md` asks for "full observability and auditability of every
+  action the agent takes against the filesystem". Reads are not covered.
+
+  `permission-gate` sees every tool call, but returns early for read-only ones
+  (`index.ts`, the `requiresConfirmation` guard) and logs nothing. `audited-tools`
+  logs only `bash`. So every `mcp_read_file`, `mcp_read_multiple_files`,
+  `mcp_list_directory`, `mcp_directory_tree`, `mcp_search_files`, and
+  `mcp_get_file_info` — which is to say every read of project content, the whole
+  reason the agent has filesystem access at all — leaves no entry in
+  `/var/log/pi`. Writes, refusals, and bash are recorded; reads are invisible.
+
+  Two partial records exist, and neither is an audit trail. The gateway logs
+  `Calling tool …` to its own container stdout with `--log-calls`, which is
+  unstructured, lives in a different container, and dies with it. Session
+  transcripts under `/home/pi/sessions` contain the calls and their results, but
+  that is the agent's own narrative on a volume with different retention — a
+  transcript, not an independent accountability record. For a regulated context,
+  "we can reconstruct what was read from the chat log" is not the answer.
+
+  The fix is small: have the gate log every call it sees, with the outcome as the
+  `status` (`approved` / `denied` / `allowed` for the read-only pass-through).
+  Two things to decide while doing it:
+
+  - **Calls or actions?** Logging at `tool_call` records what was *attempted*. A
+    read that the MCP server then refuses (traversal, outside the allowed
+    directory) would appear as allowed, because the gate cannot see the outcome.
+    A truthful trail needs the unused `tool_result` hook too — which is already
+    an open item below, and this is the strongest argument for implementing it.
+  - **Paths, not payloads.** Record the path and the outcome, never the content.
+    Logging what was read would copy the secrets out of the files and into the
+    audit trail, which is the opposite of the point.
+
+  Renaming is worth considering too: once it records every call rather than every
+  confirmation, `permission-gate/audit.jsonl` is a tool-call log, and the
+  extension's README describes it as a decision log.
+
 - [ ] **Enforce network egress control, or drop the claim.**
   The hardening table says the container "reaches the model only via the host
   proxy" and that "the only outbound network is the proxy and the MCP gateway".
@@ -138,7 +175,9 @@ claimed and what is enforced.
   latter is not in the design at all. There is no `tool_result` handler (so no
   output redaction), no `before_provider_request` handler (so no auditing of
   outbound model traffic, despite `docs/solution.md:58`), and no
-  `before_agent_start` handler. Either implement them or rewrite the section as
+  `before_agent_start` handler. The `tool_result` gap is not only a documentation
+  problem: the read-auditing item above needs that hook to record what a call
+  actually *did* rather than what it attempted. Either implement them or rewrite the section as
   stated intent.
 
 - [ ] **Document the `docker.sock` grant in `docs/solution.md`.**

@@ -243,6 +243,53 @@ docker compose -f src/infrastructure/compose.yaml exec pi cat /var/log/pi/permis
 > docker volume rm pi-secure-agent_pi-logs
 > ```
 
+## Troubleshooting
+
+**The agent prints its reasoning, then stops.** Typically after something like
+*"I should explore the directory structure"*, with no error and no further
+output. This is a tool-calling failure, not a hang: the model asked for a tool
+and the request never became a tool call, so there was nothing to run and
+nothing to report.
+
+The usual cause is a `ollama/` prefix in `proxy/litellm.config.yaml` where
+`ollama_chat/` is required. That integration drops tool-call deltas when
+streaming, and delivers the call as assistant text instead — the agent shows a
+bare JSON object like `{"name": "mcp_list_directory", "arguments": {…}}` and
+stops. See the warning in that file.
+
+What makes this one expensive to diagnose is that every layer looks healthy, and
+the obvious checks all pass:
+
+| Check | What it shows |
+|---|---|
+| `docker logs pi-secure-agent-mcp-gateway-1` | gateway up, 11 tools listed, client initialized — but no `Calling tool …` lines |
+| `/var/log/pi/*/audit.jsonl` | absent or stale: no tool call reached an extension |
+| a `curl` tool test against the proxy | **passes** — non-streaming works under both prefixes |
+| the session transcript | one assistant message, `"stopReason":"stop"`, thinking only, no `tool_call` entry |
+
+The transcripts under `/home/pi/sessions/` are the fastest way in: if no session
+has ever contained a `tool_call` entry, the problem is upstream of every
+security control in this repo. Reproduce it directly with a streaming request:
+
+```sh
+docker compose -f src/infrastructure/compose.yaml exec pi node -e '
+fetch("http://host-gateway:4000/v1/chat/completions", { method: "POST",
+  headers: { "content-type": "application/json",
+             authorization: "Bearer " + process.env.LITELLM_MASTER_KEY },
+  body: JSON.stringify({ model: "computer-programmer", stream: true,
+    messages: [{ role: "user", content: "List /tmp. Use the tool." }],
+    tools: [{ type: "function", function: { name: "list_directory",
+      parameters: { type: "object", properties: { path: { type: "string" } } } } }] })
+}).then(r => r.text()).then(t => console.log(
+  t.includes("tool_calls") ? "OK: tool_call deltas present" : "BROKEN: no tool_call deltas"))'
+```
+
+**Verifying the extensions are loaded.** `pi list` is *not* the check — it lists
+installed packages, and these extensions are auto-discovered from
+`~/.pi/agent/extensions/*/index.ts` instead, so it correctly reports "No
+packages installed" on a healthy container. Confirm loading by the tools the
+model is offered, or by watching for audit-log entries.
+
 ## The docker.sock trade-off (read this)
 
 The Docker MCP Toolkit gateway **spawns and manages** the filesystem MCP server

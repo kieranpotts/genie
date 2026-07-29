@@ -45,13 +45,30 @@ model_list:
   # Each name must exist in Ollama (`ollama list`) or requests 404. Create them
   # from the modelfiles project:
   #   ollama create <capability> -f ./dist/<profile>/<capability>/Modelfile
+  #
+  # ⚠️ USE `ollama_chat/`, NEVER `ollama/`. The two prefixes select different
+  # LiteLLM integrations, and the difference is invisible until tools are used
+  # WITH STREAMING — which is exactly how the agent runs:
+  #
+  #   ollama/       streaming + tools → NO tool_call deltas. The model's tool
+  #                 call arrives as ordinary assistant TEXT, eg. the literal
+  #                 string {"name": "mcp_list_directory", "arguments": {…}}.
+  #                 Pi has nothing to execute, so the agent emits its reasoning
+  #                 and stops. It looks exactly like a hang, with no error
+  #                 anywhere: not in the proxy log, not in the gateway log, and
+  #                 not in the audit trail — because no tool call ever happened.
+  #   ollama_chat/  streaming + tools → proper tool_call deltas. Works.
+  #
+  # Non-streaming requests return correct `tool_calls` under BOTH prefixes, so a
+  # curl check against this proxy will happily pass while the agent stays broken.
+  # Reproduce the real path by sending `"stream": true` with a `tools` array.
   # ---------------------------------------------------------------------------
 
   # Writes and modifies code. Lowest temperature (0.2) and the largest context
   # of the set — the capability is tuned for correct, deterministic output.
   - model_name: computer-programmer
     litellm_params:
-      model: ollama/computer-programming
+      model: ollama_chat/computer-programming
       api_base: os.environ/OLLAMA_HOST
       api_key: none
 
@@ -59,7 +76,7 @@ model_list:
   # (0.5) to explore options without drifting from the requirements.
   - model_name: technical-lead
     litellm_params:
-      model: ollama/technical-reasoning
+      model: ollama_chat/technical-reasoning
       api_base: os.environ/OLLAMA_HOST
       api_key: none
 
@@ -67,7 +84,7 @@ model_list:
   # the role is a writer, the capability is the writing itself.
   - model_name: technical-writer
     litellm_params:
-      model: ollama/prose-writing
+      model: ollama_chat/prose-writing
       api_base: os.environ/OLLAMA_HOST
       api_key: none
 
@@ -75,7 +92,7 @@ model_list:
   # enough latitude to surface non-obvious attack paths.
   - model_name: security-analyst
     litellm_params:
-      model: ollama/security-analysis
+      model: ollama_chat/security-analysis
       api_base: os.environ/OLLAMA_HOST
       api_key: none
 
