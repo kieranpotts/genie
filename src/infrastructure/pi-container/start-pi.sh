@@ -82,8 +82,9 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   printf '  %-26s (the mcp_* tools are the only file tools)\n' "--no-builtin-tools"
   printf '  %-26s (override with PI_PROJECT_TRUST=approve)\n' "${trust_flag}"
   echo ""
-  echo "Extra arguments are passed through to Pi. To start Pi without the"
-  echo "security profile — for debugging the harness itself — run \`pi\` directly."
+  echo "Extra arguments are passed through to Pi. An interactive shell aliases"
+  echo "\`pi\` to this script; to start Pi WITHOUT the security profile — for"
+  echo "debugging the harness itself — bypass the alias with \`\\pi\`."
   exit 0
 fi
 

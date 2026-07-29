@@ -30,8 +30,8 @@ esac
 # Populate Pi's agent directory from the image template. It lives on a tmpfs
 # (Pi requires it writable, and the rootfs is not), so it is empty at the start
 # of every container and must be seeded before Pi runs. Done here rather than
-# only in `start-pi` so that running `pi` directly — the documented way to debug
-# the harness itself — also finds its extensions.
+# only in `start-pi` so that running `\pi` directly — the documented way to
+# debug the harness itself — also finds its extensions.
 seed-agent-dir || printf 'Warning: could not seed the agent directory; Pi may not find its extensions.\n' >&2
 
 # The rootfs is read-only, so bash cannot write a history file; disable it
@@ -64,6 +64,22 @@ else
   printf 'The project is mounted by compose — check PROJECT_PATH in .env.\n\n'
 fi
 unset project_dir
+
+# `pi` starts the hardened harness. This is ERGONOMICS FOR THE OPERATOR, not a
+# control, and it must not be mistaken for one: aliases exist only in
+# interactive shells, so `docker compose exec pi pi ...` never sees this, and
+# `\pi`, `command pi`, and `/usr/local/bin/pi` all step around it. What it buys
+# is that a human typing the name they already know does not get Pi with its
+# built-in tools intact. The control is still the flags `start-pi` passes.
+#
+# Aliased to `start-pi` rather than to `pi --no-builtin-tools` so that typing
+# `pi` yields the WHOLE security profile — model route, project-trust decision,
+# seeded agent directory — instead of one flag out of three.
+#
+# Bash does not re-expand an alias whose expansion begins with the alias name,
+# so this would not recurse even if it were written as `pi ...`. Raw Pi stays
+# reachable as `\pi`, which is the documented way to debug the harness itself.
+alias pi='start-pi'
 
 # Start the hardened harness, then fall back to this shell when it exits.
 #

@@ -173,8 +173,13 @@ back in, or `harnesses` to re-show the list.
 `start-pi` supplies `--model` (the proxy route, from `PI_MODEL`),
 `--no-builtin-tools`, so the `mcp_*` tools are the only file tools and the agent
 has no shell, and `--no-approve` (see below). These flags live in the image, not
-in `compose.yaml`, precisely so they cannot be lost by an override. Running `pi`
-directly bypasses them — use it only when debugging the harness itself, and note
+in `compose.yaml`, precisely so they cannot be lost by an override.
+
+An interactive shell aliases `pi` to `start-pi`, so the name an operator already
+knows gets the security profile too. That alias is a convenience, not a control:
+it exists only in interactive shells, so `docker compose exec pi pi …` never sees
+it, and `\pi`, `command pi`, and `/usr/local/bin/pi` all step around it. Raw `\pi`
+bypasses the profile — use it only when debugging the harness itself, and note
 that doing so re-enables Pi's built-in `read`/`grep`/`find`/`edit` against the
 project mount below.
 
