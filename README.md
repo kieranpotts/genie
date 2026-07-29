@@ -39,7 +39,15 @@ To use the full hardened agent infrastructure, the following tools are required,
 too:
 
 - [Docker][docker] and the [Docker MCP Toolkit][docker-mcp-toolkit]
-- [LiteLLM][lite-llm]
+- [LiteLLM][lite-llm], **with the proxy extra**:
+
+  ```sh
+  pipx install 'litellm[proxy]'
+  ```
+
+  The `[proxy]` extra is not optional here. A plain `pip install litellm`
+  installs the SDK but no `litellm` command, and `./run/startup` needs the
+  proxy server on `PATH`.
 
 ## 🧭 Usage
 
