@@ -127,8 +127,8 @@ describe('McpClient', () => {
       url: 'http://gw/mcp',
       fetch: fakeFetch((req) => { seen = req.params; return { content: [{ type: 'text', text: 'hi' }] } }),
     })
-    const out = await client.callTool('read_file', { path: '/projects/active/x' })
-    assert.deepEqual(seen, { name: 'read_file', arguments: { path: '/projects/active/x' } })
+    const out = await client.callTool('read_file', { path: '/workspace/x' })
+    assert.deepEqual(seen, { name: 'read_file', arguments: { path: '/workspace/x' } })
     assert.deepEqual(out, { content: [{ type: 'text', text: 'hi' }] })
   })
 

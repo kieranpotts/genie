@@ -8,7 +8,7 @@
 # it can actually see. Get this wrong and the boundary is wrong.
 #
 # The gateway is pointed at this file with `--catalog` (see compose.yaml). The
-# project volume is mounted into the spawned server at /projects/active, and the
+# project volume is mounted into the spawned server at /workspace, and the
 # server is told to confine itself to exactly that path.
 #
 # ⚠️ SCHEMA CAVEAT: the catalog format is owned by the Docker MCP Toolkit and
@@ -31,8 +31,8 @@ registry:
     # The allowed directory, passed as the server's command argument. This IS
     # the boundary — the server refuses operations outside it.
     command:
-      - /projects/active
+      - /workspace
     # What the spawned server container can see. The named project volume only;
     # nothing else of the host or the gateway.
     volumes:
-      - "project:/projects/active"
+      - "project:/workspace"

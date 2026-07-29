@@ -64,9 +64,9 @@ which fires before a tool is invoked:
     on the host system. A representative sample of log entries is shown below.
 
 ```json
-{"ts":"2026-06-04T12:00:00.000Z","tool":"write","status":"approved","reason":"user approved","detail":"write: /projects/active/x.ts"}
-{"ts":"2026-06-04T12:00:10.000Z","tool":"mcp_read_file","status":"denied","reason":"mcp_read_file blocked: sensitive file refused: .env","detail":"mcp_read_file: /projects/active/.env"}
-{"ts":"2026-06-04T12:00:30.000Z","tool":"mcp_write_file","status":"denied","reason":"mcp_write_file blocked: confirmation timed out (default deny)","detail":"mcp_write_file: /projects/active/y.ts"}
+{"ts":"2026-06-04T12:00:00.000Z","tool":"write","status":"approved","reason":"user approved","detail":"write: /workspace/x.ts"}
+{"ts":"2026-06-04T12:00:10.000Z","tool":"mcp_read_file","status":"denied","reason":"mcp_read_file blocked: sensitive file refused: .env","detail":"mcp_read_file: /workspace/.env"}
+{"ts":"2026-06-04T12:00:30.000Z","tool":"mcp_write_file","status":"denied","reason":"mcp_write_file blocked: confirmation timed out (default deny)","detail":"mcp_write_file: /workspace/y.ts"}
 ```
 
 ### What this does not do

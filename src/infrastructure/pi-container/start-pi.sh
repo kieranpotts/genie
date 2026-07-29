@@ -18,7 +18,7 @@
 #   --no-builtin-tools THIS IS THE CONTROL, not a tidying-up flag. Pi's built-in
 #                      read, grep, find, edit, and write operate directly on
 #                      THIS container's filesystem — which mounts the project
-#                      read-only at /projects/active for the operator. Without
+#                      read-only at /workspace for the operator. Without
 #                      this flag the agent can read every project file locally,
 #                      bypassing the MCP server that is supposed to be its only
 #                      route to them, with none of that server's mediation or

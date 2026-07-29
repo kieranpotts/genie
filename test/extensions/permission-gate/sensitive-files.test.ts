@@ -8,20 +8,20 @@ import {
 
 describe('isSensitiveFile', () => {
   for (const name of ['.env', '.env.local', '.env.production', 'id_rsa', 'id_ed25519.pub', 'server.pem', 'private.key', 'cert.p12', 'cert.pfx', '.netrc', '.npmrc', '.pgpass', '.git-credentials', 'credentials']) {
-    it(`refuses ${name}`, () => assert.equal(isSensitiveFile(`/projects/active/${name}`), true))
+    it(`refuses ${name}`, () => assert.equal(isSensitiveFile(`/workspace/${name}`), true))
   }
 
   for (const name of ['index.ts', 'README.md', 'env.example', 'keyboard.ts', 'package.json', 'credentials.md']) {
-    it(`allows ${name}`, () => assert.equal(isSensitiveFile(`/projects/active/${name}`), false))
+    it(`allows ${name}`, () => assert.equal(isSensitiveFile(`/workspace/${name}`), false))
   }
 
   it('matches case-insensitively', () => {
-    assert.equal(isSensitiveFile('/projects/active/ID_RSA'), true)
-    assert.equal(isSensitiveFile('/projects/active/Server.PEM'), true)
+    assert.equal(isSensitiveFile('/workspace/ID_RSA'), true)
+    assert.equal(isSensitiveFile('/workspace/Server.PEM'), true)
   })
 
   it('matches on the basename, not the directory', () => {
-    assert.equal(isSensitiveFile('/projects/active/.env/notes.txt'), false)
+    assert.equal(isSensitiveFile('/workspace/.env/notes.txt'), false)
     assert.equal(isSensitiveFile('/home/pi/deep/nested/.env'), true)
   })
 
@@ -32,7 +32,7 @@ describe('isSensitiveFile', () => {
 
 describe('pathArguments', () => {
   it('collects a single path argument', () => {
-    assert.deepEqual(pathArguments({ path: '/projects/active/x.ts' }), ['/projects/active/x.ts'])
+    assert.deepEqual(pathArguments({ path: '/workspace/x.ts' }), ['/workspace/x.ts'])
   })
 
   it('collects an array of paths (read_multiple_files)', () => {
@@ -66,7 +66,7 @@ describe('pathArguments', () => {
 
 describe('findSensitiveArgument', () => {
   it('finds a sensitive path argument', () => {
-    assert.equal(findSensitiveArgument({ path: '/projects/active/.env' }), '/projects/active/.env')
+    assert.equal(findSensitiveArgument({ path: '/workspace/.env' }), '/workspace/.env')
   })
 
   it('finds a sensitive entry inside an array of paths', () => {
@@ -90,11 +90,11 @@ describe('findSensitiveArgument', () => {
   it('does NOT fire on a search pattern that looks like a key file', () => {
     // `search_files` takes `pattern`, which is not a path — blocking it would
     // deny a legitimate search for key files by name.
-    assert.equal(findSensitiveArgument({ path: '/projects/active', pattern: '*.key' }), undefined)
+    assert.equal(findSensitiveArgument({ path: '/workspace', pattern: '*.key' }), undefined)
   })
 
   it('returns undefined for an ordinary call', () => {
-    assert.equal(findSensitiveArgument({ path: '/projects/active/src/x.ts' }), undefined)
+    assert.equal(findSensitiveArgument({ path: '/workspace/src/x.ts' }), undefined)
   })
 
   it('returns undefined for an empty input', () => {

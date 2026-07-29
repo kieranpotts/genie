@@ -164,7 +164,7 @@ CMD ["bash"]
 #     LITELLM_MASTER_KEY:   (proxy token only — not a cloud key)
 #   NO bind of /var/run/docker.sock
 #   NO bind of host dotfiles
-#   project bound READ-ONLY at /projects/active, for the operator to browse;
+#   project bound READ-ONLY at /workspace, for the operator to browse;
 #     the agent has no local tool that can read it, so it reaches project files
 #     ONLY via the MCP server over agent-net
 # ===========================================================================

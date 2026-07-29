@@ -29,7 +29,7 @@ describe('requiresConfirmation', () => {
 
 describe('describeCall', () => {
   it('summarises a path call', () => {
-    assert.equal(describeCall('write', { path: '/projects/active/x.ts' }), 'write: /projects/active/x.ts')
+    assert.equal(describeCall('write', { path: '/workspace/x.ts' }), 'write: /workspace/x.ts')
   })
 
   it('ignores a command argument, which no tool takes', () => {
@@ -51,7 +51,7 @@ describe('describeCall', () => {
   })
 
   it('truncates a very long path list', () => {
-    const paths = Array.from({ length: 40 }, (_, i) => `/projects/active/file-${i}.ts`)
+    const paths = Array.from({ length: 40 }, (_, i) => `/workspace/file-${i}.ts`)
     const out = describeCall('mcp_read_multiple_files', { paths })
     assert.equal(out.length <= 'mcp_read_multiple_files: '.length + 120, true)
     assert.match(out, /…$/)

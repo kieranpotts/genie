@@ -143,14 +143,14 @@ and the hardened `pi` container.
 **5. Start an agent**
 
 Entering the container lands you in the hardened Pi harness, with your shell's
-working directory set to the project at `/projects/active`:
+working directory set to the project at `/workspace`:
 
 ```sh
 docker compose -f src/infrastructure/compose.yaml exec pi bash
 ```
 
 ```
-pi-container:/projects/active$
+pi-container:/workspace$
 ```
 
 If you land in `~` instead, the shell says so on entry — the project volume is
@@ -190,7 +190,7 @@ exist only for the length of a session someone is actually sitting in.
 
 **6. Browse the project (as the operator)**
 
-The project is mounted **read-only** at `/projects/active`, which is where your
+The project is mounted **read-only** at `/workspace`, which is where your
 shell starts — so `ls` shows exactly what the agent is working against. To look
 without starting an agent at all:
 
@@ -218,10 +218,10 @@ what keeps the change trail complete.
 | Check | How | Expect |
 |---|---|---|
 | Agent holds no cloud keys | `docker compose -f src/infrastructure/compose.yaml exec pi env \| grep -i api_key` | no `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` |
-| Project mount is read-only | `docker compose ... exec pi touch /projects/active/x 2>&1` | `Read-only file system` |
+| Project mount is read-only | `docker compose ... exec pi touch /workspace/x 2>&1` | `Read-only file system` |
 | Agent has no Docker socket | `docker compose ... exec pi ls -l /var/run/docker.sock 2>&1` | no such file |
 | Mediated read works | ask the agent to read a file in the project | returns content via an `mcp_*` tool |
-| Agent has no local tools | ask it to run a shell command, or to read `/projects/active/README.md` without MCP | it has no such tool to call; only `mcp_*` tools are offered |
+| Agent has no local tools | ask it to run a shell command, or to read `/workspace/README.md` without MCP | it has no such tool to call; only `mcp_*` tools are offered |
 | Traversal denied | ask it to read `../../etc/passwd` | denied at the MCP boundary |
 | Sensitive file refused | ask it to read `.env` in the project | refused before the call runs; the permission-gate log shows `sensitive file refused` |
 | Write requires approval | ask it to write a file | a confirmation prompt appears; on approve, write succeeds |

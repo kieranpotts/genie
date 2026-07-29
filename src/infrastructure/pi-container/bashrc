@@ -45,7 +45,7 @@ PS1='\[\033[34m\]pi-container\[\033[0m\]:\w\$ '
 # or a compose file without the project volume), and noisy when the mount is
 # missing, because silently sitting in $HOME is precisely the confusing symptom
 # this exists to prevent.
-project_dir="${PI_PROJECT_DIR:-/projects/active}"
+project_dir="${PI_PROJECT_DIR:-/workspace}"
 if [[ -d "${project_dir}" ]]; then
   cd "${project_dir}" || true
 else

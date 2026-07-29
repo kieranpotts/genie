@@ -21,7 +21,7 @@ claimed and what is enforced.
   The no-mount rule was written for the agent, but it took the operator's
   visibility with it — a shell in the container could see only `/home/pi`, so
   "is the project loaded correctly?" was unanswerable from inside the boundary.
-  The project is now mounted READ-ONLY at `/projects/active` for the operator,
+  The project is now mounted READ-ONLY at `/workspace` for the operator,
   and a path fence in the bash policy (`AUDITED_BASH_FENCE`) refuses any agent
   command reaching into it, so the agent's route to project files is still the
   MCP server. `:ro` means the MCP server keeps the only writable handle, so the
@@ -80,7 +80,7 @@ claimed and what is enforced.
   sees nothing to object to:
 
   ```
-  node -e "require('fs').readFileSync('/projects/active/.env','utf8')"
+  node -e "require('fs').readFileSync('/workspace/.env','utf8')"
   ```
 
   One allowlisted program, no shell operators, no token resolving into a fenced
@@ -145,7 +145,7 @@ claimed and what is enforced.
     lexical resolution, no symlink assumption, no "only as strong as the
     allowlist".
   - **Nothing demonstrably depended on it.** The tool ran in `/home/pi`, fenced
-    out of `/projects/active`, on a read-only rootfs. It could not run project
+    out of `/workspace`, on a read-only rootfs. It could not run project
     tests or builds. Its main demonstrated capability was being the interpreter
     that defeated the fence — which is the thing that was removed.
 
@@ -154,7 +154,7 @@ claimed and what is enforced.
   - **`--no-builtin-tools` stays.** This was the original motivation for the
     whole discussion and it does not survive contact. The flag exists because
     Pi's built-in `read`, `grep`, `find`, and `edit` operate directly on the
-    container filesystem, which mounts the project at `/projects/active`.
+    container filesystem, which mounts the project at `/workspace`.
     Dropping it hands the agent an unmediated route to every project file,
     bypassing MCP entirely — a *wider* hole than the fence ever was, and one
     `permission-gate` would not catch (`policy.ts` gates `write`/`edit`/`bash`
@@ -166,7 +166,7 @@ claimed and what is enforced.
   - **Deleted:** `src/extensions/audited-tools/` and
     `test/extensions/audited-tools/`.
   - **Infrastructure:** the four `AUDITED_*` variables, the fence rationale on
-    the `project:/projects/active:ro` mount, and the `pi-logs` comment in
+    the `project:/workspace:ro` mount, and the `pi-logs` comment in
     `compose.yaml`; the `COPY`, the `/var/log/pi/audited-tools` mkdir, the
     header note and the footer hardening block in the Dockerfile; the
     `AUDITED_BASH_CWD` comment in `bashrc`; the "audited tools only" greeting in
@@ -266,7 +266,7 @@ claimed and what is enforced.
 
   Note also that the sensitive-filename refusal does not backstop this case:
   `sensitive-files.ts` whitespace-splits `command`, so the basename of
-  `readFileSync('/projects/active/.env','utf8')` is `.env','utf8')`, which
+  `readFileSync('/workspace/.env','utf8')` is `.env','utf8')`, which
   matches no pattern. It catches `cat .env`; it does not catch a payload.
 
 - [ ] **Use the gateway's own controls — `--tools` and `--verify-signatures`.**
@@ -373,17 +373,35 @@ claimed and what is enforced.
   `compose.yaml:101` binds the host Docker socket into `mcp-gateway`.
   `src/infrastructure/README.md`'s "The docker.sock trade-off (read this)"
   section documents and justifies this honestly and at length, but
-  `docs/solution.md` never mentions it: the diagram at line 213 labels the
-  pi-container "no FS, docker.sock, or keys" and the hardening table at line 277
-  says "no `docker.sock`" — both true of the *agent*, but together they read as
-  though no component holds one. `docs/requirements.md:11` names host Docker
-  control explicitly, so this is the most important of the documentation gaps.
+  `docs/solution.md` never mentions it: the trust-boundary diagram labels the
+  pi-container "no agent file tools, no docker.sock, no keys" and the hardening
+  table says "no `docker.sock`" — both true of the *agent*, but together they
+  read as though no component holds one. Neither that diagram nor any other in
+  `docs/solution.md` shows `mcp-gateway` at all, which is the component that
+  actually holds the socket. `docs/requirements.md` names host Docker control
+  explicitly, so this is the most important of the documentation gaps.
 
-- [ ] **Reconcile multi-project diagrams with the single-project reality.**
-  The diagrams and the mount view show `proj-a`/`proj-b` volumes and
-  "per-project perms". Compose supports exactly one project (`PROJECT_PATH` →
-  the `project` volume → `/projects/active`). The sequence-diagram paths
-  (`/projects/proj-a/src/x.ts`) match nothing deployed.
+- [x] **Reconcile multi-project diagrams with the single-project reality.**
+  The diagrams and the mount view showed `proj-a`/`proj-b` volumes and
+  "per-project perms"; compose supports exactly one project. Resolved by
+  committing to single-project as the ARCHITECTURE rather than by redrawing the
+  diagrams to match an accident of the build.
+
+  Single-project is now a stated requirement (`docs/requirements.md`) with its
+  reasoning: multi-project would mean the agent could name a second project's
+  path, which turns "outside the project scope" from one directory boundary into
+  a per-project permission model the MCP filesystem server does not implement.
+  The sequence diagram, the trust-boundary diagram, and the mount view now show
+  one volume, and the hardening table gained a "Project scoping" row. Two
+  projects means two stacks with different `PROJECT_PATH` values.
+
+  The mount was renamed `/projects/active` → `/workspace` in the same pass. The
+  old path was the residue of the multi-project design: a `/projects/` parent
+  holding exactly one child called `active` — a slot with nothing to distinguish
+  it from — whose empty, root-owned parent directory was a live source of
+  confusion when traversing the container. Renamed across `compose.yaml` (both
+  services), `catalog.yaml` (both the `command` boundary arg and the `volumes`
+  entry), the `Dockerfile`, `start-pi.sh`, `bashrc`, both READMEs, and the tests.
 
 ## Hygiene
 

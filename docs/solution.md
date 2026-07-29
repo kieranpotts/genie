@@ -79,10 +79,20 @@ argument concrete.
 ## Containerized Pi instance
 
 The next layer of defense is a dedicated, hardened container for running Pi
-agents in. Guest agents have no direct access to the host filesystem, and
-there are not even any project filesystem mounts. There's no access to Docker
-sockets either, preventing badly behaving models from taking control of the
-host's Docker daemon.
+agents in. Guest agents have no direct access to the host filesystem. There's
+no access to Docker sockets either, preventing badly behaving models from
+taking control of the host's Docker daemon.
+
+The container does carry one project mount, at `/workspace`, and it is worth
+being precise about who it is for. It is mounted **read-only, for the human
+operator** — someone who enters the container needs to see what they are
+working with. It is not the agent's route to files and cannot become one:
+Pi runs with `--no-builtin-tools`, so it has no `read`, `grep`, `find`, or
+`edit` to point at that mount, and no extension restores them. The `mcp_*`
+tools are the agent's only file surface, and they resolve inside the MCP
+server's container, not this one. The `:ro` flag is the backstop — even if a
+local tool were ever restored, the only *writable* handle on the project
+stays with the MCP server, so the audit trail of changes remains complete.
 
 All interactions with the outside world happen via:
 
@@ -113,26 +123,39 @@ tool calls. The containerized MCP server enforces what tool calls are allowed.
 Thus, the MCP server becomes the gatekeeper to the host system. Access is
 mediated using scoped allowlists. Every call is logged.
 
+The allowlist is a single directory: `/workspace`, the one project this stack
+is scoped to (see `docs/requirements.md`). That boundary is declared in the
+Docker MCP Toolkit catalog entry (`src/infrastructure/mcp/toolkit/catalog.yaml`),
+whose `command` argument is the allowed directory and whose `volumes` entry is
+all the spawned server can see. Those two must name the same path — if they
+disagree, the server confines itself to a directory it cannot reach and every
+call fails.
+
 ```mermaid
 sequenceDiagram
   participant Pi as pi-container
   participant MCP as mcp-server
-  participant FS as project-a volume
+  participant FS as workspace volume
 
   Note over Pi,FS: Legitimate file write.
-  Pi->>MCP: write_file("/projects/proj-a/src/x.ts", …)
-  MCP->>MCP: check path within project root ✅
+  Pi->>MCP: write_file("/workspace/src/x.ts", …)
+  MCP->>MCP: check path within /workspace ✅
   MCP->>MCP: append audit log entry
   MCP->>FS: write bytes
   FS-->>MCP: ok
   MCP-->>Pi: { ok: true }
 
   Note over Pi,FS: Illegal directory traversal attempt — denied at boundary.
-  Pi->>MCP: read_file("/projects/project-a/../../etc/passwd")
-  MCP->>MCP: check path within project root ❌
+  Pi->>MCP: read_file("/workspace/../etc/passwd")
+  MCP->>MCP: check path within /workspace ❌
   MCP->>MCP: append audit log entry
   MCP-->>Pi: { error: "path outside allowlist" }
   Note right of FS: filesystem not touched
+
+  Note over Pi,FS: Sensitive filename — refused before it reaches MCP.
+  Pi->>Pi: permission-gate tool_call hook
+  Pi-->>Pi: { error: "sensitive file refused: .env" }
+  Note right of FS: no MCP call issued
 ```
 
 This design aligns with emerging best practices for secure agent harnesses. MCP
@@ -210,14 +233,13 @@ flowchart TB
   end
 
   subgraph Net["Docker network: agent-net"]
-    Pi["<b>pi-container</b><br/>Pi + MCP client extension<br/>(no FS, docker.sock, or keys)"]
-    MCP["<b>mcp-server-container</b><br/>path + operation allowlist, logging (only component with host FS access)"]
-    VolA[("proj-a volume")]
-    VolB[("proj-b volume")]
+    Pi["<b>pi-container</b><br/>Pi + MCP client extension<br/>(no agent file tools, no docker.sock, no keys)"]
+    MCP["<b>mcp-server-container</b><br/>path + operation allowlist, logging<br/>(only writable handle on the project)"]
+    Vol[("workspace volume<br/>the one project, PROJECT_PATH")]
 
     Pi -->|"MCP tool calls<br/>(HTTP/SSE or stdio)"| MCP
-    MCP --> VolA
-    MCP --> VolB
+    MCP -->|"read/write"| Vol
+    Vol -.->|"read-only, operator view only"| Pi
   end
 
   Pi -->|"model calls<br/>host-gateway:4000"| Proxy
@@ -250,14 +272,17 @@ Host Machine
     │
     ├── pi-container
     │   ├── Pi process + MCP client extension
-    │   └── /home/pi - Pi config + session history (saved to named volume)
+    │   ├── /home/pi - Pi config + session history (saved to named volume)
+    │   └── /workspace - the project, READ-ONLY, for the operator to browse.
+    │         The agent has no local tool that can read it.
     │
     └── mcp-server-container
         ├── MCP server process
-        │   Enforces path allowlist, operation allowlist, per-project perms, logging
+        │   Enforces path allowlist, operation allowlist, logging
         │
-        ├── /projects/proj-a - scoped named volume (read/write)
-        └── /projects/proj-b - scoped named volume (read/write)
+        └── /workspace - the same named volume (read/write). The only
+              writable handle on the project. One project per stack;
+              a second project means a second stack.
 ```
 
 The following table summarizes all the custom security hardening solutions
@@ -267,6 +292,7 @@ to what's described above.
 | Requirement                         | Hardening solution                                                                                                                                                      |
 |-------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Filesystem access control           | ALL agent file access mediated by the MCP server, reached by the `mcp-client` extension. The project is mounted read-only in the agent container for the human operator to browse; the agent has no local tool that can read it (`--no-builtin-tools`, and no extension restores one), and the MCP server holds the only writable handle. |
+| Project scoping                     | Exactly ONE project per stack, at `/workspace`, set by `PROJECT_PATH`. The allowlist is therefore a single directory rather than a per-project permission model — see `docs/requirements.md` for why this is a requirement and not an unfinished feature. Two projects means two stacks. |
 | Command execution control           | The agent cannot execute anything. `--no-builtin-tools` removes Pi's `bash`, and no extension provides a replacement, so there is no execution surface to police. This replaced an `audited-tools` extension that allowlisted commands from inside the agent's own process — a cooperative guard whose fence was self-enforced and lexical, and which interpreters on its allowlist (`node -e`, `python3 -c`) could read straight through. Removing the capability is the stronger control. See `TODO.md`, which also records the deferred option of an out-of-process exec MCP server should execution ever be needed. |
 | Permission prompts / approval gates | `permission-gate` extension requires interactive confirmation for mutating calls — writes, edits, moves, directory creation (`tool_call` events). Denies access by default. There is no execution to gate; see the row above. |
 | Sensitive-file refusal              | `permission-gate` refuses any call naming secrets or key material (`.env*`, `id_rsa`, `*.pem`, `*.key`, …) on filename patterns. Absolute — no approval path — and applied to every tool call, `mcp_*` included. |
