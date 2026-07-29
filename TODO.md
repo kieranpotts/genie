@@ -68,6 +68,54 @@ claimed and what is enforced.
   by the private `agent-net` bridge, which is now stated as the actual control.
   The `mcp-client` still sends the header if the variable is ever set.
 
+- [ ] **Decide whether interpreters stay on the default bash allowlist.**
+  The path fence added with the read-only project mount is only as strong as the
+  allowlist it sits behind, and the default allowlist includes `node`, `npm`,
+  `npx`, `python`, `python3`, `pip`, `make`, `cargo`, and `go`. Each is a
+  general-purpose interpreter, so the fence — which inspects command *tokens* —
+  sees nothing to object to:
+
+  ```
+  node -e "require('fs').readFileSync('/projects/active/.env','utf8')"
+  ```
+
+  One allowlisted program, no shell operators, no token resolving into a fenced
+  root. It reads the file, unmediated and outside the MCP audit trail. `python3
+  -c` is the same shape, and `make` will run whatever a fenced `Makefile` says.
+  The `:ro` mount still prevents writes, so this is a **read** and
+  **exfiltration** exposure, not a tampering one — the change trail stays
+  complete either way.
+
+  What stops it today is the operator, not the fence: `permission-gate` requires
+  confirmation for every `bash` call, so a `node -e "…"` is shown before it runs.
+  That is a real control, but it is human vigilance on a string that may be long,
+  minified, or boring on the hundredth prompt — precisely the conditions under
+  which approval fatigue sets in. For an away-from-keyboard agent in a regulated
+  context (`docs/requirements.md`), that is thin.
+
+  The options, in the order they are worth considering:
+
+  1. **Trim the default allowlist to the read-only inspection set** (`ls`, `cat`,
+     `head`, `grep`, `find`, …), dropping every interpreter. The fence then holds
+     on its own. Costs the agent the ability to run anything — but note it
+     already cannot run project tests or builds, because the project is mounted
+     read-only and most toolchains need to write. So the practical loss may be
+     smaller than it looks. **Check what the interpreters are actually being used
+     for before assuming otherwise.**
+  2. **Keep them and drop the fence's claim to being a control**, describing it
+     honestly as an ergonomic guardrail that keeps the model pointed at the
+     `mcp_*` tools, with operator confirmation as the actual boundary.
+  3. **Vet interpreter invocations specifically** — reject `-e`/`-c`/`--eval`
+     and their equivalents, so the interpreters can only run files, which the
+     fence *can* see. Narrows the hole without removing the tools, but it is an
+     allowlist of flags per interpreter, which is the kind of thing that is
+     wrong six months later when a flag is added.
+
+  Option 1 is the recommendation unless the interpreters are earning their place.
+  Whichever is chosen, the fence's limits are already stated where they are
+  enforced (`src/extensions/audited-tools/bash-policy.ts`) and in that
+  extension's README — those need updating to match the decision.
+
 - [ ] **Enforce network egress control, or drop the claim.**
   The hardening table says the container "reaches the model only via the host
   proxy" and that "the only outbound network is the proxy and the MCP gateway".
