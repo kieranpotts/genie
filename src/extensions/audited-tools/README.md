@@ -92,7 +92,8 @@ that is mediated and logged.
 >   allowlisted, the fence stops accidents and casual paths, and the operator
 >   confirmation in [`permission-gate`](../permission-gate/) (every `bash` call is
 >   confirmed) is what stops the rest. Trim `AUDITED_BASH_ALLOWLIST` if you need
->   the fence to hold on its own.
+>   the fence to hold on its own — this is an open decision, recorded with its
+>   options in the repository's `TODO.md`.
 >
 > The `:ro` on the mount is the control that does not depend on any of this: the
 > agent cannot write to the project through that path however the fence fares, so

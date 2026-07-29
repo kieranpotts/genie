@@ -124,6 +124,11 @@ claimed and what is enforced.
   own calls; nothing stops a tool, an extension, or `npx`. (Check `host-gateway`
   reachability before switching the network to `internal: true`.)
 
+  This compounds the allowlist item above: an interpreter that can read a fenced
+  file can also post it somewhere. Either fix alone reduces the exposure —
+  closing egress means a read cannot leave; trimming the allowlist means there is
+  nothing to read with — so they are worth weighing together rather than in turn.
+
 ## Documentation fixes — the design overstates the build
 
 - [ ] **Three of the four documented hooks are not used anywhere.**
