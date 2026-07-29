@@ -205,8 +205,12 @@ and no Docker control. (The MCP gateway does hold a host Docker socket, because
 it spawns the MCP server — confined to a component the agent cannot reach. See
 [the trade-off](./docs/solution.md#the-gateway-and-the-dockersock-trade-off).)
 
-Plus every model request, tool call, and filesystem action an agent performs
-is logged.
+Plus every tool call an agent makes is logged — both what it attempted and what
+the call actually did. Since the agent's only tools are filesystem tools, that
+is every filesystem action it takes.
+
+Model requests are **not** logged here. The host-side proxy is the component
+positioned to do that, and this repository neither implements nor verifies it.
 
 These components are installed and managed separately from the Pi extension.
 See the [**infrastructure runbook**](./src/infrastructure/README.md) for

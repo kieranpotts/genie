@@ -306,10 +306,12 @@ what keeps the change trail complete.
 | Mediated read works | ask the agent to read a file in the project | returns content via an `mcp_*` tool |
 | Agent has no local tools | ask it to run a shell command, or to read `/workspace/README.md` without MCP | it has no such tool to call; only `mcp_*` tools are offered |
 | Traversal denied | ask it to read `../../etc/passwd` | denied at the MCP boundary |
-| Sensitive file refused | ask it to read `.env` in the project | refused before the call runs; the call log shows `"outcome":"blocked","confirmation":"not-offered"` |
+| Sensitive file refused | ask it to read `.env` in the project | refused before the call runs; the call log shows `"phase":"call","outcome":"blocked","confirmation":"not-offered"` |
 | Write requires approval | ask it to write a file | a confirmation prompt appears; on approve, write succeeds |
 | Default-deny on timeout | ignore the prompt for 60s | the write is blocked; the call log shows `"confirmation":"timeout"` |
-| Reads are recorded | ask it to read any ordinary project file | the call log gains an `"outcome":"allowed","confirmation":"not-required"` line naming the path |
+| Reads are recorded | ask it to read any ordinary project file | the call log gains a `"phase":"call","outcome":"allowed","confirmation":"not-required"` line naming the path |
+| Results are recorded | ask it to read any ordinary project file | a second `"phase":"result"` line follows with the same `id` and `"result":"ok"` |
+| A downstream refusal is visible as one | ask it to read `../../etc/passwd` | the `call` line says `"outcome":"allowed"` (the gate admitted it) and the `result` line says `"result":"error"` (the MCP server refused it). This pairing is the thing the trail could not express before. |
 | Tool surface is the documented eleven | the tool-surface check below | exactly the eleven `mcp_*` tools listed in `docs/solution.md`; no `bash`, no Git, no web fetch |
 | No network binaries | `docker compose ... exec pi sh -c 'for b in git curl wget nc ssh; do command -v $b \|\| echo "$b absent"; done'` | all five absent |
 | Gateway starts hardened | `docker compose ... up` then `docker compose ... ps` | `mcp-gateway` is healthy with `cap_drop: ALL` + read-only rootfs. If it fails to start, relax `cap_drop` to the minimum it reports needing (see the compose comment). |
@@ -387,16 +389,29 @@ changing the gateway's `--servers`/`--tools` flags, the catalog, or the pinned
 
 The log lives on the `pi-logs` volume, outside the agent's read-only rootfs. It
 records **every** tool call the agent makes — reads included, which are never
-prompted for — one JSON line each:
+prompted for:
 
 ```sh
 docker compose -f src/infrastructure/compose.yaml exec pi cat /var/log/pi/permission-gate/calls.jsonl
 ```
 
-Each line carries two independent fields: `outcome` (`allowed` / `blocked`) says
-whether the call ran, and `confirmation` says whether a human was involved and
-what they said. Keeping them apart is what lets a review separate a policy
-refusal from an operator's rejection by field rather than by reading prose:
+**A call writes two lines, joined by `id`.** This is the first thing to know
+before querying it, because every naive count is otherwise doubled:
+
+| `phase` | Written | Says |
+|---|---|---|
+| `call` | before the tool runs | what the **gate** decided: `outcome` (`allowed` / `blocked`) and `confirmation` (whether a human was involved, and what they said) |
+| `result` | after the tool runs | what the **tool** did: `result` (`ok` / `error`) |
+
+Both are needed. The gate admits calls but does not perform them, so a read of a
+path outside `/workspace` is `allowed` on the `call` line and `error` on the
+`result` line — the MCP server refused it, and only the second line knows.
+Keeping `outcome` and `confirmation` apart on the first line is likewise what
+lets a review separate a policy refusal from an operator's rejection by field
+rather than by reading prose.
+
+Neither line ever carries tool *content*. `detail` is the path; the file's
+contents are never copied into the trail.
 
 The image has no `jq` — it is a hardened runtime, not an analysis box — so pipe
 the log out to the host and query it there:
@@ -404,26 +419,39 @@ the log out to the host and query it there:
 ```sh
 LOG='docker compose -f src/infrastructure/compose.yaml exec -T pi cat /var/log/pi/permission-gate/calls.jsonl'
 
-# Everything that did not run, and why — by cause, not by grepping English.
-$LOG | jq -r 'select(.outcome=="blocked") | [.confirmation, .tool, .detail] | @tsv'
+# Everything the gate refused, and why — by cause, not by grepping English.
+$LOG | jq -r 'select(.phase=="call" and .outcome=="blocked") | [.confirmation, .tool, .detail] | @tsv'
 
 # Refused outright by policy: no approval path was ever offered.
 $LOG | jq 'select(.confirmation=="not-offered")'
 
+# Admitted by the gate, then refused downstream by the MCP server. These are
+# the calls a trail of attempts alone would have wrongly reported as reads.
+$LOG | jq -s '
+  (map(select(.phase=="result" and .result=="error")) | map(.id)) as $failed
+  | map(select(.phase=="call" and (.id | IN($failed[])) and .outcome=="allowed"))
+  | .[] | [.tool, .detail] | @tsv' -r
+
 # Which MCP tools are actually in use — the working set for the gateway's
 # `--tools` allowlist, which should be established from this, not guessed.
-$LOG | jq -r .tool | sort | uniq -c | sort -rn
+# NOTE the phase filter: without it every tool is counted twice.
+$LOG | jq -r 'select(.phase=="call") | .tool' | sort | uniq -c | sort -rn
 ```
 
-Two limits to know before relying on it:
+Limits to know before relying on it:
 
-- **It records attempts, not results.** The `tool_call` hook fires before the
-  call runs, so a read the MCP server then refuses — traversal, or a path
-  outside the allowed directory — appears here as `allowed`. Closing that needs
-  the `tool_result` hook or a gateway-side `after:` interceptor; see `TODO.md`.
 - **Paths, never content.** `detail` carries the path a call named and nothing
   it returned. Logging what was read would copy the secrets out of the files and
   into the audit trail.
+- **It covers tool calls, not model requests.** Nothing here records what was
+  sent to the model. The host-side proxy is the component positioned to do that,
+  and this repository neither implements nor verifies it; see `TODO.md`.
+- **It grows with activity, and nothing prunes it.** Two lines per call, and
+  reads are most of what an agent does. Retention is an open decision in
+  `TODO.md`; the failure mode is a large file on a host volume, not a broken
+  agent.
+- **No turn boundaries.** The trail is a flat sequence of calls, so grouping
+  them by the agent turn that caused them is not possible today. Also `TODO.md`.
 
 > [!IMPORTANT]
 > The `pi-logs` volume must be owned by the agent's uid (1001) or the log fails

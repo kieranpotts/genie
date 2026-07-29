@@ -29,11 +29,15 @@
  * trail the system has, which is what makes logging the read surface load-
  * bearing rather than a nicety.
  *
- * What this records is what was ATTEMPTED, not what resulted: the `tool_call`
- * hook fires before the call runs, so a read the MCP server then refuses (path
- * traversal, outside the allowed directory) is recorded here as allowed. Closing
- * that gap needs the `tool_result` hook or a gateway-side `after:` interceptor;
- * see TODO.md.
+ * TWO HOOKS, and the second is why the trail is truthful. `tool_call` fires
+ * before a call runs and records what was ATTEMPTED; on its own that asserts
+ * reads which the MCP server then refuses (path traversal, outside the allowed
+ * directory) actually happened. `tool_result` fires after, carries `isError`,
+ * and records what RESULTED. The two lines share Pi's `toolCallId` as `id`.
+ *
+ * The result handler must never log `event.content`. That field is the tool's
+ * full output — the file the agent just read — and copying it into the audit
+ * trail would defeat the point of having one.
  *
  * Note the scope this extension does NOT have to cover: the agent has no local
  * file or shell tools at all (`--no-builtin-tools`, and no extension restores
@@ -71,7 +75,13 @@ export default function (pi: ExtensionAPI): void {
     if (sensitive !== undefined) {
       const reason = `${event.toolName} blocked: sensitive file refused: ${basename(sensitive)}`
       await log.record(makeRecord({
-        tool: event.toolName, outcome: 'blocked', confirmation: 'not-offered', detail, reason,
+        phase: 'call',
+        id: event.toolCallId,
+        tool: event.toolName,
+        outcome: 'blocked',
+        confirmation: 'not-offered',
+        detail,
+        reason,
       }))
       return { block: true, reason }
     }
@@ -83,7 +93,12 @@ export default function (pi: ExtensionAPI): void {
        entire surface invisible to a reviewer. */
     if (!requiresConfirmation(event.toolName)) {
       await log.record(makeRecord({
-        tool: event.toolName, outcome: 'allowed', confirmation: 'not-required', detail,
+        phase: 'call',
+        id: event.toolCallId,
+        tool: event.toolName,
+        outcome: 'allowed',
+        confirmation: 'not-required',
+        detail,
       }))
       return undefined
     }
@@ -92,6 +107,8 @@ export default function (pi: ExtensionAPI): void {
     const decision = decide(event.toolName, outcome)
 
     await log.record(makeRecord({
+      phase: 'call',
+      id: event.toolCallId,
       tool: event.toolName,
       outcome: decision.outcome,
       confirmation: decision.confirmation,
@@ -102,6 +119,27 @@ export default function (pi: ExtensionAPI): void {
     if (decision.outcome === 'blocked') {
       return { block: true, reason: decision.reason }
     }
+    return undefined
+  })
+
+  /* What actually happened. The gate admits calls; it does not perform them, so
+     `tool_call` alone cannot say whether the MCP server honoured or refused
+     one. `isError` is that missing axis.
+
+     Every result is recorded, including results for calls this gate blocked, if
+     the harness reports them. Suppressing those would need a set of blocked ids
+     held for the life of the session — unbounded state to hide a line that is
+     accurate anyway: a blocked call whose result is an error is exactly what
+     the trail should show.
+
+     `event.content` is NEVER touched. See the header. */
+  pi.on('tool_result', async (event) => {
+    await log.record(makeRecord({
+      phase: 'result',
+      id: event.toolCallId,
+      tool: event.toolName,
+      result: event.isError ? 'error' : 'ok',
+    }))
     return undefined
   })
 }

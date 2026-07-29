@@ -64,21 +64,58 @@ which fires before a tool is invoked:
     approval by the user will allow the call.
 
 5.  **Log the call — every call.** \
-    One JSON line per tool call is appended to the call log, which lives on a
-    volume mounted from `/var/log/pi/` on the host system. This includes the
-    read-only calls that passed straight through at step 2: a trail that
-    recorded only confirmations would omit every `mcp_read_file`,
-    `mcp_list_directory` and `mcp_search_files` — which is to say every read of
-    project content, the whole reason the agent has filesystem access at all.
+    A JSON line is appended to the call log, which lives on a volume mounted
+    from `/var/log/pi/` on the host system. This includes the read-only calls
+    that passed straight through at step 2: a trail that recorded only
+    confirmations would omit every `mcp_read_file`, `mcp_list_directory` and
+    `mcp_search_files` — which is to say every read of project content, the
+    whole reason the agent has filesystem access at all.
+
+6.  **Log what the call did.** \
+    A second hook, `tool_result`, fires after the tool runs and appends a
+    second line carrying the real outcome. See below for why one line was not
+    enough.
 
 ```json
-{"ts":"2026-06-04T12:00:00.000Z","tool":"mcp_read_file","outcome":"allowed","confirmation":"not-required","detail":"mcp_read_file: /workspace/src/a.ts"}
-{"ts":"2026-06-04T12:00:05.000Z","tool":"mcp_write_file","outcome":"allowed","confirmation":"approved","detail":"mcp_write_file: /workspace/x.ts"}
-{"ts":"2026-06-04T12:00:10.000Z","tool":"mcp_read_file","outcome":"blocked","confirmation":"not-offered","detail":"mcp_read_file: /workspace/.env","reason":"mcp_read_file blocked: sensitive file refused: .env"}
-{"ts":"2026-06-04T12:00:30.000Z","tool":"mcp_write_file","outcome":"blocked","confirmation":"timeout","detail":"mcp_write_file: /workspace/y.ts","reason":"mcp_write_file blocked: confirmation timed out (default deny)"}
+{"ts":"2026-06-04T12:00:00.000Z","phase":"call","id":"tc_01","tool":"mcp_read_file","outcome":"allowed","confirmation":"not-required","detail":"mcp_read_file: /workspace/src/a.ts"}
+{"ts":"2026-06-04T12:00:00.010Z","phase":"result","id":"tc_01","tool":"mcp_read_file","result":"ok"}
+{"ts":"2026-06-04T12:00:05.000Z","phase":"call","id":"tc_02","tool":"mcp_write_file","outcome":"allowed","confirmation":"approved","detail":"mcp_write_file: /workspace/x.ts"}
+{"ts":"2026-06-04T12:00:05.020Z","phase":"result","id":"tc_02","tool":"mcp_write_file","result":"ok"}
+{"ts":"2026-06-04T12:00:10.000Z","phase":"call","id":"tc_03","tool":"mcp_read_file","outcome":"blocked","confirmation":"not-offered","detail":"mcp_read_file: /workspace/.env","reason":"mcp_read_file blocked: sensitive file refused: .env"}
+{"ts":"2026-06-04T12:00:30.000Z","phase":"call","id":"tc_04","tool":"mcp_write_file","outcome":"blocked","confirmation":"timeout","detail":"mcp_write_file: /workspace/y.ts","reason":"mcp_write_file blocked: confirmation timed out (default deny)"}
 ```
 
-### The record's two axes
+### Two lines per call
+
+`phase` distinguishes them, and `id` — Pi's `toolCallId` — joins them.
+
+| `phase` | Hook | Written | Records |
+|---|---|---|---|
+| `call` | `tool_call` | before the tool runs | what the **gate** decided |
+| `result` | `tool_result` | after the tool runs | what the **tool** did (`ok` / `error`) |
+
+The second line exists because the first is not a record of what happened. The
+gate decides *admission*; it does not perform the call. A read of a path outside
+`/workspace` is admitted here and then refused by the MCP filesystem server, so
+a trail of attempts alone asserts reads that never occurred:
+
+```json
+{"ts":"…","phase":"call","id":"tc_09","tool":"mcp_read_file","outcome":"allowed","confirmation":"not-required","detail":"mcp_read_file: /workspace/../etc/passwd"}
+{"ts":"…","phase":"result","id":"tc_09","tool":"mcp_read_file","result":"error"}
+```
+
+**Two lines rather than one enriched line, deliberately.** Buffering the attempt
+in memory until the result arrived would give one tidy line per call, but the
+only record of the attempt would live in the process for the duration of the
+call — so a crash, a kill, or an OOM between the two would erase the evidence
+that it was ever made. Appending on observation means the trail is never less
+complete than the events that have actually happened. The cost is volume, which
+is why retention is an open item in `TODO.md`.
+
+A blocked call has no `result` line if the harness never runs the tool. The
+absence is not ambiguous: the `call` line already says `blocked` and why.
+
+### The attempt record's two axes
 
 `outcome` and `confirmation` are deliberately **separate fields**, because they
 answer different questions and a reviewer needs both:
@@ -107,15 +144,22 @@ already say everything there is to say.
 
 ### What the log does not capture
 
-- **Attempts, not results.** The `tool_call` hook fires *before* the call runs,
-  so this records what was requested. A read that the MCP filesystem server then
-  refuses — path traversal, or a path outside the allowed directory — is logged
-  here as `allowed`, because the gate never sees the outcome. Recording what a
-  call actually *did* needs the `tool_result` hook or a gateway-side `after:`
-  interceptor; both are open items in `TODO.md`.
 - **Paths, never content.** `detail` carries the path a call named, never what
-  it returned. Logging what was read would copy the secrets out of the files and
-  into the audit trail, which is the opposite of the point.
+  it returned. The `result` line is deliberately minimal for the same reason:
+  `tool_result` hands the handler the tool's entire output — the file the agent
+  just read — and copying that here would turn the audit trail into a second
+  copy of every secret the agent has touched.
+- **Model requests.** Nothing here records what was sent to the model. That
+  would be the `before_provider_request` hook, which this extension does not
+  handle; the payload is the whole conversation, so logging it naively has the
+  same problem as logging content. A scoped, metadata-only version is an open
+  item in `TODO.md`.
+- **Turn boundaries.** The trail is a flat sequence of calls; grouping them by
+  the agent turn that caused them would need `before_agent_start`. Open item.
+- **Secret-shaped content reaching the model.** The filename refusal at step 1
+  stops `.env` and `id_rsa` being *opened*, but a key pasted into an ordinary
+  `.txt` passes through. Redacting tool output would be a `tool_result`
+  responsibility; it is not implemented. Open item.
 
 ### What this extension does not enforce
 

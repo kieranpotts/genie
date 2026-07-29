@@ -37,36 +37,47 @@ flowchart LR
 ## Pi extensions
 
 The first layer of defense in my hardened agent harness design is a suite of
-Pi extensions that add security controls. The following hooks are used to
-intercept tool and model calls from the harness.
+Pi extensions that add security controls. Three hooks are handled, and this
+section describes what they do rather than what the extension API makes
+possible — the two drifted apart once before, and the second is the thing that
+gets read as a claim.
 
-- **The `tool_call` event.**
-  Fires before any tool executes. Extensions can inspect and modify arguments
-  before execution, or block entirely with `{ block: true, reason: string }`.
-  This event is used to implement path allowlists, command denylists, and
-  confirmation prompts.
+- **`tool_call`** (`permission-gate`). Fires before any tool executes, and can
+  block with `{ block: true, reason: string }`. Used for all three of the
+  gate's controls: the absolute refusal of sensitive filenames, the
+  confirmation prompt for mutating calls, and the record of what was
+  attempted. This is the only hook that sees *every* tool call, whichever
+  extension registered it, which is why the filename refusal lives here rather
+  than closer to the filesystem.
 
-- **The `tool_result` event.**
-  Fires after tool execution, before the result is returned to the model.
-  Handlers are chained as middleware. An extension can inspect, log, and modify
-  the result. This is the place to implement redaction of sensitive content
-  from tool output, before it enters the model context.
+- **`tool_result`** (`permission-gate`). Fires after a tool executes, carrying
+  `isError`. Used solely to record what the call actually *did*, joined to the
+  attempt by Pi's `toolCallId`. Without it the trail records admissions and
+  calls them outcomes: a read of a path outside `/workspace` is admitted by the
+  gate and then refused by the MCP server, and only this hook sees the refusal.
 
-- **The `before_provider_request` event.**
-  Fires after the provider payload is built, immediately before the outbound
-  model API call. An extension can inspect or replace the full payload. This is
-  the place to implement auditing of outbound model traffic.
+  The handler deliberately ignores the event's `content`, which carries the
+  tool's full output. Recording it would copy every file the agent reads into
+  the audit trail.
 
-- **The `before_agent_start` event.**
-  Fires before each agent turn. Extensions can inject context, modify the
-  system prompt, and record that a turn is beginning — useful for audit trail
-  entries.
+- **`session_start`** (`mcp-client`). Registers the `mcp_*` tools against the
+  gateway, which is the agent's entire file surface.
 
-In addition, my extensions can use Pi's **tool overriding** behavior to replace
-Pi's built-in tools such as `read`, `bash`, `edit`, `write`, `grep`, `find`,
-and `ls`. All you do is register a new tool with the same name. Combined with
-`--no-builtin-tools`, which starts Pi with no built-in tools at all, this
-allows constructing a fully locked-down, audited tool surface.
+Pi offers further hooks this build does not handle — `before_provider_request`
+(the outbound model payload) and `before_agent_start` (turn boundaries) among
+them. Neither is used, so **outbound model traffic is not audited in this
+repository**, and the trail has no turn markers. `TODO.md` records both as
+scoped follow-ups, along with the redaction of secret-shaped content from tool
+output, which `tool_result` would be the place for and which is likewise not
+implemented.
+
+Pi also supports **tool overriding** — registering a tool with the same name as
+a built-in replaces it. This design does not use it. It relies on
+`--no-builtin-tools` instead, which starts Pi with no built-in tools at all, so
+there is nothing to override and the `mcp_*` tools are the whole surface. An
+earlier iteration did override built-ins, from an `audited-tools` extension
+that has since been removed; see `TODO.md` for why replacing a tool in the
+agent's own process is a weaker control than not having the tool.
 
 This project uses the second half of that and deliberately not the first. An
 overriding tool runs inside the agent's own process, so any policy it enforces
@@ -437,7 +448,7 @@ to what's described above.
 | Command execution control           | The agent cannot execute anything. `--no-builtin-tools` removes Pi's `bash`, and no extension provides a replacement, so there is no execution surface to police. This replaced an `audited-tools` extension that allowlisted commands from inside the agent's own process — a cooperative guard whose fence was self-enforced and lexical, and which interpreters on its allowlist (`node -e`, `python3 -c`) could read straight through. Removing the capability is the stronger control. See `TODO.md`, which also records the deferred option of an out-of-process exec MCP server should execution ever be needed. |
 | Permission prompts / approval gates | `permission-gate` extension requires interactive confirmation for mutating calls — writes, edits, moves, directory creation (`tool_call` events). Denies access by default. There is no execution to gate; see the row above. |
 | Sensitive-file refusal              | `permission-gate` refuses any call naming secrets or key material (`.env*`, `id_rsa`, `*.pem`, `*.key`, …) on filename patterns. Absolute — no approval path — and applied to every tool call, `mcp_*` included. |
-| Audit log of tool calls             | Append-only JSONL log, on a dedicated volume, for **every** tool call — reads included, which are never prompted for. Two independent fields: `outcome` (did it run) and `confirmation` (was a human involved, and what did they say), so a policy refusal and an operator's rejection are distinguishable by field rather than by prose. The volume must be owned by the agent's uid or logging fails silently. PARTIAL: records what was *attempted*, not what resulted — the `tool_call` hook fires before the call runs, so a read the MCP server then refuses is logged as allowed. Closing that needs the `tool_result` hook or a gateway `after:` interceptor; see `TODO.md`. |
+| Audit log of tool calls             | Append-only JSONL log, on a dedicated volume, for **every** tool call — reads included, which are never prompted for. Each call writes **two lines** joined by `id`: `phase:"call"` records what the gate decided, `phase:"result"` records what the tool actually did (`tool_result`'s `isError`). Both are needed — the gate admits calls but does not perform them, so a read the MCP server later refuses is `allowed` on the first line and `error` on the second. The attempt line carries two independent fields, `outcome` (did the gate let it run) and `confirmation` (was a human involved, and what did they say), so a policy refusal and an operator's rejection are distinguishable by field rather than by prose. Neither line ever carries tool *content*. The volume must be owned by the agent's uid or logging fails silently. |
 | API key isolation from agent        | Host-side LiteLLM proxy holds API keys (eg. `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`). Agent container gets a proxy endpoint + low-value rotatable proxy token.             |
 | Extension vetting / signing         | Extensions require manual review. Third-party packages MUST be pinned to exact versions/commit hashes.                                                                  |
 | Network egress control              | ENFORCED. `agent-net` is `internal: true`, so Docker installs no default route and no masquerade rule for it: external addresses are `ENETUNREACH` and DNS does not resolve. The container's only reachable peers are the MCP gateway and the host LiteLLM proxy. Because an internal network has no route to docker0, the proxy is reached at this network's own pinned gateway address (`extra_hosts`), not via Docker's `host-gateway` alias — the subnet pin in `compose.yaml` and that `extra_hosts` entry are one setting in two places. This is what rules out the gateway's `--verify-signatures`, which needs the sigstore TUF mirror; see `TODO.md`. |

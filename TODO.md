@@ -300,8 +300,10 @@ claimed and what is enforced.
     of measuring.
 
     What remains is the *use* question, which the call log now answers: run
-    `jq -r .tool calls.jsonl | sort | uniq -c` after real work and drop what
-    never appears. `list_allowed_directories` and `directory_tree` are the
+    `jq -r 'select(.phase=="call") | .tool' calls.jsonl | sort | uniq -c` after
+    real work and drop what never appears. The phase filter matters — a call
+    writes two lines, so an unfiltered count doubles everything.
+    `list_allowed_directories` and `directory_tree` are the
     obvious first candidates. Note the honest ceiling — with all eleven being
     filesystem tools confined to `/workspace`, this is defence in depth, not a
     new boundary; the containment is already the MCP server's.
@@ -384,14 +386,23 @@ claimed and what is enforced.
   nothing had ever been written to it anyway, which is the silent-failure mode
   the Dockerfile and both READMEs warn about, observed in the wild.
 
-  **Still open, and stated where it is claimed:** this records what was
-  *attempted*, not what resulted. See the `tool_result` / `after:` interceptor
-  discussion retained below — it is unchanged by this work.
+  > **Since closed.** The "still open" note here said this records what was
+  > *attempted*, not what resulted. That gap is now shut: `tool_result` is
+  > handled, and each call writes a second `phase:"result"` line joined by `id`.
+  > See the hooks item under *Documentation fixes*. The `after:` interceptor
+  > alternative discussed below was **not** taken — it would have added an exec
+  > path to the `docker.sock`-holding gateway, which is the most privileged
+  > component in the stack.
 
   This also produces the input the `--tools` allowlist item above is waiting
-  for: `jq -r .tool calls.jsonl | sort | uniq -c` is the working set, measured
-  rather than guessed. The runbook (`src/infrastructure/README.md`) carries that
-  command.
+  for. The working set, measured rather than guessed — note the phase filter,
+  without which every tool is counted twice:
+
+  ```sh
+  jq -r 'select(.phase=="call") | .tool' calls.jsonl | sort | uniq -c
+  ```
+
+  The runbook (`src/infrastructure/README.md`) carries that command.
 
   <details>
   <summary>Original analysis, kept for the parts still open</summary>
@@ -460,6 +471,14 @@ claimed and what is enforced.
   rotation, ship-then-truncate to somewhere durable, or an explicit "grows
   unbounded, the operator prunes" stance — but it should be a stated decision
   rather than a default inherited from whatever tool is convenient.
+
+  **Doubled since this was written.** The `tool_result` work means a call now
+  writes two lines, not one, so the growth rate is roughly twice what this item
+  was raised about. The argument is unchanged, the number is worse.
+
+  Decide this **before** the turn-markers item below, which would add a third
+  line kind. Sequencing them the other way means choosing a retention policy for
+  a format that is still moving.
 
   Not urgent: the volume is host-side, outside the read-only rootfs, and a
   failure to write is swallowed by design, so the failure mode is a large file
@@ -545,27 +564,138 @@ claimed and what is enforced.
 
 ## Documentation fixes — the design overstates the build
 
-- [ ] **Three of the four documented hooks are not used anywhere.**
-  `docs/solution.md:41` says these hooks "are used to intercept tool and model
-  calls". Only `tool_call` (`src/extensions/permission-gate/index.ts:51`) and
-  `session_start` (`src/extensions/mcp-client/index.ts:59`) are used — and the
-  latter is not in the design at all. There is no `tool_result` handler (so no
-  output redaction), no `before_provider_request` handler (so no auditing of
-  outbound model traffic, despite `docs/solution.md:58`), and no
-  `before_agent_start` handler. The `tool_result` gap is not only a documentation
-  problem: the read-auditing item above needs that hook to record what a call
-  actually *did* rather than what it attempted. Either implement them or rewrite the section as
-  stated intent.
+- [x] **Three of the four documented hooks are not used anywhere.**
+  Resolved by doing both things the item offered: **implementing** the one hook
+  that was load-bearing, and **deleting the catalogue** that made claims about
+  the rest.
 
-  **A second place makes the same overclaim,** found while documenting the
-  `docker.sock` grant: `README.md`'s security section says "every model request,
-  tool call, and filesystem action an agent performs is logged". Tool calls and
-  filesystem actions are now genuinely covered, but *model requests* are not —
-  that is precisely the missing `before_provider_request` handler. The host
-  LiteLLM proxy may log them, but nothing in this repository asserts or verifies
-  that. Left alone deliberately: whether to fix by implementing the hook or by
-  rewording is the decision this item exists to make, and it should be made once
-  for both places.
+  **`tool_result` implemented — this was never only a documentation problem.**
+  It is the hook the audit trail needed to record what a call *did* rather than
+  what was attempted. `permission-gate` now handles it. Verified against the
+  pinned API before designing anything: `ToolResultEvent` carries `toolCallId`
+  (so it joins to `tool_call`), `isError` (the missing outcome axis), and
+  `content` (the tool's entire output — never logged; there is a test asserting
+  the result line has exactly five keys, so a future edit that spreads the event
+  into the record fails in the suite).
+
+  A call now writes **two lines** joined by `id`:
+
+  ```json
+  {"ts":"…","phase":"call","id":"tc_09","tool":"mcp_read_file","outcome":"allowed","confirmation":"not-required","detail":"mcp_read_file: /workspace/../etc/passwd"}
+  {"ts":"…","phase":"result","id":"tc_09","tool":"mcp_read_file","result":"error"}
+  ```
+
+  That pairing — admitted by the gate, refused by the MCP server — is precisely
+  what the trail could not express before, and it is now a row in the runbook's
+  verification table.
+
+  **Two lines rather than one enriched line**, chosen deliberately. Buffering
+  the attempt until the result arrived would give one tidy line per call, but
+  the record would exist only in memory for the duration of the call, so a
+  crash between the two would erase the evidence that the call was ever made.
+  Appending on observation keeps the trail never less complete than reality.
+  The cost is volume — roughly double — which sharpens the retention item above
+  rather than creating a new problem.
+
+  **The hooks section in `docs/solution.md` was deleted, not corrected.** It
+  catalogued four hooks and described what each was "the place to implement",
+  which reads as a description of the build and was not one. It is replaced by
+  a list of the three hooks actually handled (`tool_call`, `tool_result`,
+  `session_start` — the last was previously undocumented) and an explicit
+  statement of what is *not* handled. The tool-overriding paragraph was
+  rewritten in the same pass: this design does not use tool overriding, and the
+  extension that did was removed.
+
+  **The `README.md` overclaim is reworded, not implemented.**
+  `before_provider_request` hands over `payload: unknown` — the entire
+  conversation, including every file the agent has read. Logging it would copy
+  the whole context into the audit trail, which is the failure "paths, not
+  payloads" exists to prevent. Both places now say plainly that model requests
+  are not logged here and that the host proxy is where that would live. A
+  scoped, metadata-only version is a separate item below.
+
+  Three follow-ups fell out of this and are recorded below rather than silently
+  dropped: metadata-only model-request logging, tool-output redaction, and turn
+  markers.
+
+- [ ] **Log model requests as metadata only, or leave them to the proxy.**
+  Raised by the item above, which reworded the claim rather than implementing
+  the hook. The gap is real: nothing in this repository records what was sent to
+  a model.
+
+  The reason it was not just implemented is the payload shape.
+  `BeforeProviderRequestEvent` is `{ type, payload: unknown }`, and that payload
+  is the **whole conversation** — system prompt, every message, and the contents
+  of every file the agent has read this session. Logging it wholesale would put
+  a complete copy of everything the agent has touched into the audit trail,
+  which is worse than the gap it closes and directly contradicts the
+  "paths, never content" rule the rest of the trail is built on.
+
+  So the only version worth building is metadata-only:
+
+  ```json
+  {"ts":"…","kind":"provider_request","model":"litellm/computer-programmer","messages":34,"approx_bytes":18422}
+  ```
+
+  Shape, never content. If it is built, the hazard to guard is that
+  `payload: unknown` makes it *easy* to serialise the lot by accident — the
+  handler should extract named scalars, never spread, and should carry a test
+  like the `result`-line one that asserts the record's key set is closed.
+
+  Worth deciding first whether this belongs here at all. The host LiteLLM proxy
+  sees the same traffic, already holds the credentials, and is outside the
+  agent's process — which makes it the stronger place to log from, for the same
+  reason the MCP gateway is a stronger boundary than an in-process guard. If the
+  answer is "the proxy does it", then this item closes by documenting and
+  verifying that, not by writing an extension.
+
+- [ ] **Redact secret-shaped content from tool output.**
+  Deferred from the hooks work above; `tool_result` is the hook for it and is
+  now handled, so the wiring exists and only the policy is missing.
+
+  The gap: `sensitive-files.ts` refuses calls that *name* a secret file — `.env`,
+  `id_rsa`, `*.pem`. It matches on filename, so a key pasted into
+  `notes.txt`, a token in a config sample, or a credential in a log excerpt
+  passes through untouched and enters the model context. For an
+  away-from-keyboard agent in a regulated setting that is a real exfiltration
+  path the filename rule cannot see.
+
+  What makes this non-trivial, and why it is an item rather than a patch:
+
+  - **False positives are expensive.** High-entropy strings are also hashes,
+    UUIDs, minified code, and base64 test fixtures. Redacting those silently
+    corrupts what the model reads and produces confusing failures downstream.
+  - **It must not become a content log.** Whatever detects a secret must not
+    record it while reporting it. The record should say *that* redaction
+    happened and in which call, never what was redacted.
+  - **Scope it to shapes with low ambiguity first** — PEM blocks, `AKIA…` AWS
+    keys, `ghp_`/`github_pat_` tokens, `-----BEGIN … PRIVATE KEY-----` — rather
+    than a general entropy heuristic.
+
+  Note the honest ceiling before building it: this narrows what reaches the
+  model, but the agent could still be induced to read a file and act on it
+  without the content appearing in output the redactor sees. It is
+  defence-in-depth, not a boundary.
+
+- [ ] **Add turn markers to the call log.**
+  Deferred from the hooks work above. `before_agent_start` fires before each
+  agent turn; a handler writing one line per turn would let a reviewer group
+  calls by the turn that caused them:
+
+  ```json
+  {"ts":"…","kind":"turn_start","turn":7}
+  {"ts":"…","phase":"call","id":"tc_21","tool":"mcp_read_file", …}
+  {"ts":"…","phase":"result","id":"tc_21", …}
+  ```
+
+  Today the trail is a flat sequence, so "what did the agent do in response to
+  *that* instruction" is answerable only by timestamp correlation against a
+  session transcript on a different volume with different retention.
+
+  Small and low-risk — it records a boundary, not content. The reason it is not
+  done: it adds a third line kind to a log whose retention is already an open
+  question, and the two should be decided together. Do this one after retention,
+  not before.
 
 - [x] **Document the `docker.sock` grant in `docs/solution.md`.**
   `compose.yaml` binds the host Docker socket into `mcp-gateway`.
