@@ -6,12 +6,12 @@
 # Automates steps 2-5 of the operator runbook in
 # `src/infrastructure/README.md`: start the host LiteLLM proxy, build the
 # hardened agent image, bring up the docker compose boundary (agent-net, the
-# mcp-gateway, and the pi container), then drop you into a shell inside the
-# hardened container.
+# mcp-gateway, and the pi container), then put you inside the hardened
+# container, where the Pi harness starts automatically.
 #
-# That last shell is where you choose a harness — the container starts no
-# agent by itself. It greets you with what is available; `start-pi` launches
-# Pi with the security profile applied.
+# `/quit` leaves the agent but not the container: you land at a shell inside
+# the boundary, and `start-pi` takes you back in. Exiting THAT shell is what
+# ends the session and tears everything down.
 #
 # Step 1 of the runbook (populating `src/infrastructure/.env`) is not
 # automated — it requires the operator's own cloud API keys and generated

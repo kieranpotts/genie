@@ -214,18 +214,18 @@ compose_service_running() {
   grep -qx "${service}" <<< "${running}"
 }
 
-# enter_container - Open an interactive shell inside the hardened container.
+# enter_container - Enter the hardened container, where the harness auto-starts.
 #
 # This is the foreground step: it holds the script open for as long as the
-# operator is working, and exiting the shell falls through to cleanup, which
-# tears the boundary down and stops the proxy this script started.
+# operator is working, and exiting falls through to cleanup, which tears the
+# boundary down and stops the proxy this script started.
 #
-# The container's greeting (~/.bashrc -> `harnesses`) prints on entry, listing
-# the harnesses available inside. No agent has been started at this point --
-# `start-pi` does that.
+# The container's ~/.bashrc starts the hardened Pi harness on entry. `/quit`
+# returns to the container's shell rather than ending the session, so leaving
+# for good is a two-step exit: quit the agent, then exit the shell.
 #
 enter_container() {
-  print_info "Entering the hardened container. Exit the shell to tear everything down."
+  print_info "Entering the hardened container. /quit leaves the agent; exit the shell to tear everything down."
   echo ""
 
   # `exec` (not `attach`): attaching would share PID 1's terminal with the

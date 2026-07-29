@@ -4,10 +4,16 @@
 # Installed to /home/pi/.bashrc. Bash reads this for interactive non-login
 # shells, which covers both ways into the container:
 #
-#   docker compose run --rm pi        (the image's default command)
-#   docker compose exec pi bash       (a second shell in a running container)
+#   docker run -it <image>            (the image's default command)
+#   docker compose exec pi bash       (a shell in a running container)
 #
 # An entrypoint script would only cover the first.
+#
+# The hardened harness auto-starts from here, so an interactive session lands
+# in Pi. This is DELIBERATELY done from a shell rather than by making Pi the
+# container's main process: `/quit` then returns you to this shell instead of
+# exiting PID 1 and stopping the container. That is the whole reason the agent
+# is launched here and not from an ENTRYPOINT.
 #
 
 # Nothing below is useful to a non-interactive shell, and printing to one would
@@ -25,8 +31,31 @@ unset HISTFILE
 
 PS1='\[\033[34m\]pi-container\[\033[0m\]:\w\$ '
 
-# Greet with the harness menu. Guarded on a TTY so that a piped or redirected
-# interactive shell is not polluted.
-if [[ -t 1 ]] && command -v harnesses >/dev/null 2>&1; then
-  harnesses
+# Start the hardened harness, then fall back to this shell when it exits.
+#
+# Guards:
+#   -t 1              A piped or redirected interactive shell is not an operator
+#                     session; do not launch an agent into it.
+#   PI_AUTOSTARTED    Exported, so it is inherited by every child shell. Stops a
+#                     nested `bash` — or Pi's own bash tool, were it interactive
+#                     — from starting a second agent inside the first.
+#   PI_AUTOSTART=0    Operator opt-out: land in the shell instead. Useful for
+#                     inspecting the boundary without burning a model session.
+#
+if [[ -t 1 ]] && [[ -z "${PI_AUTOSTARTED:-}" ]]; then
+  export PI_AUTOSTARTED=1
+
+  if [[ "${PI_AUTOSTART:-1}" == "0" ]]; then
+    harnesses
+  else
+    printf '\nStarting the hardened Pi harness. Use %s to return to this shell.\n' "/quit"
+    printf 'Set PI_AUTOSTART=0 to land in the shell instead.\n\n'
+
+    # Not `exec` — the shell must survive Pi so /quit has somewhere to land.
+    start-pi
+
+    # Reached once Pi exits. Show what is available, so it is obvious where you
+    # are and how to get back in.
+    harnesses
+  fi
 fi

@@ -93,12 +93,17 @@ and the hardened `pi` container.
 
 **5. Start an agent**
 
-The container does not start an agent by itself. Entering it drops you into a
-shell that lists the harnesses available inside:
+Entering the container lands you in the hardened Pi harness:
 
 ```sh
 docker compose -f src/infrastructure/compose.yaml exec pi bash
 ```
+
+The agent starts automatically. It is launched by the shell (`~/.bashrc` calls
+`start-pi`) rather than being the container's main process, which is what makes
+`/quit` useful: it returns you to a shell **inside** the container, with the
+harness list printed, instead of stopping the container. Run `start-pi` to go
+back in, or `harnesses` to re-show the list.
 
 ```
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
@@ -106,23 +111,22 @@ docker compose -f src/infrastructure/compose.yaml exec pi bash
 ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 ```
 
-Then start Pi with the security profile applied:
-
-```sh
-start-pi
-```
-
 `start-pi` supplies `--model` (the proxy route, from `PI_MODEL`) and
 `--no-builtin-tools`, so the audited replacements are the only file tools. These
 flags live in the image, not in `compose.yaml`, precisely so they cannot be lost
 by an override. Running `pi` directly bypasses them — use it only when debugging
-the harness itself. Re-show the harness list at any time with `harnesses`.
+the harness itself.
 
-To skip the shell and go straight into a throwaway agent session:
+To land in the shell without starting an agent — inspecting the boundary, or
+running the checks below — set `PI_AUTOSTART=0`:
 
 ```sh
-docker compose -f src/infrastructure/compose.yaml run --rm pi start-pi
+docker compose -f src/infrastructure/compose.yaml exec -e PI_AUTOSTART=0 pi bash
 ```
+
+Note that the container's own main process is `sleep`, not an agent: `up -d`
+has no operator attached, so nothing should be running there unwatched. Agents
+exist only for the length of a session someone is actually sitting in.
 
 **6. Verify the boundary**
 

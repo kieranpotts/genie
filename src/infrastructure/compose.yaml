@@ -128,14 +128,23 @@ services:
       context: ../..
       dockerfile: src/infrastructure/pi-container/Dockerfile
     image: pi-agent:hardened
-    # NO `command:` here, deliberately. The image's default command is a shell
-    # that greets you with the available harnesses; you then start an agent
-    # explicitly with `start-pi`. Overriding it here is what previously dropped
-    # `--no-builtin-tools` from the launch, silently weakening the tool profile —
-    # those flags now live in `start-pi` inside the image.
+    # PID 1 idles; it is NOT the agent and NOT a shell.
     #
-    # To go straight into the agent instead:
-    #   docker compose -f src/infrastructure/compose.yaml run --rm pi start-pi
+    # The image's default command is a shell whose ~/.bashrc auto-starts the
+    # hardened harness, so an OPERATOR session lands straight in Pi and `/quit`
+    # drops back to a shell. Under `up -d` there is no operator: the container's
+    # own TTY is attached to nobody, so that shell would start an agent that
+    # sits unwatched at a prompt, consuming a model session. Idling here means
+    # an agent starts only when someone actually enters:
+    #
+    #   docker compose -f src/infrastructure/compose.yaml exec pi bash
+    #
+    # This override is safe in a way the previous one was not: the launch flags
+    # (--model, --no-builtin-tools) now live in `start-pi` inside the image, so
+    # replacing the command cannot silently weaken the tool profile.
+    command: ["sleep", "infinity"]
+    # `sleep` as PID 1 would not reap orphaned children; docker-init does.
+    init: true
     networks:
       - agent-net
     depends_on:
