@@ -1,11 +1,13 @@
 {
-  // Type-checking only. We never emit: Pi (and Node's type stripping) run the
-  // TypeScript directly, so this is a CHECK step, not a build step. See
-  // `run/typecheck` and AGENTS.md.
+
+  //
+  // Used for type-checking only. See `run/typecheck`.
+  //
+
   "compilerOptions": {
     "noEmit": true,
 
-    // Match how Pi and Node load the code: ESM, NodeNext resolution, and
+    // Match how Pi and Node load TS code: ESM, NodeNext resolution, and
     // explicit `.ts` import specifiers (which Node's type stripping requires).
     "module": "nodenext",
     "moduleResolution": "nodenext",
@@ -14,18 +16,19 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
 
-    // Strictness — the point of adding a typechecker at all.
-    "strict": true,
-    "noImplicitOverride": true,
+    // Be strict — it's literally the point of a type-checker.
     // NOTE: `noUncheckedIndexedAccess` is intentionally OFF for now. Enabling it
     // surfaces ~20 latent `T | undefined` index-access findings across existing
     // code; adopt it as a separate cleanup once those are addressed.
+    "strict": true,
+    "noImplicitOverride": true,
 
-    // Skip checking declaration files in node_modules (Pi ships a large surface;
-    // we type-check our own code against it, not it against itself).
+    // Skip checking declaration files in node_modules.
     "skipLibCheck": true,
 
     "types": ["node"]
   },
+
   "include": ["src/**/*.ts", "test/**/*.ts"]
+
 }
