@@ -308,14 +308,28 @@ claimed and what is enforced.
     filesystem tools confined to `/workspace`, this is defence in depth, not a
     new boundary; the containment is already the MCP server's.
 
-    **Blocked on data, not on a decision.** Checked while closing the egress
-    item: `calls.jsonl` is **0 lines**. The volume re-seed worked (it is owned
-    `1001:1001`, so the silent-failure mode is not what is happening), but no
-    agent session has run since the logging change landed. Trimming the list now
-    would mean guessing which tools are unused — which is the exact failure this
-    entry was rewritten to avoid when it wrongly cited `read_media_file`.
-    **Do not attempt this until real work has gone through the stack.** The
-    unblocking action is to use the agent normally, then re-run the `jq` line.
+    **First real data, and it is not yet enough.** Four driven sessions
+    produced 20 lines (10 calls), and the working set was exactly two tools:
+
+    ```
+      5 mcp_read_file
+      5 mcp_list_directory
+    ```
+
+    Do **not** trim to those two on this evidence. The sessions were short,
+    non-interactive (`--print`), and all ran on one role — the model chose
+    list-then-read every time and never reached for `search_files`,
+    `directory_tree`, or `get_file_info`, which a longer task plausibly would.
+    Writes were never exercised at all: `--print` has no UI, so
+    `permission-gate` denies mutating calls as `no-ui` before they run, meaning
+    this sample cannot say anything about `write_file`, `edit_file`,
+    `move_file`, or `create_directory`.
+
+    What the sample *does* establish is that the measurement now works. Carry on
+    accumulating across real interactive sessions — including ones that write —
+    and re-run the `jq` line before deciding. The trap to avoid is treating a
+    thin sample as a measured result, which is the same mistake as guessing,
+    with better presentation.
   - **`--verify-signatures`: DECLINED, not deferred.** The instruction above was
     "close to free; turn it on unless it breaks the bring-up". Measured, it is
     neither free nor compatible, and the item is closed rather than left open.
@@ -617,6 +631,41 @@ claimed and what is enforced.
   Three follow-ups fell out of this and are recorded below rather than silently
   dropped: metadata-only model-request logging, tool-output redaction, and turn
   markers.
+
+  > ### The first live run falsified this, and the fix was in `mcp-client`
+  >
+  > Everything above shipped green — typecheck, 123 tests, the extension loading
+  > inside the image, handlers verified against a stubbed `ExtensionAPI`. Driven
+  > for real against Ollama and the MCP gateway, **the outcome axis did not
+  > work**: a read of a missing file logged `"result":"ok"` while the agent
+  > correctly reported `ENOENT`.
+  >
+  > The chain checked out at every point except one. The MCP filesystem server
+  > returns `isError: true` (verified over the wire, for both a missing file and
+  > a traversal). `mcp-client` mapped it faithfully with
+  > `isError: isErrorResult(result)`. But **Pi derives the `tool_result` event's
+  > `isError` solely from whether `execute` threw** — `agent-loop.js` returns
+  > `{ result, isError: false }` on a normal return and sets `true` only in its
+  > catch. A *returned* flag is discarded there, so the event said `false` and
+  > the gate dutifully recorded success.
+  >
+  > Fixed in `mcp-client/index.ts`: an MCP error result now **throws** with the
+  > flattened error text. Re-verified on a rebuilt image — the same read now
+  > logs `"outcome":"allowed"` then `"result":"error"`, which is the pairing
+  > this whole item exists to produce. The model still sees the message, because
+  > Pi's catch wraps it with `createErrorToolResult`.
+  >
+  > Two things worth carrying forward:
+  >
+  > - **The failure mode was silent and in the audit trail.** Not a crash, not a
+  >   wrong answer to the user — a log that quietly asserted reads which had been
+  >   refused. That is the specific thing this trail exists to prevent, so it
+  >   would have been believed.
+  > - **No amount of unit testing would have caught it.** The bug was in an
+  >   assumption about a harness contract, and both sides of that contract were
+  >   stubbed in the tests. The regression guard now lives in
+  >   `tool-mapping.test.ts` and in `mcp-client/README.md`, but what actually
+  >   found it was running the thing.
 
 - [ ] **Log model requests as metadata only, or leave them to the proxy.**
   Raised by the item above, which reworded the claim rather than implementing

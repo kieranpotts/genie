@@ -472,11 +472,40 @@ output. This is a tool-calling failure, not a hang: the model asked for a tool
 and the request never became a tool call, so there was nothing to run and
 nothing to report.
 
-The usual cause is a `ollama/` prefix in `proxy/litellm.config.yaml` where
-`ollama_chat/` is required. That integration drops tool-call deltas when
-streaming, and delivers the call as assistant text instead — the agent shows a
-bare JSON object like `{"name": "mcp_list_directory", "arguments": {…}}` and
-stops. See the warning in that file.
+There are **two** causes with an identical symptom. Rule out the second before
+touching the config, because it is the cheaper check.
+
+**Cause 1 — the wrong LiteLLM prefix.** An `ollama/` prefix in
+`proxy/litellm.config.yaml` where `ollama_chat/` is required. That integration
+drops tool-call deltas when streaming and delivers the call as assistant text
+instead — the agent shows a bare JSON object like
+`{"name": "mcp_list_directory", "arguments": {…}}` and stops. See the warning in
+that file.
+
+**Cause 2 — the model does not emit tool calls, whatever it advertises.**
+Observed with `qwen2.5-coder:14b`, the base of the `workstation` profile's
+`computer-programming` capability. Ollama reports `"capabilities": ["completion",
+"tools", "insert"]` for it, and it still returns the call as ordinary content.
+The config is irrelevant here; no prefix change helps.
+
+Isolate it by asking Ollama directly, bypassing the proxy and the agent
+entirely — `tool_calls` must be non-null:
+
+```sh
+curl -s http://127.0.0.1:11434/api/chat -d '{
+  "model":"computer-programming","stream":false,
+  "messages":[{"role":"user","content":"List the entries of /workspace."}],
+  "tools":[{"type":"function","function":{"name":"mcp_list_directory",
+    "description":"List directory contents",
+    "parameters":{"type":"object","properties":{"path":{"type":"string"}},
+    "required":["path"]}}}]}' | jq '.message.tool_calls'
+```
+
+`null` means the model is the problem. Swap the capability's base model in the
+modelfiles project — `qwen2.5:14b`, `llama3.1:8b`, `qwen3.6:27b` and
+`gpt-oss:20b` were all verified to emit proper `tool_calls` — or drive the
+session on a role whose capability uses one of those (`--model
+litellm/technical-lead` maps to `technical-reasoning`, which is `qwen2.5:14b`).
 
 What makes this one expensive to diagnose is that every layer looks healthy, and
 the obvious checks all pass:

@@ -21,6 +21,35 @@ If `MCP_GATEWAY_URL` is unset, the extension does nothing. The agent will simply
 have no MCP-mediated file tools. If `MCP_GATEWAY_URL` is set but the gateway is
 unreachable, a one-off error is shown and the session continues.
 
+## How tool failures are signalled
+
+**A failed MCP call is reported by THROWING out of the tool's `execute`, never
+by returning `{ isError: true }`.** This is not a style preference — it is the
+only channel Pi reads.
+
+Pi derives the `tool_result` event's `isError` purely from whether `execute`
+threw. In `agent-loop.js`:
+
+```js
+return { result, isError: false }                       // execute returned
+catch (error) { return { result: …, isError: true } }   // execute threw
+```
+
+A returned `isError` is discarded at that point. This extension used to return
+one, and the consequence was not cosmetic: `permission-gate` records the
+`tool_result` event's `isError` as the `result` field of its audit trail, so
+**every failed MCP call was logged as `"result":"ok"`** — including reads the
+filesystem server had refused for being outside `/workspace`. The audit trail
+asserted successful reads that never happened, which is the exact failure the
+two-line trail was built to prevent.
+
+Found by running the stack, not by reading it: the unit tests passed and the
+extension typechecked throughout.
+
+The model still sees the failure. Pi's catch wraps the thrown message with
+`createErrorToolResult`, so the MCP server's error text reaches the transcript
+exactly as the returned content did.
+
 ## Configuration
 
 The following environment variables must be exported into the environment in

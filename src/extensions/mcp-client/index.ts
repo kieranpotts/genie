@@ -87,10 +87,25 @@ function registerMcpTool (
     execute: async (_toolCallId, params, signal) => {
       const result = await client.callTool(mcpToolName(name), (params ?? {}) as Record<string, unknown>, signal)
       const text = flattenContent(result)
-      return {
-        content: [{ type: 'text', text }],
-        isError: isErrorResult(result),
-      } as never
+
+      /* An MCP error is signalled by THROWING, not by returning `isError`.
+         Pi derives the `tool_result` event's `isError` solely from whether this
+         function threw — `agent-loop.js` returns `{ result, isError: false }`
+         on a normal return and only sets `true` in its catch. A returned
+         `isError` is ignored there, so returning one produced a `tool_result`
+         event claiming success for every failed MCP call, and
+         `permission-gate` recorded `"result":"ok"` for reads the server had
+         refused. That is the precise failure the two-line audit trail exists to
+         prevent, so it must be signalled the way the harness actually reads.
+
+         The model still sees the message: Pi's catch wraps it with
+         `createErrorToolResult`, so the text below reaches the transcript just
+         as the returned content did. */
+      if (isErrorResult(result)) {
+        throw new Error(text)
+      }
+
+      return { content: [{ type: 'text', text }] } as never
     },
   })
 }

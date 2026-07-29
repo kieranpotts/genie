@@ -73,4 +73,25 @@ describe('isErrorResult', () => {
     assert.equal(isErrorResult({ content: [] }), false)
     assert.equal(isErrorResult({ content: [], isError: false }), false)
   })
+
+  /* REGRESSION GUARD. An MCP error must reach Pi by THROWING out of a tool's
+     `execute`, never by returning `{ isError: true }`.
+
+     Pi derives the `tool_result` event's `isError` solely from whether execute
+     threw: `agent-loop.js` returns `{ result, isError: false }` on a normal
+     return and sets `true` only in its catch. A returned flag is discarded
+     there. While `mcp-client` returned one, every failed MCP call produced a
+     `tool_result` claiming success, and `permission-gate` logged
+     `"result":"ok"` for reads the filesystem server had actually refused —
+     silently, in the audit trail, which is the one place it must not happen.
+
+     This test pins the reasoning; `index.ts` does the throwing. If a refactor
+     moves back to returning the flag, the audit trail goes quietly wrong again
+     rather than failing loudly, so the comment is the point as much as the
+     assertion. */
+  it('is the signal that index.ts converts into a thrown error', () => {
+    const failure = { content: [{ type: 'text', text: 'Error: Access denied' }], isError: true }
+    assert.equal(isErrorResult(failure), true, 'the flag is how an MCP failure arrives...')
+    assert.equal(flattenContent(failure), 'Error: Access denied', '...and its text becomes the thrown message')
+  })
 })
