@@ -405,10 +405,10 @@ claimed and what is enforced.
   plan that is not in the repository.
 
 - [ ] **Copy-edit `docs/solution.md`.**
-  - Line 90: "if you have another keeping secrets away from the model" — a word
+  - Line 98: "if you have another keeping secrets away from the model" — a word
     is missing.
-  - Line 138: "to secrets never enter" → "so secrets never enter".
-  - Line 141: "Docker MCP TOols" → "Docker MCP Toolkit".
-  - Line 146: "so another proxy sites between" → "sits".
-  - Lines 21, 24, 28: these Mermaid node labels use `\n` for line breaks where
-    line 198 uses `<br/>`; current Mermaid renders `\n` literally.
+  - Line 146: "to secrets never enter" → "so secrets never enter".
+  - Line 149: "Docker MCP TOols" → "Docker MCP Toolkit".
+  - Line 155: "so another proxy sites between" → "sits".
+  - Lines 21, 24, 25, 28: these Mermaid node labels use `\n` for line breaks
+    where lines 205-207 use `<br/>`; current Mermaid renders `\n` literally.
