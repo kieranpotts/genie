@@ -49,12 +49,10 @@ describe('pathArguments', () => {
     )
   })
 
-  it('tokenises a command into candidate paths', () => {
-    assert.deepEqual(pathArguments({ command: 'cat id_rsa' }), ['cat', 'id_rsa'])
-  })
-
-  it('strips quotes from command tokens', () => {
-    assert.deepEqual(pathArguments({ command: "cat '.env'" }), ['cat', '.env'])
+  /* `command` was tokenised when the agent had a `bash` tool. It has none now,
+     so the key is treated like any other unrecognised one. See TODO.md. */
+  it('ignores a command argument, which no tool takes', () => {
+    assert.deepEqual(pathArguments({ command: 'cat id_rsa' }), [])
   })
 
   it('ignores non-string and non-path keys', () => {
@@ -85,8 +83,8 @@ describe('findSensitiveArgument', () => {
     )
   })
 
-  it('finds a sensitive file named as a bash argument', () => {
-    assert.equal(findSensitiveArgument({ command: 'cat /home/pi/.netrc' }), '/home/pi/.netrc')
+  it('does not inspect a command argument, which no tool takes', () => {
+    assert.equal(findSensitiveArgument({ command: 'cat /home/pi/.netrc' }), undefined)
   })
 
   it('does NOT fire on a search pattern that looks like a key file', () => {

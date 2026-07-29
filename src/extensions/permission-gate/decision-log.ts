@@ -6,8 +6,8 @@
  * pure function (`formatDecision`) so it can be asserted in tests; the sink
  * (`DecisionLog`) is the only side-effecting part.
  *
- * Kept local to this extension rather than shared with `audited-tools`, because
- * the verbatim-copy installer requires each extension directory to be
+ * Kept local to this extension rather than factored into a shared module,
+ * because the verbatim-copy installer requires each extension directory to be
  * self-contained (no cross-directory imports survive installation).
  */
 

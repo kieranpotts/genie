@@ -27,13 +27,17 @@ claimed and what is enforced.
   MCP server. `:ro` means the MCP server keeps the only writable handle, so the
   change trail stays complete regardless of how the fence fares.
 
-  The fence's limits are stated where they are enforced
+  The fence's limits were stated where they were enforced
   (`src/extensions/audited-tools/bash-policy.ts`) and in that extension's README:
-  it is lexical (no symlink resolution), self-enforced (in the agent's own
+  it was lexical (no symlink resolution), self-enforced (in the agent's own
   process, unlike the MCP server's containment), and only as strong as the
-  allowlist — `node -e` defeats it, which is why every `bash` call is also
-  operator-confirmed. Trim `AUDITED_BASH_ALLOWLIST` if the fence needs to hold on
-  its own.
+  allowlist — `node -e` defeated it, which is why every `bash` call was also
+  operator-confirmed.
+
+  > **Superseded.** The read-only mount stays, but the fence is gone with the
+  > `audited-tools` extension — see the removal item below. Nothing needs
+  > fencing now: the agent has no local tool that can read the mount at all.
+  > This entry is kept as the record of why the mount was added.
 
 - [x] **Resolve the `AUDITED_TOOLS_ROOT` mismatch.**
   Resolved by reclassifying the extension rather than making its file tools work,
@@ -111,10 +115,176 @@ claimed and what is enforced.
      allowlist of flags per interpreter, which is the kind of thing that is
      wrong six months later when a flag is added.
 
-  Option 1 is the recommendation unless the interpreters are earning their place.
-  Whichever is chosen, the fence's limits are already stated where they are
-  enforced (`src/extensions/audited-tools/bash-policy.ts`) and in that
-  extension's README — those need updating to match the decision.
+  **Resolved by a fourth option: remove agent execution entirely** — see the
+  item below. All three options above are attempts to make a *self-enforced*
+  guard hold, which is the one thing it structurally cannot do. Deleting the
+  tool closes the question rather than answering it: there is no allowlist to
+  trim, no interpreter to vet, and no fence to make claims about, because
+  nothing executes in the agent container at all.
+
+  Keep this item's analysis. If execution is ever restored (see the deferred
+  exec-server option below), the interpreter question returns exactly as
+  written, and option 1 is the answer to carry forward.
+
+- [ ] **Remove the `audited-tools` extension; the agent gets no execution.**
+  *(decided; not done)*
+
+  The extension is now scoped to `bash` alone, and its own documentation
+  concedes the two limits that matter: the guard is **lexical**, and it is
+  **self-enforced**, running inside the agent's own process. It is a cooperative
+  guard, not a boundary — so it cannot be strengthened in place, only moved or
+  removed.
+
+  Removing it, rather than moving it, is the decision. The reasoning:
+
+  - **MCP becomes genuinely the sole route to files.** That is the design's
+    central claim (`docs/solution.md`), and it has not been true while a second,
+    self-policed route existed alongside it.
+  - **The audit trail becomes complete** for the first time, instead of being
+    split between the gateway and a log the agent writes about itself.
+  - **The fence and its caveats disappear** rather than being restated. No
+    lexical resolution, no symlink assumption, no "only as strong as the
+    allowlist".
+  - **Nothing demonstrably depends on it.** The tool runs in `/home/pi`, fenced
+    out of `/projects/active`, on a read-only rootfs. It cannot run project
+    tests or builds. Its main demonstrated capability was being the interpreter
+    that defeated the fence — which is the thing being removed.
+
+  What this does **not** change, and must not be claimed:
+
+  - **`--no-builtin-tools` stays.** This was the original motivation for the
+    whole discussion and it does not survive contact. The flag exists because
+    Pi's built-in `read`, `grep`, `find`, and `edit` operate directly on the
+    container filesystem, which mounts the project at `/projects/active`.
+    Dropping it hands the agent an unmediated route to every project file,
+    bypassing MCP entirely — a *wider* hole than the fence ever was, and one
+    `permission-gate` would not catch (`policy.ts` gates `write`/`edit`/`bash`
+    only; reads pass silently). The flag is required in every branch. It is also
+    already free: `start-pi` bakes it into the image, so no operator types it.
+
+  Removal covers, verified by grep:
+
+  - **Delete:** `src/extensions/audited-tools/` and
+    `test/extensions/audited-tools/`.
+  - **Infrastructure:** the four `AUDITED_*` variables, the fence rationale on
+    the `project:/projects/active:ro` mount, and the `pi-logs` comment in
+    `compose.yaml`; the `COPY`, the `/var/log/pi/audited-tools` mkdir, the
+    header note and the footer hardening block in the Dockerfile; the
+    `AUDITED_BASH_CWD` comment in `bashrc`; the "audited tools only" greeting in
+    `harnesses.sh`.
+  - **`start-pi.sh` needs care.** The `--no-builtin-tools` flag *stays*, but its
+    comment justifies it in terms of `audited-tools` shadowing built-ins by
+    name. That rationale dies with the extension; the real one — built-in
+    `read`/`grep`/`find`/`edit` reaching the project mount directly — must
+    replace it, or the flag will look vestigial and get removed later by
+    someone tidying up.
+  - **Tooling:** the entry in `run/install` and the case branch in
+    `run/inc/fn/extensions.sh`.
+  - **Docs:** the Mermaid node and extension-list entry in `README.md` (the
+    latter is already stale — it still describes the `read`/`write`/`ls` tools
+    removed earlier); `docs/solution.md` line 69 and the "Command execution
+    control" row of the hardening table, which becomes "none — the agent cannot
+    execute"; and `src/infrastructure/README.md`.
+  - **`permission-gate` cross-references:** historical rationale in
+    `index.ts`, `decision-log.ts`, `sensitive-files.ts`, and its README explains
+    that the sensitive-file rule "used to live in `audited-tools`". Keep the
+    rule, rewrite the provenance.
+
+  **This leaves dead code in `permission-gate`, which should go in the same
+  change.** With no `bash` tool and `--no-builtin-tools` in force, there is no
+  tool call carrying a `command` argument and no built-in `write`/`edit`/`bash`
+  to match:
+
+  - `policy.ts`: `MUTATING_BUILTINS` (`write`, `edit`, `bash`) can never match.
+  - `policy.ts`: the `command` branch of `describeCall`, and with it the
+    truncation bug recorded below — which this change makes moot rather than
+    fixing.
+  - `sensitive-files.ts`: the `input.command` tokenising branch of
+    `pathArguments`, which existed so `cat id_rsa` could be caught.
+
+  Decide deliberately whether to delete these or keep them as defence against a
+  future tool reintroducing a `command` argument. Deleting is the honest choice
+  and matches the reasoning for removing the extension; if they stay, they need
+  a comment saying they are dormant, or the next reader will assume `bash` is
+  still gated somewhere.
+
+  Note the `:ro` project mount **stays**. It is for the operator, and with no
+  agent execution there is nothing left to fence it against — the agent has no
+  way to read through it once its only local tool is gone.
+
+  **Deferred option: an exec MCP server.** If execution turns out to be needed,
+  do not restore the extension — put it behind a process boundary instead: a
+  container exposing a single `run_command` tool, carrying the same
+  `shell: false` execution and control-operator rejection, with **no project
+  mount** and `--block-network`. That is strictly stronger than what is being
+  removed, because a compromised agent cannot reach around it.
+
+  Design work already done, should this be picked up:
+
+  - **Deployment: a catalog entry**, not a sibling compose service. The gateway
+    would spawn it from `mcp/toolkit/catalog.yaml` exactly as it does the
+    filesystem server, keeping one endpoint and one audit path, and bringing
+    `--tools` and `--interceptor` coverage for free. The deciding factor is
+    `mcp-client`: `index.ts` reads a single `MCP_GATEWAY_URL`, so a sibling
+    service would first need multi-endpoint support added there. Trade-off: the
+    `docker.sock`-holding gateway would spawn a second image.
+  - **Allowlist: the read-only inspection set** (`ls`, `cat`, `head`, `tail`,
+    `grep`, `find`, `wc`, `file`, `pwd`, `echo`, `which`, `stat`, `diff`,
+    `tree`, `sort`, `uniq`, `cut`, `basename`, `dirname`) — no interpreters, and
+    no `git`, since there is no project mount for it to act on.
+  - **Sequencing: build before delete** — moot now that deletion comes first,
+    but it means restoring execution is a clean additive change with no window
+    of unaudited execution.
+  - **Unresolved, and the reason this was deferred:** with an inspection-only
+    allowlist and no project mount, it is unclear what such a server would have
+    to inspect. The filesystem MCP server already covers reading, searching, and
+    listing project content. Do not build it until there is a concrete blocked
+    task that names what it needs to run — that requirement is the input the
+    design is missing, not a detail to be filled in later.
+
+  Triggers worth revisiting on: the agent repeatedly needing to run project
+  tests or builds; a task that genuinely needs process execution rather than
+  file access; or the project mount becoming writable, which would change the
+  calculus entirely.
+
+- [ ] **`permission-gate` truncates the command it asks you to approve.**
+  *(Likely moot — removing `audited-tools`, above, deletes the only tool with a
+  `command` argument. Recorded because the analysis is what justifies deleting
+  the branch rather than leaving it dormant, and because it returns intact if
+  the deferred exec server is ever built.)*
+
+  `policy.ts`'s `describeCall` runs `truncate(command, 120)`, and that string is
+  both what the confirmation dialog shows and what lands in the audit trail as
+  `detail`. So an operator approving a long `node -e "…"` payload cannot see
+  past character 119, and the audit record of what was approved is equally
+  truncated.
+
+  This matters more than it looks, because operator confirmation is the control
+  the fence's limits currently fall back on — the item above describes it as the
+  thing that "stops the rest". A control that hides the second half of what it is
+  confirming is not doing that job. Show the full command in the prompt (or at
+  minimum a much higher cap), and log it in full regardless of what is displayed.
+
+  Note also that the sensitive-filename refusal does not backstop this case:
+  `sensitive-files.ts` whitespace-splits `command`, so the basename of
+  `readFileSync('/projects/active/.env','utf8')` is `.env','utf8')`, which
+  matches no pattern. It catches `cat .env`; it does not catch a payload.
+
+- [ ] **Use the gateway's own controls — `--tools` and `--verify-signatures`.**
+  Verified against the pinned image (`docker run --rm --entrypoint /docker-mcp
+  docker/mcp-gateway@sha256:e3d6672… gateway run --help`), so this is the
+  deployed surface, not the documented one.
+
+  - `--tools strings` (and `--tools-config`) is a **tool-surface allowlist
+    enforced at the boundary, out of process**. `compose.yaml` currently enables
+    the `filesystem` server whole, so the agent gets `move_file`,
+    `create_directory`, `read_media_file`, and the rest whether or not it needs
+    them. Naming only the tools actually used is a real tightening, and a
+    stronger one than anything `permission-gate` can offer, since that extension
+    is cooperative and in-process. Establish the working set first — do not guess
+    the list.
+  - `--verify-signatures` is off. Largely redundant against digest pinning, but
+    close to free; turn it on unless it breaks the bring-up.
 
 - [ ] **Record read-only tool calls in the audit trail.**
   `docs/requirements.md` asks for "full observability and auditability of every
@@ -145,6 +315,19 @@ claimed and what is enforced.
     directory) would appear as allowed, because the gate cannot see the outcome.
     A truthful trail needs the unused `tool_result` hook too — which is already
     an open item below, and this is the strongest argument for implementing it.
+
+    There is a second mechanism, and it is arguably the better one. The gateway
+    accepts `--interceptor when:type:path` (e.g. `after:exec:/bin/path`),
+    verified present on the pinned image. An `after` interceptor runs
+    gateway-side and sees the **outcome** of a call, not the attempt — exactly
+    what this bullet is asking for, and it records it outside the agent's own
+    process rather than relying on the agent to narrate itself.
+
+    Two caveats. The gateway runs `read_only: true` with `cap_drop: [ALL]`, so
+    the interceptor binary must be baked into an image or bind-mounted
+    read-only. And the gateway is the one container holding `docker.sock`, so
+    adding an exec path there adds surface to the most privileged component —
+    weigh that against the honesty gained.
   - **Paths, not payloads.** Record the path and the outcome, never the content.
     Logging what was read would copy the secrets out of the files and into the
     audit trail, which is the opposite of the point.

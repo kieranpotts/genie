@@ -6,37 +6,41 @@
  * can be unit-tested without the `ExtensionAPI` or a real confirmation dialog.
  */
 
-/** Tool names that mutate state and therefore require confirmation. */
-const MUTATING_BUILTINS = new Set(['write', 'edit', 'bash'])
-
 /**
- * Custom (extension) tools that mutate state. Our own audited/MCP tools use
- * these names; matched by suffix so the `mcp_` prefix from `mcp-client` is
- * covered (`mcp_write_file`, `mcp_edit_file`, …).
+ * Tool names that mutate state, matched by suffix so the `mcp_` prefix from
+ * `mcp-client` is covered (`mcp_write_file`, `mcp_edit_file`, …). The bare forms
+ * (`write`, `edit`) are matched too, so a tool registered without the prefix is
+ * still gated.
+ *
+ * There is deliberately no entry for `bash` or any other execution tool: the
+ * agent runs with `--no-builtin-tools` and no extension restores local
+ * execution, so no such call can occur. Restoring one (see the deferred
+ * exec-server option in `TODO.md`) means adding it here.
  */
-const MUTATING_CUSTOM_SUFFIXES = ['write', 'edit', 'write_file', 'edit_file', 'move_file', 'create_directory']
+const MUTATING_SUFFIXES = ['write', 'edit', 'write_file', 'edit_file', 'move_file', 'create_directory']
 
 /**
  * Whether a tool call must be confirmed before it runs. Read-only tools
- * (`read`, `ls`, `grep`, `find`, and their MCP equivalents) pass without a
- * prompt; anything that writes, edits, or executes is gated. Pure.
+ * (`mcp_read_file`, `mcp_list_directory`, `mcp_search_files`, …) pass without a
+ * prompt; anything that writes or edits is gated. Pure.
  */
 export function requiresConfirmation (toolName: string): boolean {
-  if (MUTATING_BUILTINS.has(toolName)) return true
   const lower = toolName.toLowerCase()
-  return MUTATING_CUSTOM_SUFFIXES.some((s) => lower === s || lower.endsWith(`_${s}`) || lower.endsWith(s))
+  return MUTATING_SUFFIXES.some((s) => lower === s || lower.endsWith(`_${s}`) || lower.endsWith(s))
 }
 
 /**
  * A short, human-readable summary of what is being confirmed — shown in the
  * approval prompt and recorded as the audit trail's `detail`. Covers the MCP
- * filesystem server's argument shapes as well as the simple `path`/`command`
- * ones, so a multi-file read or a move is not logged as a bare tool name. Pure.
+ * filesystem server's argument shapes, so a multi-file read or a move is not
+ * logged as a bare tool name. Pure.
+ *
+ * A `command` branch was removed with the `audited-tools` extension. It
+ * truncated at 120 characters, which meant an operator confirming a long shell
+ * command could not see what they were approving past that point — worth
+ * remembering if execution is ever reintroduced.
  */
 export function describeCall (toolName: string, input: Record<string, unknown>): string {
-  const command = typeof input.command === 'string' ? input.command : undefined
-  if (command) return `${toolName}: ${truncate(command, 120)}`
-
   const path = typeof input.path === 'string' ? input.path : undefined
   if (path) return `${toolName}: ${path}`
 

@@ -7,8 +7,8 @@
  *   1. An ABSOLUTE refusal of calls naming a sensitive file — secrets and key
  *      material — which is not offered to the user for approval at all.
  *   2. Explicit user confirmation for any mutating operation — writes, edits,
- *      and shell execution. Confirmation times out to DENY, and a missing
- *      interactive UI also denies.
+ *      moves, and directory creation. Confirmation times out to DENY, and a
+ *      missing interactive UI also denies.
  *
  * Every decision, approved or denied, is logged to an append-only file outside
  * the agent's writable tree.
@@ -20,9 +20,12 @@
  * this exists to stop.
  *
  * Being the only hook that sees every tool call is why the sensitive-file rule
- * lives here rather than in `audited-tools`: it must cover the `mcp_*` tools,
- * which are the sole route to project files and enforce directory containment
- * but not filename sensitivity.
+ * lives here: it must cover the `mcp_*` tools, which are the sole route to
+ * project files and enforce directory containment but not filename sensitivity.
+ *
+ * Note the scope this extension does NOT have to cover: the agent has no local
+ * file or shell tools at all (`--no-builtin-tools`, and no extension restores
+ * them), so every call reaching these hooks is an `mcp_*` call.
  *
  * The policy, the sensitive-file rule, and the log format live in pure,
  * unit-tested helpers (`policy.ts`, `sensitive-files.ts`, `decision-log.ts`);

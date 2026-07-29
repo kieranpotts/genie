@@ -8,7 +8,7 @@ This extension changes that. With this extension installed, Pi:
 - **refuses outright** any tool call naming a sensitive file — secrets and key
   material — with no approval path at all; and
 - requires explicit, interactive user confirmation before any mutating tool call
-  runs — writes, edits, and shell execution.
+  runs — writes, edits, moves, and directory creation.
 
 Confirmation defaults to deny, so a timeout or a missing interactive UI blocks
 the operation.
@@ -38,20 +38,20 @@ which fires before a tool is invoked:
     distracted operator past it.
 
     Arguments are read from the path-bearing keys (`path`, `paths`, `source`,
-    `destination`, …), which covers the MCP filesystem server's argument shapes,
-    plus each token of a `command`, so `cat id_rsa` is refused too. Keys that
-    carry patterns rather than paths — `search_files` takes `pattern` — are not
-    checked, so searching *for* `*.key` files by name is still allowed; only
-    opening one is not.
+    `destination`, …), which covers the MCP filesystem server's argument shapes.
+    Keys that carry patterns rather than paths — `search_files` takes `pattern`
+    — are not checked, so searching *for* `*.key` files by name is still
+    allowed; only opening one is not.
 
-2.  **Classify the tool: read-only versus mutating/dangerous** \
-    Read-only tools (`read`, `ls`, `grep`, `find`, and their MCP equivalents)
-    pass through silently. Mutating tools (`write`, `edit`, `bash`, and
-     custom `*_write_file` / `*_edit_file` / etc.) are gated.
+2.  **Classify the tool: read-only versus mutating** \
+    Read-only tools (`mcp_read_file`, `mcp_list_directory`, `mcp_search_files`,
+    …) pass through silently. Mutating tools (`*_write_file`, `*_edit_file`,
+    `*_move_file`, `*_create_directory`, and the unprefixed `write` / `edit`)
+    are gated.
 
 3.  **Confirm.** \
-    The user is shown the tool name and a summary of the operation
-    (the path, or a truncated command) and asked to approve.
+    The user is shown the tool name and a summary of the operation (the path,
+    or a truncated list of paths) and asked to approve.
 
 4.  **Deny by default.** \
     The confirmation dialog has a timeout of 60s, after which time the call is
@@ -66,7 +66,7 @@ which fires before a tool is invoked:
 ```json
 {"ts":"2026-06-04T12:00:00.000Z","tool":"write","status":"approved","reason":"user approved","detail":"write: /projects/active/x.ts"}
 {"ts":"2026-06-04T12:00:10.000Z","tool":"mcp_read_file","status":"denied","reason":"mcp_read_file blocked: sensitive file refused: .env","detail":"mcp_read_file: /projects/active/.env"}
-{"ts":"2026-06-04T12:00:30.000Z","tool":"bash","status":"denied","reason":"bash blocked: confirmation timed out (default deny)","detail":"bash: rm -rf /tmp/x"}
+{"ts":"2026-06-04T12:00:30.000Z","tool":"mcp_write_file","status":"denied","reason":"mcp_write_file blocked: confirmation timed out (default deny)","detail":"mcp_write_file: /projects/active/y.ts"}
 ```
 
 ### What this does not do
@@ -95,8 +95,17 @@ via the `pi-logs` volume, mounted at `/var/log/pi`.
 
 > [!IMPORTANT]
 > The volume must also be **owned by the agent's uid**, or the log silently never
-> appears. See the note in [`audited-tools`](../audited-tools/README.md), which
-> shares this volume, for why and how to fix it.
+> appears. The image creates `/var/log/pi/permission-gate` as the `pi` user so
+> that Docker seeds a new named volume with that ownership — but a volume created
+> before that layer existed keeps its original `root:root` ownership, and the
+> agent cannot write to it. Because the sink swallows write failures by design (a
+> failed log must not change a tool's outcome), this fails **silently**: the log
+> file simply never appears. Remove the volume to re-seed it:
+>
+> ```sh
+> docker compose -f src/infrastructure/compose.yaml down
+> docker volume rm pi-secure-agent_pi-logs
+> ```
 
 The log file path does not need to exist, because the extension will create it,
 and its parent directory, on first write.

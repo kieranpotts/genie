@@ -68,7 +68,6 @@ flowchart LR
     subgraph Pi["<b>Pi</b>"]
       Core["Pi core"]
       MC["mcp-client"]
-      AT["audited-tools"]
       PG["permission-gate"]
     end
   end
@@ -86,7 +85,7 @@ flowchart LR
   classDef guard fill:#f0fff4,stroke:#27ae60,color:#000;
   classDef agent fill:#f5f7ff,stroke:#2c5fb3,color:#000;
   class MCP,Proxy,Container guard;
-  class Core,MC,AT,PG agent;
+  class Core,MC,PG agent;
 ```
 
 ### Pi extensions
@@ -94,14 +93,10 @@ flowchart LR
 This repository packages the following Pi extensions. Click the links to see
 their READMEs, which provide detailed usage instructions.
 
-- [**`audited-tools`**](../src/extensions/audited-tools/README.md): \
-  Audited, allowlisted replacements for Pi's `read`, `write`, `ls`, and `bash`
-  tools, for use with `--no-builtin-tools`. Part of the security hardening
-  infrastructure (see below)
-
 - [**`permission-gate`**](../src/extensions/permission-gate/README.md): \
-  Interactive, default-deny confirmation gate on mutating tool calls. Part
-  of the security hardening infrastructure (see below).
+  Interactive, default-deny confirmation gate on mutating tool calls, plus an
+  absolute refusal of sensitive filenames on every call. Part of the security
+  hardening infrastructure (see below).
 
 - [**`mcp-client`**](../src/extensions/mcp-client/README.md): \
   MCP client giving Pi mediated filesystem access through the Docker MCP Toolkit

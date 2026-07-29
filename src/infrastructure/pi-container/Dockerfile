@@ -6,7 +6,7 @@
 #   - no cloud API keys (held by the host proxy; see src/infra/proxy/)
 #   - no Docker socket
 #   - no project source (compose mounts it read-only at runtime, for the
-#     operator to browse; the agent's bash is fenced out of it)
+#     operator to browse; the agent has no local tool that can read it)
 #   - runs as a non-root user
 #
 # Capability dropping, no-new-privileges, read-only rootfs, and resource limits
@@ -38,9 +38,15 @@ RUN npm install -g @earendil-works/pi-coding-agent \
  && npm cache clean --force
 
 # ---------------------------------------------------------------------------
-# Security extensions. The in-Pi half of the architecture (the `mcp-client`,
-# `audited-tools`, and `permission-gate` extensions) is installed here so the
-# hardened controls ship WITH the image rather than being added ad hoc.
+# Security extensions. The in-Pi half of the architecture (the `mcp-client` and
+# `permission-gate` extensions) is installed here so the hardened controls ship
+# WITH the image rather than being added ad hoc.
+#
+# Note what is NOT here: nothing restores local file or shell access. Pi runs
+# with `--no-builtin-tools`, and `mcp-client` gives back only the `mcp_*` tools,
+# which resolve inside the MCP server's container. An `audited-tools` extension
+# used to provide a guarded `bash`; it was removed because a guard running in
+# the agent's own process is cooperative, not a boundary. See TODO.md.
 #
 # Rather than copy `src/extensions/` wholesale, the build copies only the named
 # security extensions. Each name is appended below as its step lands; until
@@ -51,7 +57,6 @@ RUN npm install -g @earendil-works/pi-coding-agent \
 # ---------------------------------------------------------------------------
 RUN mkdir -p /home/pi/.pi/agent/extensions && chown -R pi:pi /home/pi/.pi
 COPY --chown=pi:pi src/extensions/mcp-client/             /home/pi/.pi/agent/extensions/mcp-client/
-COPY --chown=pi:pi src/extensions/audited-tools/          /home/pi/.pi/agent/extensions/audited-tools/
 COPY --chown=pi:pi src/extensions/permission-gate/        /home/pi/.pi/agent/extensions/permission-gate/
 
 # ---------------------------------------------------------------------------
@@ -101,11 +106,12 @@ VOLUME ["/home/pi/sessions"]
 #   docker compose -f src/infrastructure/compose.yaml down
 #   docker volume rm pi-secure-agent_pi-logs
 #
-# Both extensions create their own log file and parent directory on first write,
-# but they cannot create them under a root-owned mount point, and both swallow
-# write failures by design so the audit trail would go silently missing.
+# `permission-gate` creates its own log file and parent directory on first
+# write, but it cannot create them under a root-owned mount point, and it
+# swallows write failures by design so the audit trail would go silently
+# missing.
 # ---------------------------------------------------------------------------
-RUN mkdir -p /var/log/pi/audited-tools /var/log/pi/permission-gate \
+RUN mkdir -p /var/log/pi/permission-gate \
  && chown -R pi:pi /var/log/pi
 VOLUME ["/var/log/pi"]
 
@@ -159,6 +165,6 @@ CMD ["bash"]
 #   NO bind of /var/run/docker.sock
 #   NO bind of host dotfiles
 #   project bound READ-ONLY at /projects/active, for the operator to browse;
-#     the agent's bash is fenced out of it (AUDITED_BASH_FENCE), so the agent
-#     reaches project files ONLY via the MCP server over agent-net
+#     the agent has no local tool that can read it, so it reaches project files
+#     ONLY via the MCP server over agent-net
 # ===========================================================================

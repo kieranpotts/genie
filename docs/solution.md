@@ -68,6 +68,14 @@ and `ls`. All you do is register a new tool with the same name. Combined with
 `--no-builtin-tools`, which starts Pi with no built-in tools at all, this
 allows constructing a fully locked-down, audited tool surface.
 
+This project uses the second half of that and deliberately not the first. An
+overriding tool runs inside the agent's own process, so any policy it enforces
+is cooperative — the agent is asked to police itself. `--no-builtin-tools`
+removes the capability outright instead, and `mcp-client` hands back only the
+`mcp_*` tools, whose containment is enforced in another container. See
+`TODO.md` for the removal of the `audited-tools` extension, which made this
+argument concrete.
+
 ## Containerized Pi instance
 
 The next layer of defense is a dedicated, hardened container for running Pi
@@ -258,11 +266,11 @@ to what's described above.
 
 | Requirement                         | Hardening solution                                                                                                                                                      |
 |-------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Filesystem access control           | ALL agent file access mediated by the MCP server, reached by the `mcp-client` extension. The project is mounted read-only in the agent container for the human operator to browse; the agent's `bash` is fenced out of that mount, and the MCP server holds the only writable handle. |
-| Command execution control           | `bash` replacement (via `audited-tools`) never invokes a shell, rejects control operators, runs only allowlisted programs, and refuses any argument resolving into the mediated project path. PARTIAL: the fence is self-enforced and lexical, and the default allowlist includes interpreters (`node -e`, `python3 -c`) that read a fenced file without the fence seeing a path — operator confirmation is the control there. See `TODO.md`. |
+| Filesystem access control           | ALL agent file access mediated by the MCP server, reached by the `mcp-client` extension. The project is mounted read-only in the agent container for the human operator to browse; the agent has no local tool that can read it (`--no-builtin-tools`, and no extension restores one), and the MCP server holds the only writable handle. |
+| Command execution control           | The agent cannot execute anything. `--no-builtin-tools` removes Pi's `bash`, and no extension provides a replacement, so there is no execution surface to police. This replaced an `audited-tools` extension that allowlisted commands from inside the agent's own process — a cooperative guard whose fence was self-enforced and lexical, and which interpreters on its allowlist (`node -e`, `python3 -c`) could read straight through. Removing the capability is the stronger control. See `TODO.md`, which also records the deferred option of an out-of-process exec MCP server should execution ever be needed. |
 | Permission prompts / approval gates | `permission-gate` extension requires interactive confirmation for writes/edits/execution (`tool_call` events). Denies access by default.                                |
 | Sensitive-file refusal              | `permission-gate` refuses any call naming secrets or key material (`.env*`, `id_rsa`, `*.pem`, `*.key`, …) on filename patterns. Absolute — no approval path — and applied to every tool call, `mcp_*` included. |
-| Audit log of tool calls             | Append-only JSONL logs, on a dedicated volume, for every bash call and every tool approve/deny decision. The volume must be owned by the agent's uid or logging fails silently. |
+| Audit log of tool calls             | Append-only JSONL log, on a dedicated volume, for every tool approve/deny decision. The volume must be owned by the agent's uid or logging fails silently. PARTIAL: read-only calls are not yet recorded — see `TODO.md`. |
 | API key isolation from agent        | Host-side LiteLLM proxy holds API keys (eg. `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`). Agent container gets a proxy endpoint + low-value rotatable proxy token.             |
 | Extension vetting / signing         | Extensions require manual review. Third-party packages MUST be pinned to exact versions/commit hashes.                                                                  |
 | Network egress control              | Container has no host networking. Reaches the model only via the host proxy over a private bridge network.                                                              |

@@ -20,8 +20,8 @@ no host files, no cloud credentials, and no host Docker control — and every
 filesystem action it takes should be logged.
 
 The architecture has two halves. This directory is the host-and-container
-half; the in-Pi controls are the `mcp-client`, `audited-tools`, and
-`permission-gate` extensions under `src/extensions/`.
+half; the in-Pi controls are the `mcp-client` and `permission-gate` extensions
+under `src/extensions/`.
 
 ## Components
 
@@ -43,9 +43,9 @@ See the architecture doc for the full boundary diagrams.
 ## Operator runbook
 
 End-to-end procedure to bring the stack up against a real project and verify
-the security boundary. The three in-Pi extensions (`mcp-client`,
-`audited-tools`, `permission-gate`) are baked into the hardened image, so once
-it is built they are present in the agent.
+the security boundary. Both in-Pi extensions (`mcp-client`, `permission-gate`)
+are baked into the hardened image, so once it is built they are present in the
+agent.
 
 **1. Configure the host**
 
@@ -155,9 +155,8 @@ pi-container:/projects/active$
 
 If you land in `~` instead, the shell says so on entry — the project volume is
 not mounted, and `PROJECT_PATH` in `.env` is the thing to check. That directory
-is the operator's, and is set by `PI_PROJECT_DIR`; the agent's `bash` runs
-somewhere else entirely (`AUDITED_BASH_CWD`, outside the fence), so do not point
-one at the other.
+is the operator's, and is set by `PI_PROJECT_DIR`. The agent has no working
+directory in this container at all — it has no shell and no local file tools.
 
 The agent starts automatically. It is launched by the shell (`~/.bashrc` calls
 `start-pi`) rather than being the container's main process, which is what makes
@@ -172,10 +171,11 @@ back in, or `harnesses` to re-show the list.
 ```
 
 `start-pi` supplies `--model` (the proxy route, from `PI_MODEL`) and
-`--no-builtin-tools`, so the audited replacements are the only file tools. These
-flags live in the image, not in `compose.yaml`, precisely so they cannot be lost
-by an override. Running `pi` directly bypasses them — use it only when debugging
-the harness itself.
+`--no-builtin-tools`, so the `mcp_*` tools are the only file tools and the agent
+has no shell. These flags live in the image, not in `compose.yaml`, precisely so
+they cannot be lost by an override. Running `pi` directly bypasses them — use it
+only when debugging the harness itself, and note that doing so re-enables Pi's
+built-in `read`/`grep`/`find`/`edit` against the project mount below.
 
 To land in the shell without starting an agent — inspecting the boundary, or
 running the checks below — set `PI_AUTOSTART=0`:
@@ -198,11 +198,16 @@ without starting an agent at all:
 docker compose -f src/infrastructure/compose.yaml exec -e PI_AUTOSTART=0 pi bash
 ```
 
-This mount is for **you**, not the agent. The agent's `bash` tool is fenced out
-of it (`AUDITED_BASH_FENCE`), so the agent still reaches project files only
-through the `mcp_*` tools, where the access is mediated and logged. Your own
-shell is not fenced — the fence is a rule the agent's tooling applies to itself,
-and you are not the threat model.
+This mount is for **you**, not the agent. The agent has no tool that can read it
+— `--no-builtin-tools` removes Pi's own `read`, `grep`, `find`, and `edit`, and
+no extension restores local file or shell access — so it still reaches project
+files only through the `mcp_*` tools, where the access is mediated and logged.
+Your own shell is unrestricted; you are not the threat model.
+
+This used to be enforced by a path fence in an `audited-tools` extension, which
+policed the same boundary from inside the agent's own process. That extension
+was removed: a cooperative guard is weaker than not having the capability. See
+`TODO.md`.
 
 Because the mount is read-only, nothing in this container can modify the project
 through it. The MCP filesystem server holds the only writable handle, which is
@@ -216,7 +221,7 @@ what keeps the change trail complete.
 | Project mount is read-only | `docker compose ... exec pi touch /projects/active/x 2>&1` | `Read-only file system` |
 | Agent has no Docker socket | `docker compose ... exec pi ls -l /var/run/docker.sock 2>&1` | no such file |
 | Mediated read works | ask the agent to read a file in the project | returns content via an `mcp_*` tool |
-| Agent's bash is fenced | ask it to `cat /projects/active/README.md` | denied: `reaches into a mediated path … use the mcp_* tools`; the audited-tools log shows the `denied` line |
+| Agent has no local tools | ask it to run a shell command, or to read `/projects/active/README.md` without MCP | it has no such tool to call; only `mcp_*` tools are offered |
 | Traversal denied | ask it to read `../../etc/passwd` | denied at the MCP boundary |
 | Sensitive file refused | ask it to read `.env` in the project | refused before the call runs; the permission-gate log shows `sensitive file refused` |
 | Write requires approval | ask it to write a file | a confirmation prompt appears; on approve, write succeeds |
@@ -225,16 +230,15 @@ what keeps the change trail complete.
 
 **8. Inspect the audit trail**
 
-Both logs live on the `pi-logs` volume, outside the agent's read-only rootfs:
+The log lives on the `pi-logs` volume, outside the agent's read-only rootfs:
 
 ```sh
-docker compose -f src/infrastructure/compose.yaml exec pi cat /var/log/pi/audited-tools/audit.jsonl    # bash calls
 docker compose -f src/infrastructure/compose.yaml exec pi cat /var/log/pi/permission-gate/audit.jsonl  # approvals + refusals
 ```
 
 > [!IMPORTANT]
-> The `pi-logs` volume must be owned by the agent's uid (1001) or both logs fail
-> **silently** — the sinks swallow write errors so a logging failure cannot change
+> The `pi-logs` volume must be owned by the agent's uid (1001) or the log fails
+> **silently** — the sink swallows write errors so a logging failure cannot change
 > a tool's outcome. Ownership is seeded from the image, so a volume created
 > before that layer existed is still `root:root`. Fix it once:
 >

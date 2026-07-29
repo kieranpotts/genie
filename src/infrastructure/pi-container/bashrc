@@ -36,11 +36,10 @@ PS1='\[\033[34m\]pi-container\[\033[0m\]:\w\$ '
 # entering the container wants to be where the work is — and starting in an
 # empty home is what makes a correctly-mounted project look absent.
 #
-# This is the OPERATOR's working directory only. It is deliberately NOT
-# AUDITED_BASH_CWD, which is where the agent's `bash` tool runs and the base its
-# fenced paths resolve against: that must stay OUTSIDE the fence, or every
-# relative path the agent uses would resolve into the mediated project and be
-# refused. Two different directories, for two different users of this container.
+# This is the OPERATOR's working directory only, and it has no bearing on the
+# agent: the agent has no shell and no local file tools, so it has no working
+# directory in this container at all. Its route to the project is the `mcp_*`
+# tools, which resolve inside the MCP server's container, not this one.
 #
 # Guarded on existence so the image still works unmounted (a plain `docker run`,
 # or a compose file without the project volume), and noisy when the mount is

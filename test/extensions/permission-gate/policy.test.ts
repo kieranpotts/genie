@@ -3,13 +3,20 @@ import assert from 'node:assert/strict'
 import { decide, describeCall, requiresConfirmation } from '../../../src/extensions/permission-gate/policy.ts'
 
 describe('requiresConfirmation', () => {
-  for (const t of ['write', 'edit', 'bash']) {
-    it(`gates mutating builtin: ${t}`, () => assert.equal(requiresConfirmation(t), true))
+  for (const t of ['write', 'edit']) {
+    it(`gates unprefixed mutating tool: ${t}`, () => assert.equal(requiresConfirmation(t), true))
   }
 
   for (const t of ['read', 'ls', 'grep', 'find']) {
     it(`allows read-only builtin: ${t}`, () => assert.equal(requiresConfirmation(t), false))
   }
+
+  /* The agent has no execution tool: `--no-builtin-tools` removes Pi's `bash`
+     and nothing restores it. Asserted so that reintroducing execution without
+     also gating it fails here rather than in production. See TODO.md. */
+  it('does not gate `bash`, which cannot occur', () => {
+    assert.equal(requiresConfirmation('bash'), false)
+  })
 
   for (const t of ['mcp_write_file', 'mcp_edit_file', 'mcp_move_file', 'mcp_create_directory']) {
     it(`gates mutating MCP tool: ${t}`, () => assert.equal(requiresConfirmation(t), true))
@@ -21,19 +28,12 @@ describe('requiresConfirmation', () => {
 })
 
 describe('describeCall', () => {
-  it('summarises a command call', () => {
-    assert.equal(describeCall('bash', { command: 'rm -rf /tmp/x' }), 'bash: rm -rf /tmp/x')
-  })
-
   it('summarises a path call', () => {
     assert.equal(describeCall('write', { path: '/projects/active/x.ts' }), 'write: /projects/active/x.ts')
   })
 
-  it('truncates a very long command', () => {
-    const long = 'echo ' + 'a'.repeat(200)
-    const out = describeCall('bash', { command: long })
-    assert.equal(out.length <= 'bash: '.length + 120, true)
-    assert.match(out, /…$/)
+  it('ignores a command argument, which no tool takes', () => {
+    assert.equal(describeCall('mcp_write_file', { command: 'rm -rf /tmp/x' }), 'mcp_write_file')
   })
 
   it('summarises a move as source -> destination', () => {
@@ -57,11 +57,11 @@ describe('describeCall', () => {
     assert.match(out, /…$/)
   })
 
-  it('prefers a command over a path when both are present', () => {
-    assert.equal(describeCall('bash', { command: 'git status', path: '/a' }), 'bash: git status')
+  it('uses the path when a command is also present', () => {
+    assert.equal(describeCall('mcp_write_file', { command: 'git status', path: '/a' }), 'mcp_write_file: /a')
   })
 
-  it('falls back to the tool name with no path or command', () => {
+  it('falls back to the tool name with no recognised argument', () => {
     assert.equal(describeCall('write', {}), 'write')
   })
 })

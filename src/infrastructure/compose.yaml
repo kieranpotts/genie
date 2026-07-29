@@ -8,10 +8,11 @@
 #         └────────model calls───────▶  host LiteLLM proxy (host-gateway:4000)
 #
 # The pi-container holds NO cloud keys and NO docker.sock. It mounts the project
-# READ-ONLY, for the human operator's benefit only: the agent's own access is
-# fenced out of that mount (AUDITED_BASH_FENCE) so every agent read and ALL
-# writes still go through the mcp-filesystem server, which is the only component
-# with a writable handle on the project.
+# READ-ONLY, for the human operator's benefit only: the agent itself has no
+# local file or shell tools at all (`--no-builtin-tools`, and no extension
+# restores them), so every agent read and ALL writes go through the
+# mcp-filesystem server, which is the only component with a writable handle on
+# the project.
 #
 # Host prerequisites (see src/infrastructure/.env.example, copied to src/infrastructure/.env):
 #   - Ollama bound to the bridge gateway (OLLAMA_HOST)
@@ -42,9 +43,9 @@ volumes:
       device: ${PROJECT_PATH:?set PROJECT_PATH in src/infrastructure/.env}
   # Pi session transcripts, persisted outside any project tree (sensitive).
   pi-sessions:
-  # Audit trails (permission-gate + audited-tools). A separate volume from
-  # sessions so the accountability logs have their own lifecycle and can be
-  # retained/shipped independently of transcripts.
+  # Audit trails (permission-gate). A separate volume from sessions so the
+  # accountability logs have their own lifecycle and can be retained/shipped
+  # independently of transcripts.
   #
   # The agent runs as uid 1001, so this volume must be owned by it or the logs
   # fail silently. Ownership is seeded from the image's /var/log/pi, which means
@@ -181,19 +182,22 @@ services:
       #
       # The agent's own route to these files remains the MCP server, which
       # mediates and logs every access. What keeps this mount from becoming a
-      # second, unmediated route is the PATH FENCE in the audited-tools bash
-      # policy (AUDITED_BASH_FENCE, below): any command reaching into
-      # /projects/active is refused and the model is pointed at the mcp_* tools.
+      # second, unmediated route is that the agent has NO TOOL that can read it:
+      # `--no-builtin-tools` removes Pi's own read/grep/find/edit, and no
+      # extension restores local file or shell access. The `mcp_*` tools are the
+      # only file surface it has, and they resolve inside the MCP server's own
+      # container, not this one.
       #
-      # `:ro` is load-bearing in two ways. It stops the agent writing here even
-      # if the fence is defeated, and it means the ONLY writable route to the
-      # project is the MCP server — so the audit trail of changes stays complete.
-      # Do not drop it without re-reading the fence's stated limits in
-      # src/extensions/audited-tools/bash-policy.ts.
+      # This replaced a path fence in a since-removed `audited-tools` extension,
+      # which policed the same boundary from inside the agent's own process — a
+      # cooperative guard rather than an absence of capability. See TODO.md.
+      #
+      # `:ro` remains load-bearing: it means the ONLY writable route to the
+      # project is the MCP server, so the audit trail of changes stays complete
+      # even if the agent were to regain a local tool.
       - project:/projects/active:ro
       # Keep this path in step with PI_PROJECT_DIR below, which is where an
-      # operator's shell lands, and with AUDITED_BASH_FENCE, which keeps the
-      # agent out of it.
+      # operator's shell lands.
     environment:
       # Model access: proxy token ONLY. No cloud API keys. The proxy ENDPOINT is
       # declared in the image's models.json (pi-container/models.json) — Pi reads
@@ -212,19 +216,6 @@ services:
       # so entering the container puts you in the project rather than an empty
       # home. Nothing about the agent's own access is derived from this.
       PI_PROJECT_DIR: "/projects/active"
-      # Working directory for the AGENT's audited `bash`, and the base that
-      # relative arguments are resolved against when fencing. Outside the fence
-      # by construction — pointing this into the project would make every
-      # relative path the agent uses resolve into the fence and be refused.
-      AUDITED_BASH_CWD: "/home/pi"
-      # Directories the agent's `bash` may not reach. This is what keeps the
-      # read-only project mount an OPERATOR convenience rather than an agent
-      # back door: the mount is visible in this container, but every bash
-      # command naming a path inside it is refused. Set to `none` to disable
-      # fencing entirely — which, with the project mounted, hands the agent
-      # unmediated read access to it.
-      AUDITED_BASH_FENCE: "/projects/active"
-      AUDITED_TOOLS_LOG: "/var/log/pi/audited-tools/audit.jsonl"
       # Interactive approval: the permission-gate extension requires confirmation
       # for mutating tool calls, refuses sensitive filenames outright on every
       # call (including the mcp_* ones), and logs every decision here.

@@ -6,14 +6,16 @@
  * whole point is that a misbehaving model must not be able to talk a distracted
  * operator into leaking a private key.
  *
- * This rule used to live in the `audited-tools` extension's path guard, where it
- * covered only that extension's own file tools. Those were removed (they were
- * rooted at a path the agent container does not have), so the rule was lifted
- * here: the permission gate's `tool_call` hook is the one place that sees EVERY
- * tool call, including the `mcp_*` tools that are now the sole route to project
- * files. The MCP filesystem server enforces its allowed-directory boundary but
- * has no notion of sensitive filenames, so without this the agent could read a
- * project's committed `.env` or `*.pem` unchallenged.
+ * This lives here because the permission gate's `tool_call` hook is the one
+ * place that sees EVERY tool call, including the `mcp_*` tools that are the sole
+ * route to project files. The MCP filesystem server enforces its
+ * allowed-directory boundary but has no notion of sensitive filenames, so
+ * without this the agent could read a project's committed `.env` or `*.pem`
+ * unchallenged.
+ *
+ * (Historically the rule lived in an `audited-tools` extension's path guard,
+ * where it covered only that extension's own file tools. That extension has
+ * since been removed entirely — see `TODO.md`.)
  *
  * The logic is pure and unit-tested; `index.ts` is the glue that blocks and logs.
  *
@@ -61,10 +63,17 @@ export function isSensitiveFile (candidate: string): boolean {
 }
 
 /**
- * Every path-shaped value in a tool input, flattened. String values of the
- * path-bearing keys, plus each whitespace-separated token of a `command`, since
- * a vetted `bash` call can still name a file as an argument (`cat id_rsa`).
- * Quotes are stripped so a quoted argument is checked on its content. Pure.
+ * Every path-shaped value in a tool input, flattened: the string values of the
+ * path-bearing keys, and the string members of their array forms. Pure.
+ *
+ * This used to also tokenise a `command` string, so that `cat id_rsa` was caught
+ * for the `audited-tools` extension's `bash`. No tool takes a `command` argument
+ * any more — the agent has no execution surface — so that branch was removed
+ * rather than left dormant. It was never sound for the case that mattered:
+ * whitespace-splitting `node -e "…readFileSync('.env')…"` yields a token whose
+ * basename is `.env','utf8')`, which matches nothing. If execution ever returns
+ * (see the deferred exec-server option in `TODO.md`), do not restore this as it
+ * was — the argument vector should be checked, not a re-split string.
  */
 export function pathArguments (input: Record<string, unknown>): string[] {
   const found: string[] = []
@@ -74,13 +83,6 @@ export function pathArguments (input: Record<string, unknown>): string[] {
     if (typeof value === 'string') found.push(value)
     else if (Array.isArray(value)) {
       for (const item of value) if (typeof item === 'string') found.push(item)
-    }
-  }
-
-  if (typeof input.command === 'string') {
-    for (const token of input.command.split(/\s+/)) {
-      const unquoted = token.replace(/^['"]|['"]$/g, '')
-      if (unquoted !== '') found.push(unquoted)
     }
   }
 

@@ -15,10 +15,20 @@
 #                      (google), finds no key, and reports "No models
 #                      available". The route names come from models.json.
 #
-#   --no-builtin-tools Without it, the audited-tools extension only shadows
-#                      read/write/ls/bash BY NAME; Pi's built-in edit, grep,
-#                      and find stay live and unguarded. See
-#                      src/extensions/audited-tools/README.md.
+#   --no-builtin-tools THIS IS THE CONTROL, not a tidying-up flag. Pi's built-in
+#                      read, grep, find, edit, and write operate directly on
+#                      THIS container's filesystem — which mounts the project
+#                      read-only at /projects/active for the operator. Without
+#                      this flag the agent can read every project file locally,
+#                      bypassing the MCP server that is supposed to be its only
+#                      route to them, with none of that server's mediation or
+#                      logging. permission-gate would not catch it either: it
+#                      gates writes and execution, and lets reads pass silently.
+#
+#                      Do not remove this on the grounds that "there is no
+#                      audited-tools extension to shadow built-ins any more".
+#                      That extension's removal is exactly why this flag is now
+#                      the whole of the agent's local-tool posture. See TODO.md.
 #
 # Any additional arguments are passed through to Pi.
 #
@@ -37,7 +47,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   echo ""
   echo "Start the Pi coding agent with this container's security profile:"
   printf '  %-26s (override with the PI_MODEL environment variable)\n' "--model ${model}"
-  printf '  %-26s (audited replacements are the only file tools)\n' "--no-builtin-tools"
+  printf '  %-26s (the mcp_* tools are the only file tools)\n' "--no-builtin-tools"
   echo ""
   echo "Extra arguments are passed through to Pi. To start Pi without the"
   echo "security profile — for debugging the harness itself — run \`pi\` directly."
