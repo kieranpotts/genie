@@ -291,12 +291,16 @@ claimed and what is enforced.
   action the agent takes against the filesystem". Reads are not covered.
 
   `permission-gate` sees every tool call, but returns early for read-only ones
-  (`index.ts`, the `requiresConfirmation` guard) and logs nothing. `audited-tools`
-  logs only `bash`. So every `mcp_read_file`, `mcp_read_multiple_files`,
-  `mcp_list_directory`, `mcp_directory_tree`, `mcp_search_files`, and
-  `mcp_get_file_info` — which is to say every read of project content, the whole
-  reason the agent has filesystem access at all — leaves no entry in
-  `/var/log/pi`. Writes, refusals, and bash are recorded; reads are invisible.
+  (`index.ts`, the `requiresConfirmation` guard) and logs nothing. So every
+  `mcp_read_file`, `mcp_read_multiple_files`, `mcp_list_directory`,
+  `mcp_directory_tree`, `mcp_search_files`, and `mcp_get_file_info` — which is
+  to say every read of project content, the whole reason the agent has
+  filesystem access at all — leaves no entry in `/var/log/pi`. Writes and
+  refusals are recorded; reads are invisible.
+
+  This got sharper with the removal of `audited-tools`: `permission-gate` is now
+  the *only* extension writing an audit trail, so its blind spot is the whole
+  system's blind spot.
 
   Two partial records exist, and neither is an audit trail. The gateway logs
   `Calling tool …` to its own container stdout with `--log-calls`, which is
@@ -344,17 +348,20 @@ claimed and what is enforced.
   own calls; nothing stops a tool, an extension, or `npx`. (Check `host-gateway`
   reachability before switching the network to `internal: true`.)
 
-  This compounds the allowlist item above: an interpreter that can read a fenced
-  file can also post it somewhere. Either fix alone reduces the exposure —
-  closing egress means a read cannot leave; trimming the allowlist means there is
-  nothing to read with — so they are worth weighing together rather than in turn.
+  This used to compound the bash allowlist item: an interpreter that could read a
+  fenced file could also post it somewhere. Removing agent execution closed the
+  second half of that pairing — there is no longer a local tool that can read a
+  file *or* make an outbound request. What remains is the extension surface
+  itself (`mcp-client` opens an HTTP connection) and anything Pi's own runtime
+  does, so the claim in the hardening table is still unenforced and still worth
+  either implementing or dropping.
 
 ## Documentation fixes — the design overstates the build
 
 - [ ] **Three of the four documented hooks are not used anywhere.**
   `docs/solution.md:41` says these hooks "are used to intercept tool and model
-  calls". Only `tool_call` (`src/extensions/permission-gate/index.ts:33`) and
-  `session_start` (`src/extensions/mcp-client/index.ts:52`) are used — and the
+  calls". Only `tool_call` (`src/extensions/permission-gate/index.ts:51`) and
+  `session_start` (`src/extensions/mcp-client/index.ts:59`) are used — and the
   latter is not in the design at all. There is no `tool_result` handler (so no
   output redaction), no `before_provider_request` handler (so no auditing of
   outbound model traffic, despite `docs/solution.md:58`), and no
@@ -364,12 +371,14 @@ claimed and what is enforced.
   stated intent.
 
 - [ ] **Document the `docker.sock` grant in `docs/solution.md`.**
-  `compose.yaml:93` binds the host Docker socket into `mcp-gateway`.
-  `src/infrastructure/README.md:118-136` documents and justifies this honestly
-  and at length, but `docs/solution.md:76` says only "There's no access to
-  Docker sockets either", and the hardening table reads as though no component
-  holds one. `docs/requirements.md:11` names host Docker control explicitly, so
-  this is the most important of the documentation gaps.
+  `compose.yaml:101` binds the host Docker socket into `mcp-gateway`.
+  `src/infrastructure/README.md`'s "The docker.sock trade-off (read this)"
+  section documents and justifies this honestly and at length, but
+  `docs/solution.md` never mentions it: the diagram at line 213 labels the
+  pi-container "no FS, docker.sock, or keys" and the hardening table at line 277
+  says "no `docker.sock`" — both true of the *agent*, but together they read as
+  though no component holds one. `docs/requirements.md:11` names host Docker
+  control explicitly, so this is the most important of the documentation gaps.
 
 - [ ] **Reconcile multi-project diagrams with the single-project reality.**
   The diagrams and the mount view show `proj-a`/`proj-b` volumes and
@@ -382,12 +391,12 @@ claimed and what is enforced.
 - [ ] **Pin the Pi package, per the project's own rule.**
   The hardening table requires third-party packages pinned to exact
   versions or commit hashes. All three container images are digest-pinned, but
-  `src/infrastructure/pi-container/Dockerfile:36` is a bare
+  `src/infrastructure/pi-container/Dockerfile:37` is a bare
   `npm install -g @earendil-works/pi-coding-agent`, floating to latest at build
   time.
 
 - [ ] **Fix stale cross-references.**
-  `compose.yaml:4`, `src/infrastructure/pi-container/Dockerfile:16-17`, and
+  `compose.yaml:4`, `src/infrastructure/pi-container/Dockerfile:17-18`, and
   `src/infrastructure/README.md:6` all cite `docs/local-agent-architecture.md`
   and `docs/local-agent-implementation-plan.md`, neither of which exists —
   `docs/` holds `problem.md`, `requirements.md`, `solution.md`, and
