@@ -166,10 +166,12 @@ the design for an out-of-process exec MCP server — deliberately not an extensi
 inside the agent, for the reason given above.
 
 > [!NOTE]
-> This is a statement about the agent's **tool surface**, not about network
-> reachability. The container sits on an ordinary Docker bridge with outbound
-> NAT; nothing in the tool surface can use it today, but that is an absence of
-> capability rather than an enforced egress boundary. See `TODO.md`.
+> This is a statement about the agent's **tool surface**. Network reachability
+> is now constrained separately and independently: `agent-net` is declared
+> `internal: true`, so the container has no default route and no outbound NAT.
+> External addresses fail with `ENETUNREACH` and DNS does not resolve. The two
+> controls are worth keeping distinct — the tool surface is why nothing *wants*
+> to reach the network, the internal network is why nothing *can*.
 
 The user experience is unchanged. Users interact with Pi in the normal way.
 Only the plumbing beneath the agent changes.
@@ -438,10 +440,10 @@ to what's described above.
 | Audit log of tool calls             | Append-only JSONL log, on a dedicated volume, for **every** tool call — reads included, which are never prompted for. Two independent fields: `outcome` (did it run) and `confirmation` (was a human involved, and what did they say), so a policy refusal and an operator's rejection are distinguishable by field rather than by prose. The volume must be owned by the agent's uid or logging fails silently. PARTIAL: records what was *attempted*, not what resulted — the `tool_call` hook fires before the call runs, so a read the MCP server then refuses is logged as allowed. Closing that needs the `tool_result` hook or a gateway `after:` interceptor; see `TODO.md`. |
 | API key isolation from agent        | Host-side LiteLLM proxy holds API keys (eg. `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`). Agent container gets a proxy endpoint + low-value rotatable proxy token.             |
 | Extension vetting / signing         | Extensions require manual review. Third-party packages MUST be pinned to exact versions/commit hashes.                                                                  |
-| Network egress control              | Container has no host networking. Reaches the model only via the host proxy over a private bridge network.                                                              |
+| Network egress control              | ENFORCED. `agent-net` is `internal: true`, so Docker installs no default route and no masquerade rule for it: external addresses are `ENETUNREACH` and DNS does not resolve. The container's only reachable peers are the MCP gateway and the host LiteLLM proxy. Because an internal network has no route to docker0, the proxy is reached at this network's own pinned gateway address (`extra_hosts`), not via Docker's `host-gateway` alias — the subnet pin in `compose.yaml` and that `extra_hosts` entry are one setting in two places. This is what rules out the gateway's `--verify-signatures`, which needs the sigstore TUF mirror; see `TODO.md`. |
 | Container hardening (agent)         | Non-root user, `--cap-drop ALL`, `no-new-privileges`, read-only rootfs with tmpfs `/tmp`, memory/CPU/PIDs limits, no `docker.sock`, no host-dotfile mounts, and the project mounted read-only for the operator only. |
 | Host Docker control                 | The agent has **no** Docker socket. The `mcp-gateway` **does** — it spawns and manages the MCP server container, so `compose.yaml` binds `/var/run/docker.sock` into it. This is the one privileged grant in the design, and it is confined rather than eliminated: the gateway is unreachable from outside the stack (private bridge, unpublished port, agent as its only peer) and is itself hardened with `cap_drop: [ALL]`, `no-new-privileges`, and a read-only rootfs. `docs/requirements.md` requires that a compromised *agent* cannot reach host Docker control; that is what is enforced. See "The gateway, and the `docker.sock` trade-off" above, and `src/infrastructure/README.md` for the socket-proxy and stdio alternatives. |
-| Startup telemetry / network calls   | `PI_OFFLINE=1` / `PI_SKIP_VERSION_CHECK=1` disable Pi's built-in telemetry and version-check calls, so the only outbound network is the proxy and the MCP gateway.      |
+| Startup telemetry / network calls   | `PI_OFFLINE=1` / `PI_SKIP_VERSION_CHECK=1` disable Pi's built-in telemetry and version-check calls. This is now belt-and-braces rather than the control itself: with `agent-net` internal, such a call has nowhere to go even if the setting were lost. |
 | Session data retention              | `sessionDir` set to a named volume outside the project tree (`pi-sessions`). JSONL logs hold the full conversation, including file content reads.                       |
 | Session data encryption at rest     | NOT IMPLEMENTED. Depends on the host volume back-end (eg. an encrypted disk).                                                                                           |
 | Data classification                 | NOT IMPLEMENTED. No extension inspects tool *content* by sensitivity; the filename-pattern refusal in `permission-gate/sensitive-files.ts` classifies by name only.     |

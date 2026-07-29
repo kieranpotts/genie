@@ -14,6 +14,21 @@
   "editor.wordWrap": "bounded",
   "editor.wordWrapColumn": 120,
 
+  /* Errno and sigstore identifiers that appear in the infrastructure docs and
+  the runbook's egress check. These are literal values an operator matches
+  against command output, so they cannot be reworded. */
+  "cSpell.words": [
+    "EAI_AGAIN",
+    "ECONNREFUSED",
+    "ENETUNREACH",
+    "Errno",
+    "EROFS",
+    "litellm",
+    "Rekor",
+    "sigstore",
+    "tmpfs",
+  ],
+
   "[markdown]": {
     /* Wrap documentation files at the viewport width. Hard-wrapping
     should be applied at 80 characters, except for tables and long URLs. */

@@ -216,6 +216,21 @@ stop_stale_proxy() {
 #
 # Sets the module-level `proxy_pid`, used by cleanup to stop it on exit.
 #
+# MUST RUN AFTER bring_up_boundary. `LITELLM_HOST` is the gateway address of
+# `agent-net` (see the pinned subnet in compose.yaml), and compose only creates
+# that host interface when it creates the network. Called earlier, `litellm
+# --host` fails with "Cannot assign requested address" and the proxy never
+# starts.
+#
+# It reads as backwards -- the model proxy starting after the thing that calls
+# it -- so: nothing between the two needs a model. The pi container's PID 1 is
+# `sleep infinity`, so no agent exists until `enter_container`, which runs last.
+#
+# The address is agent-net's gateway rather than docker0's because the network
+# is `internal: true`: the container has no route off its own subnet, so
+# docker0's 172.17.0.1 is unreachable from it. Binding wider (0.0.0.0) would
+# work but would expose a key-holding proxy on every host interface.
+#
 start_proxy() {
   stop_stale_proxy
 
@@ -418,17 +433,20 @@ enter_container() {
 # cleanup - Stop what this script started. Registered as an EXIT trap.
 #
 cleanup() {
+  # Teardown is the reverse of startup, which now matters: the proxy is bound to
+  # agent-net's gateway address, so tearing the network down first would pull the
+  # interface out from under a still-running process. Stop the proxy first.
+  if [[ -n "${proxy_pid}" ]] && kill -0 "${proxy_pid}" 2>/dev/null; then
+    print_info "Stopping the LiteLLM proxy (pid ${proxy_pid})."
+    kill "${proxy_pid}" 2>/dev/null || true
+    wait "${proxy_pid}" 2>/dev/null || true
+  fi
+
   # Only tear down what was actually brought up. A failure during the preflight
   # checks used to announce a teardown of a boundary that was never started,
   # which reads as though the failure happened later than it did.
   if [[ -n "${boundary_started}" ]]; then
     print_info "Tearing down the compose boundary."
     docker compose -f "${infra_dir}/compose.yaml" --env-file "${env_file}" down 2>/dev/null || true
-  fi
-
-  if [[ -n "${proxy_pid}" ]] && kill -0 "${proxy_pid}" 2>/dev/null; then
-    print_info "Stopping the LiteLLM proxy (pid ${proxy_pid})."
-    kill "${proxy_pid}" 2>/dev/null || true
-    wait "${proxy_pid}" 2>/dev/null || true
   fi
 }

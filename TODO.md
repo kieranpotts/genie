@@ -269,7 +269,11 @@ claimed and what is enforced.
   `readFileSync('/workspace/.env','utf8')` is `.env','utf8')`, which
   matches no pattern. It catches `cat .env`; it does not catch a payload.
 
-- [ ] **Use the gateway's own controls — `--tools` and `--verify-signatures`.**
+- [ ] **Use the gateway's own controls — `--tools`.** *(`--verify-signatures`
+  was the other half of this item and is now **declined**; see the sub-item
+  below. Only the `--tools` allowlist remains open, and it is blocked on usage
+  data rather than on a decision.)*
+
   Verified against the pinned image (`docker run --rm --entrypoint /docker-mcp
   docker/mcp-gateway@sha256:e3d6672… gateway run --help`), so this is the
   deployed surface, not the documented one.
@@ -301,8 +305,54 @@ claimed and what is enforced.
     obvious first candidates. Note the honest ceiling — with all eleven being
     filesystem tools confined to `/workspace`, this is defence in depth, not a
     new boundary; the containment is already the MCP server's.
-  - `--verify-signatures` is off. Largely redundant against digest pinning, but
-    close to free; turn it on unless it breaks the bring-up.
+
+    **Blocked on data, not on a decision.** Checked while closing the egress
+    item: `calls.jsonl` is **0 lines**. The volume re-seed worked (it is owned
+    `1001:1001`, so the silent-failure mode is not what is happening), but no
+    agent session has run since the logging change landed. Trimming the list now
+    would mean guessing which tools are unused — which is the exact failure this
+    entry was rewritten to avoid when it wrongly cited `read_media_file`.
+    **Do not attempt this until real work has gone through the stack.** The
+    unblocking action is to use the agent normally, then re-run the `jq` line.
+  - **`--verify-signatures`: DECLINED, not deferred.** The instruction above was
+    "close to free; turn it on unless it breaks the bring-up". Measured, it is
+    neither free nor compatible, and the item is closed rather than left open.
+
+    Two findings, in the order they appeared:
+
+    1. **It breaks the bring-up as written.** The gateway crash-loops on
+       `verifying docker images: getting Rekor public keys: creating cached
+       local store: mkdir /root/.sigstore: read-only file system` — it wants a
+       cache directory, and the gateway runs `read_only: true`. This part is
+       fixable: adding `/root/.sigstore` to the service's `tmpfs` list makes
+       verification succeed in about a second.
+    2. **With that fixed, it needs outbound internet** — it fetches the sigstore
+       TUF root from `https://tuf-repo-cdn.sigstore.dev`. On the now-`internal`
+       `agent-net` that fails (`server misbehaving` from the embedded resolver)
+       and the gateway crash-loops again. **`--verify-signatures` and the egress
+       control are mutually exclusive as long as the gateway shares the agent's
+       network.**
+
+    The workaround was tested and rejected. Putting the gateway on a second,
+    non-internal `egress-net` does work — verification succeeds, the agent stays
+    sealed, `ENETUNREACH` on every external address. But the gateway then spawns
+    **the filesystem MCP server onto `egress-net`**, confirmed in its own log
+    line (`--network pi-secure-agent_egress-net`). That hands outbound internet
+    to the one component holding a writable handle on the project, which is a
+    worse position than the one being fixed, and the network it picks is not
+    controllable from `compose.yaml`.
+
+    So the trade is: **signature verification, or an egress boundary.** Egress
+    wins, because the two are not comparable in strength. The images are already
+    **digest-pinned**, which fixes image *identity* cryptographically — a digest
+    cannot be re-pointed. Signatures would add *provenance* (who published it)
+    on top of an identity that is already nailed down, and only at pull time.
+    The egress boundary constrains the whole running system continuously. Paying
+    for the former with the latter is a bad trade.
+
+    Revisit only if the topology changes — specifically if the gateway stops
+    sharing a network with the agent, or if the Toolkit gains a way to pin which
+    network spawned servers attach to. Neither is true today.
 
 - [x] **Record read-only tool calls in the audit trail.**
   `docs/requirements.md` asks for "full observability and auditability of every
@@ -415,21 +465,83 @@ claimed and what is enforced.
   failure to write is swallowed by design, so the failure mode is a large file
   rather than a broken agent.
 
-- [ ] **Enforce network egress control, or drop the claim.**
-  The hardening table says the container "reaches the model only via the host
-  proxy" and that "the only outbound network is the proxy and the MCP gateway".
-  `agent-net` is a plain bridge with no `internal: true` and no egress rules, so
-  the container has ordinary outbound internet via NAT. `PI_OFFLINE` stops Pi's
-  own calls; nothing stops a tool, an extension, or `npx`. (Check `host-gateway`
-  reachability before switching the network to `internal: true`.)
+- [x] **Enforce network egress control, or drop the claim.**
+  Enforced. `agent-net` is now `internal: true`, so Docker installs no default
+  route and no masquerade rule: external addresses are `ENETUNREACH` and DNS
+  does not resolve. The hardening table's claim is a control rather than an
+  absence of capability for the first time.
 
-  This used to compound the bash allowlist item: an interpreter that could read a
-  fenced file could also post it somewhere. Removing agent execution closed the
-  second half of that pairing — there is no longer a local tool that can read a
-  file *or* make an outbound request. What remains is the extension surface
-  itself (`mcp-client` opens an HTTP connection) and anything Pi's own runtime
-  does, so the claim in the hardening table is still unenforced and still worth
-  either implementing or dropping.
+  **The parenthetical warning in the original item was right, and the reason
+  this needed measuring rather than just doing.** `internal: true` on its own
+  breaks the model route. `host-gateway` resolves to the **docker0** address
+  (172.17.0.1), which is a *different subnet* from `agent-net`; on a routed
+  bridge the default route carries it, and on an internal network there is no
+  default route, so every model call fails `ENETUNREACH`. Enabling the flag
+  without noticing this would have produced an agent that looked hardened and
+  could not reach a model.
+
+  The host is still reachable, but only at **this network's own gateway**, which
+  is a host interface. So the fix is two settings that must move together:
+
+  - `agent-net` pins `subnet: 172.31.60.0/24` / `gateway: 172.31.60.1`, to make
+    that address stable rather than assigned.
+  - the pi service's `extra_hosts` maps `host-gateway` to `172.31.60.1`
+    literally, instead of using Docker's alias.
+
+  They are one setting written in two places and compose cannot derive one from
+  the other, so both carry comments saying so.
+
+  Verified on the real stack, not a synthetic one: gateway `CONNECTED`, proxy
+  `CONNECTED`, `1.1.1.1:443` and `8.8.8.8:53` `ENETUNREACH`, DNS `EAI_AGAIN` —
+  while `tools/list` still returned 11 tools, `list_directory(/workspace)`
+  worked, and `read_file(/etc/passwd)` was still refused. The runbook carries
+  that check as **the egress check**, including how to read the failure codes:
+  `ENETUNREACH` on the proxy row means the two settings above have drifted,
+  `ECONNREFUSED` there means the route is right and nothing is listening.
+
+  **Operator-visible consequence, documented in the runbook.** The proxy must
+  bind to `172.31.60.1` rather than docker0's `172.17.0.1`. This is a change of
+  *which* non-loopback address it must answer on, not a new requirement — a
+  proxy on `127.0.0.1` never worked.
+
+  **`LITELLM_HOST` must change, and that exposed a startup-ordering bug.**
+  `LITELLM_HOST` is the address passed to `litellm --host`, so it becomes
+  `172.31.60.1`. But `run/startup` called `start_proxy` *before*
+  `bring_up_boundary`, and that address does not exist on the host until compose
+  creates the network — verified: binding it with the stack down fails
+  `[Errno 99] Cannot assign requested address`, and succeeds once `up -d` has
+  created `br-…`. So the naive `.env` edit would have produced a stack that
+  fails at startup instead of one that silently cannot reach a model. Both were
+  fixed:
+
+  - `run/startup` now runs `bring_up_boundary` **before** `start_proxy`. Safe
+    because nothing between them needs a model: the pi container's PID 1 is
+    `sleep infinity`, so no agent exists until `enter_container`, which is last.
+  - `cleanup` was reversed to match — stop the proxy, *then* tear down the
+    network, rather than pulling the interface out from under a live process.
+  - The runbook's manual sequence had the same order and was renumbered: the
+    proxy is now step 5, after "Bring up the boundary".
+
+  Three files now carry the same address — `compose.yaml`'s pinned `gateway:`,
+  its `extra_hosts` entry, and `.env`'s `LITELLM_HOST`. All three say so.
+
+  **Still needs a manual edit:** `src/infrastructure/.env.example` and any
+  existing `.env` must change `LITELLM_HOST=172.17.0.1` → `172.31.60.1`. Both
+  sit in a permission-denied directory, so they could not be edited here. An
+  older `.env` left at the docker0 address now fails at proxy startup, which is
+  at least loud rather than silent.
+
+  **What this does not cover.** The gateway is on the same network and therefore
+  also has no egress — which is what rules out `--verify-signatures`, recorded
+  under that item. Image pulls are unaffected: the gateway asks the *host
+  daemon* over the Docker socket, and the daemon has its own network.
+
+  Original reasoning, still accurate: this used to compound the bash allowlist
+  item, since an interpreter that could read a fenced file could also post it
+  somewhere. Removing agent execution closed the second half of that pairing;
+  this closes the first. What remains reachable is the extension surface itself
+  (`mcp-client`'s HTTP connection to the gateway) and Pi's own runtime, both of
+  which are now confined to `agent-net`.
 
 ## Documentation fixes — the design overstates the build
 
@@ -495,10 +607,17 @@ claimed and what is enforced.
 
   **Not restated as fact:** the draft of the new section originally said the
   agent's "entire outbound surface is MCP tool calls and inference requests".
-  That is the very claim the still-open network-egress item flags as unenforced,
-  so it was rewritten to say only what is true — the agent has no local
-  execution tool and its `mcp_*` tools resolve in another container. Documenting
-  one gap is not a licence to reassert another.
+  That was the very claim the then-open network-egress item flagged as
+  unenforced, so it was rewritten to say only what is true — the agent has no
+  local execution tool and its `mcp_*` tools resolve in another container.
+  Documenting one gap is not a licence to reassert another.
+
+  > **Since resolved.** The egress item is now closed: `agent-net` is
+  > `internal: true`, so that original sentence would in fact be accurate today.
+  > It has deliberately **not** been restored — the wording that replaced it is
+  > still true and is grounded in the tool surface rather than the network, so
+  > it stays correct independently of the network config. The point of this note
+  > is the sequencing, not the sentence.
 
 - [x] **Reconcile multi-project diagrams with the single-project reality.**
   The diagrams and the mount view showed `proj-a`/`proj-b` volumes and

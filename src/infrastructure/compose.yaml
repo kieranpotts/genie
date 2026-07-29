@@ -27,9 +27,43 @@ name: pi-secure-agent
 
 networks:
   # Private bridge network. Only these services share it; the agent reaches the
-  # host proxy via the `host-gateway` alias, not via host networking.
+  # host proxy across this bridge, not via host networking.
+  #
+  # `internal: true` is the EGRESS BOUNDARY. Without it this is an ordinary
+  # bridge with outbound NAT, and the hardening table's "the only outbound
+  # network is the proxy and the MCP gateway" is an absence of capability rather
+  # than an enforced control. With it, Docker installs no default route and no
+  # masquerade rule: external addresses are ENETUNREACH and DNS fails outright.
+  #
+  # The pinned subnet/gateway is NOT cosmetic — it is what keeps the model route
+  # working, and the two must be changed together:
+  #
+  #   The `host-gateway` alias resolves to the DOCKER0 bridge address
+  #   (172.17.0.1 by default), which is a DIFFERENT subnet from this network.
+  #   On a routed bridge that is fine — the default route carries it. On an
+  #   internal network there is no default route, so `host-gateway:host-gateway`
+  #   becomes unroutable and every model call fails with ENETUNREACH.
+  #
+  #   The host is still reachable, but only at THIS network's own gateway
+  #   address, which is a host interface. So the subnet and gateway are pinned
+  #   here to make that address stable, and the pi service's `extra_hosts` maps
+  #   `host-gateway` to it explicitly instead of using the alias.
+  #
+  # Change this subnet only if it collides with something on the host, and if
+  # you do, change the pi service's `extra_hosts` entry to match. They are one
+  # setting written in two places; there is no way to derive one from the other
+  # in compose.
+  #
+  # This also rules out `--verify-signatures` on the gateway, which needs
+  # outbound access to the sigstore TUF mirror. See TODO.md for why that is the
+  # right trade against digest pinning.
   agent-net:
     driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.60.0/24
+          gateway: 172.31.60.1
 
 volumes:
   # The single project the agent is scoped to. Backed by PROJECT_PATH on the
@@ -168,8 +202,18 @@ services:
     depends_on:
       - mcp-gateway
     # Map host-gateway so the container can reach the host-side LiteLLM proxy.
+    #
+    # This is the LITERAL gateway address of `agent-net`, not Docker's
+    # `host-gateway` alias. The alias points at docker0 (172.17.0.1), which is
+    # unroutable from an internal network — see the long note on `agent-net`.
+    # Keep this in step with the `gateway:` pinned there.
+    #
+    # Consequence worth knowing: the proxy must listen on an address reachable
+    # from this bridge, so a LiteLLM bound to 127.0.0.1 will NOT work. That was
+    # already true (it had to answer on docker0 before), so this changes which
+    # address it must answer on, not whether it must answer beyond loopback.
     extra_hosts:
-      - "host-gateway:host-gateway"
+      - "host-gateway:172.31.60.1"
     volumes:
       # No docker.sock, no host dotfiles.
       # Pi's own session transcripts.

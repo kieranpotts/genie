@@ -35,8 +35,26 @@ under `src/extensions/`.
 
 ## Trust boundaries
 
-- **Host:** Ollama (local inference) and the LiteLLM proxy (holds the keys). Both bind to the Docker bridge gateway, not `0.0.0.0`.
+- **Host:** Ollama (local inference) and the LiteLLM proxy (holds the keys).
+  The proxy must bind to an address reachable from `agent-net` — which since
+  that network became `internal: true` means **its gateway, `172.31.60.1`**, and
+  no longer docker0's `172.17.0.1`. A proxy left on `127.0.0.1` was never
+  reachable and still is not.
+
+  > [!IMPORTANT]
+  > If the agent cannot reach the model after an upgrade, this is the first
+  > thing to check. The symptom is a connection failure to `host-gateway:4000`
+  > from inside the pi container. `ECONNREFUSED` means the route is fine and
+  > nothing is listening on that address (bind the proxy wider);
+  > `ENETUNREACH` means the `extra_hosts` entry in `compose.yaml` has drifted
+  > from the pinned `gateway:` on `agent-net`.
 - **`agent-net`:** the pi-container (no keys, no FS, no socket) and the **mcp-gateway**, which is the agent's only MCP endpoint and which spawns the filesystem MCP server (the sole filesystem gatekeeper) through the Docker socket. The agent reaches files only through MCP tool calls and reaches models only through the proxy endpoint. Note that compose starts two containers here, not three: the MCP server is the gateway's child, which is why the socket grant below exists.
+
+  The network is **`internal: true`**: no default route, no outbound NAT, so
+  nothing on it can reach the internet. This also means the **gateway** has no
+  egress, which is why `--verify-signatures` is not enabled — it needs the
+  sigstore TUF mirror. Image pulls are unaffected: the gateway asks the *host
+  daemon* to pull over the Docker socket, and the daemon has its own network.
 
 See [../../docs/solution.md](../../docs/solution.md) for the full boundary
 diagrams.
@@ -75,8 +93,27 @@ OLLAMA_HOST=http://127.0.0.1:11434
 ```
 
 Nothing in a container ever talks to Ollama directly. The agent reaches models
-only through LiteLLM, and reaches LiteLLM via `LITELLM_HOST` — which *is* the
+only through LiteLLM, and reaches LiteLLM via `LITELLM_HOST` — which is the
 bridge gateway. Only that one needs to be.
+
+`LITELLM_HOST` is the address the proxy **binds** to, and it must be
+`agent-net`'s gateway:
+
+```sh
+LITELLM_HOST=172.31.60.1
+```
+
+> [!WARNING]
+> This changed when `agent-net` became `internal: true`. It was previously
+> docker0's `172.17.0.1`, which an internal network has no route to — so an
+> older `.env` carrying that value produces an agent that starts cleanly and
+> cannot reach a model. Keep it equal to the `gateway:` pinned on `agent-net` in
+> `compose.yaml`, and to the `extra_hosts` entry on the `pi` service; the three
+> are one address written in three places.
+>
+> Binding wider (`0.0.0.0`) also works and removes the coupling, but puts a
+> proxy holding every cloud API key on every host interface, including your LAN.
+> Don't.
 
 > [!WARNING]
 > Do not start a second `ollama serve` bound to the bridge gateway to satisfy
@@ -90,18 +127,13 @@ bridge gateway. Only that one needs to be.
 > curl -s "$OLLAMA_HOST/api/tags"   # must list your models, not {"models":[]}
 > ```
 
-**2. Start the model proxy on the host**
+**2. Check the model routes' prerequisites**
 
-```sh
-set -a; . src/infrastructure/.env; set +a
-litellm --config src/infrastructure/proxy/litellm.config.yaml \
-        --host "$LITELLM_HOST" --port "$LITELLM_PORT"
-```
-
-Exposes one route per role — `computer-programmer`, `technical-lead`,
-`technical-writer`, `security-analyst` — each backed by a capability-tuned
-Ollama model from the [modelfiles][modelfiles] project. The agent never holds a
-provider credential of any kind.
+The proxy is started in step 5, *after* the boundary — see the note there for
+why. What it will serve is one route per role — `computer-programmer`,
+`technical-lead`, `technical-writer`, `security-analyst` — each backed by a
+capability-tuned Ollama model from the [modelfiles][modelfiles] project. The
+agent never holds a provider credential of any kind.
 
 Those Ollama models must exist before the routes resolve:
 
@@ -141,7 +173,25 @@ This starts `agent-net`, the project volume (bound to `PROJECT_PATH`), the
 `mcp-gateway` (which spawns and fronts the `mcp/filesystem` server over SSE),
 and the hardened `pi` container.
 
-**5. Start an agent**
+**5. Start the model proxy on the host**
+
+```sh
+set -a; . src/infrastructure/.env; set +a
+litellm --config src/infrastructure/proxy/litellm.config.yaml \
+        --host "$LITELLM_HOST" --port "$LITELLM_PORT"
+```
+
+> [!IMPORTANT]
+> **This comes after the boundary, not before it.** `LITELLM_HOST` is
+> `agent-net`'s gateway address, and that interface does not exist on the host
+> until compose creates the network in step 3. Run this first and it fails with
+> `Cannot assign requested address`.
+>
+> Nothing in step 3 needs a model: the `pi` container's PID 1 is `sleep
+> infinity`, so no agent exists until step 5. `./run/startup` performs these in
+> the same order.
+
+**6. Start an agent**
 
 Entering the container lands you in the hardened Pi harness, with your shell's
 working directory set to the project at `/workspace`:
@@ -221,7 +271,7 @@ Note that the container's own main process is `sleep`, not an agent: `up -d`
 has no operator attached, so nothing should be running there unwatched. Agents
 exist only for the length of a session someone is actually sitting in.
 
-**6. Browse the project (as the operator)**
+**7. Browse the project (as the operator)**
 
 The project is mounted **read-only** at `/workspace`, which is where your
 shell starts — so `ls` shows exactly what the agent is working against. To look
@@ -246,7 +296,7 @@ Because the mount is read-only, nothing in this container can modify the project
 through it. The MCP filesystem server holds the only writable handle, which is
 what keeps the change trail complete.
 
-**7. Verify the boundary**
+**8. Verify the boundary**
 
 | Check | How | Expect |
 |---|---|---|
@@ -263,6 +313,53 @@ what keeps the change trail complete.
 | Tool surface is the documented eleven | the tool-surface check below | exactly the eleven `mcp_*` tools listed in `docs/solution.md`; no `bash`, no Git, no web fetch |
 | No network binaries | `docker compose ... exec pi sh -c 'for b in git curl wget nc ssh; do command -v $b \|\| echo "$b absent"; done'` | all five absent |
 | Gateway starts hardened | `docker compose ... up` then `docker compose ... ps` | `mcp-gateway` is healthy with `cap_drop: ALL` + read-only rootfs. If it fails to start, relax `cap_drop` to the minimum it reports needing (see the compose comment). |
+| Egress is blocked | the egress check below | the gateway and the proxy are reachable; every external address is `ENETUNREACH` and DNS does not resolve |
+
+**The egress check.** `agent-net` is `internal: true`, and the hardening table
+now claims that as an enforced control rather than an absence of capability — so
+it has to be checkable. This uses `node`, because the hardened image
+deliberately has no `curl`, `wget`, or `nc` (see the row above):
+
+```sh
+docker compose -f src/infrastructure/compose.yaml exec -T pi node -e '
+const net = require("net");
+const tests = [
+  ["MCP gateway      (must work)", "mcp-gateway",  8811],
+  ["LiteLLM proxy    (must work)", "host-gateway", 4000],
+  ["1.1.1.1:443      (must fail)", "1.1.1.1",       443],
+  ["8.8.8.8:53       (must fail)", "8.8.8.8",        53],
+];
+let i = 0;
+(function run() {
+  if (i >= tests.length) {
+    return require("dns").lookup("registry.npmjs.org", (e, a) =>
+      console.log("DNS npmjs        (must fail) => " + (e ? "FAILED(" + e.code + ")" : "RESOLVED " + a)));
+  }
+  const [label, host, port] = tests[i++];
+  const s = net.connect({ host, port, timeout: 4000 });
+  const done = (r) => { s.destroy(); console.log(label + " => " + r); run(); };
+  s.on("connect", () => done("CONNECTED"));
+  s.on("timeout", () => done("TIMEOUT"));
+  s.on("error", (e) => done("FAILED(" + e.code + ")"));
+})();
+'
+```
+
+Expected:
+
+```
+MCP gateway      (must work) => CONNECTED
+LiteLLM proxy    (must work) => CONNECTED
+1.1.1.1:443      (must fail) => FAILED(ENETUNREACH)
+8.8.8.8:53       (must fail) => FAILED(ENETUNREACH)
+DNS npmjs        (must fail) => FAILED(EAI_AGAIN)
+```
+
+Read the failures precisely: `ENETUNREACH` on the external rows is the control
+working. `ENETUNREACH` on the **LiteLLM** row is a misconfiguration — the
+`extra_hosts` entry no longer matches the pinned `gateway:` on `agent-net`.
+`ECONNREFUSED` there means the route is correct and the proxy is not listening
+on that address.
 
 **The tool-surface check.** `docs/solution.md` enumerates the agent's entire
 tool surface, so that list has to be checkable rather than trusted. This asks
@@ -286,7 +383,7 @@ the surface has grown and `docs/solution.md` is out of date. Re-run this after
 changing the gateway's `--servers`/`--tools` flags, the catalog, or the pinned
 `mcp/filesystem` image.
 
-**8. Inspect the audit trail**
+**9. Inspect the audit trail**
 
 The log lives on the `pi-logs` volume, outside the agent's read-only rootfs. It
 records **every** tool call the agent makes — reads included, which are never

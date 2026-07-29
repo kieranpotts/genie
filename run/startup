@@ -100,8 +100,12 @@ trap cleanup EXIT INT TERM
 check_dependencies
 check_env
 check_ollama
-start_proxy
 build_image
 reset_project_volume
+# ORDER IS LOAD-BEARING: the boundary must come up BEFORE the proxy starts.
+# LITELLM_HOST is agent-net's gateway address, and that address does not exist
+# on the host until compose creates the network — binding to it first fails with
+# "Cannot assign requested address". See start_proxy.
 bring_up_boundary
+start_proxy
 enter_container
