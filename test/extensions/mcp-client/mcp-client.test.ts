@@ -89,7 +89,7 @@ function headersWith (sessionId?: string): { get: (name: string) => string | nul
 /** Build a fake fetch returning a single SSE-framed JSON-RPC response. */
 function fakeFetch (
   responseFor: (req: { id?: number, method: string, params?: unknown }) => unknown,
-  opts: { ok?: boolean, status?: number, sessionId?: string } = {},
+  opts: { ok?: boolean, status?: number, sessionId?: string } = {}
 ): FetchLike {
   return async (_url, init) => {
     const req = JSON.parse(init.body) as { id?: number, method: string, params?: unknown }
