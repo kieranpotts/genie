@@ -285,9 +285,47 @@ claimed and what is enforced.
   - `--verify-signatures` is off. Largely redundant against digest pinning, but
     close to free; turn it on unless it breaks the bring-up.
 
-- [ ] **Record read-only tool calls in the audit trail.**
+- [x] **Record read-only tool calls in the audit trail.**
   `docs/requirements.md` asks for "full observability and auditability of every
-  action the agent takes against the filesystem". Reads are not covered.
+  action the agent takes against the filesystem". Reads were not covered.
+
+  **Done.** `permission-gate` now logs every call it sees. The read-only branch
+  in `index.ts` records before returning instead of returning silently, so the
+  entire `mcp_read_*` / `mcp_list_*` / `mcp_search_*` surface appears in the
+  trail.
+
+  The record was made **two-axis** rather than gaining a third `status` value:
+
+  - `outcome` — `allowed` / `blocked`: did the call run.
+  - `confirmation` — `not-required` / `not-offered` / `approved` / `rejected` /
+    `timeout` / `no-ui`: was a human involved, and what did they say.
+
+  A single enum would have left the *cause* of a denial legible only as prose in
+  `reason`, so "refused outright by policy" and "the operator rejected it" could
+  not be counted separately without parsing English. The two no-prompt values
+  are distinct on purpose: `not-required` is a read-only call with nothing to
+  approve, `not-offered` is the sensitive-file refusal, which has no approval
+  path by design. `reason` is now carried only on blocked calls.
+
+  Renamed in the same change, per the note that closed this item: `decision-log.ts`
+  → `call-log.ts`, `DecisionLog`/`makeDecision`/`formatDecision`/`DecisionRecord`
+  → `CallLog`/`makeRecord`/`formatRecord`/`CallRecord`, `PERMISSION_GATE_LOG` →
+  `PERMISSION_GATE_CALL_LOG`, and `audit.jsonl` → `calls.jsonl`. The old
+  `pi-logs` volume was removed to re-seed it — it was empty and root-owned, so
+  nothing had ever been written to it anyway, which is the silent-failure mode
+  the Dockerfile and both READMEs warn about, observed in the wild.
+
+  **Still open, and stated where it is claimed:** this records what was
+  *attempted*, not what resulted. See the `tool_result` / `after:` interceptor
+  discussion retained below — it is unchanged by this work.
+
+  This also produces the input the `--tools` allowlist item above is waiting
+  for: `jq -r .tool calls.jsonl | sort | uniq -c` is the working set, measured
+  rather than guessed. The runbook (`src/infrastructure/README.md`) carries that
+  command.
+
+  <details>
+  <summary>Original analysis, kept for the parts still open</summary>
 
   `permission-gate` sees every tool call, but returns early for read-only ones
   (`index.ts`, the `requiresConfirmation` guard) and logs nothing. So every
@@ -338,6 +376,25 @@ claimed and what is enforced.
   Renaming is worth considering too: once it records every call rather than every
   confirmation, `permission-gate/audit.jsonl` is a tool-call log, and the
   extension's README describes it as a decision log.
+
+  </details>
+
+- [ ] **Decide retention for `permission-gate/calls.jsonl`.**
+  Raised by the change above. Now that every read is recorded, the log grows with
+  agent *activity* rather than with approvals — reads are the bulk of what the
+  agent does, so the file grows far faster than it used to. Nothing rotates,
+  caps, or prunes it today.
+
+  Note the tension before reaching for `logrotate`: rotation that discards old
+  lines is data loss from an accountability record, and `docs/requirements.md`
+  asks for auditability without saying for how long. The options are size-capped
+  rotation, ship-then-truncate to somewhere durable, or an explicit "grows
+  unbounded, the operator prunes" stance — but it should be a stated decision
+  rather than a default inherited from whatever tool is convenient.
+
+  Not urgent: the volume is host-side, outside the read-only rootfs, and a
+  failure to write is swallowed by design, so the failure mode is a large file
+  rather than a broken agent.
 
 - [ ] **Enforce network egress control, or drop the claim.**
   The hardening table says the container "reaches the model only via the host

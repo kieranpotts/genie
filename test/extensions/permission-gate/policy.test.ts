@@ -67,27 +67,38 @@ describe('describeCall', () => {
 })
 
 describe('decide — default deny', () => {
-  it('allows on explicit approval', () => {
+  it('allows on explicit approval, with no reason to give', () => {
     const d = decide('write', 'approved')
-    assert.deepEqual(d, { block: false, status: 'approved', reason: 'user approved' })
+    assert.deepEqual(d, { outcome: 'allowed', confirmation: 'approved' })
   })
 
   it('denies on rejection', () => {
     const d = decide('write', 'rejected')
-    assert.equal(d.block, true)
-    assert.equal(d.status, 'denied')
-    assert.match(d.reason, /user rejected/)
+    assert.equal(d.outcome, 'blocked')
+    assert.equal(d.confirmation, 'rejected')
+    assert.match(d.reason ?? '', /user rejected/)
   })
 
   it('denies on timeout', () => {
-    const d = decide('bash', 'timeout')
-    assert.equal(d.block, true)
-    assert.match(d.reason, /timed out/)
+    const d = decide('mcp_write_file', 'timeout')
+    assert.equal(d.outcome, 'blocked')
+    assert.equal(d.confirmation, 'timeout')
+    assert.match(d.reason ?? '', /timed out/)
   })
 
   it('denies when no UI is available', () => {
     const d = decide('edit', 'no-ui')
-    assert.equal(d.block, true)
-    assert.match(d.reason, /no interactive UI/)
+    assert.equal(d.outcome, 'blocked')
+    assert.equal(d.confirmation, 'no-ui')
+    assert.match(d.reason ?? '', /no interactive UI/)
+  })
+
+  /* The confirmation axis carries the cause of a denial as a field, so the three
+     ways a call can be blocked at this point stay distinguishable in the log
+     without parsing `reason`. */
+  it('reports a distinct confirmation value for each way of being denied', () => {
+    const causes = (['rejected', 'timeout', 'no-ui'] as const).map((o) => decide('write', o).confirmation)
+    assert.deepEqual(causes, ['rejected', 'timeout', 'no-ui'])
+    assert.equal(new Set(causes).size, 3)
   })
 })

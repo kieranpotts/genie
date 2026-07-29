@@ -255,18 +255,53 @@ what keeps the change trail complete.
 | Mediated read works | ask the agent to read a file in the project | returns content via an `mcp_*` tool |
 | Agent has no local tools | ask it to run a shell command, or to read `/workspace/README.md` without MCP | it has no such tool to call; only `mcp_*` tools are offered |
 | Traversal denied | ask it to read `../../etc/passwd` | denied at the MCP boundary |
-| Sensitive file refused | ask it to read `.env` in the project | refused before the call runs; the permission-gate log shows `sensitive file refused` |
+| Sensitive file refused | ask it to read `.env` in the project | refused before the call runs; the call log shows `"outcome":"blocked","confirmation":"not-offered"` |
 | Write requires approval | ask it to write a file | a confirmation prompt appears; on approve, write succeeds |
-| Default-deny on timeout | ignore the prompt for 60s | the write is blocked; the permission-gate log shows `timed out (default deny)` |
+| Default-deny on timeout | ignore the prompt for 60s | the write is blocked; the call log shows `"confirmation":"timeout"` |
+| Reads are recorded | ask it to read any ordinary project file | the call log gains an `"outcome":"allowed","confirmation":"not-required"` line naming the path |
 | Gateway starts hardened | `docker compose ... up` then `docker compose ... ps` | `mcp-gateway` is healthy with `cap_drop: ALL` + read-only rootfs. If it fails to start, relax `cap_drop` to the minimum it reports needing (see the compose comment). |
 
 **8. Inspect the audit trail**
 
-The log lives on the `pi-logs` volume, outside the agent's read-only rootfs:
+The log lives on the `pi-logs` volume, outside the agent's read-only rootfs. It
+records **every** tool call the agent makes — reads included, which are never
+prompted for — one JSON line each:
 
 ```sh
-docker compose -f src/infrastructure/compose.yaml exec pi cat /var/log/pi/permission-gate/audit.jsonl  # approvals + refusals
+docker compose -f src/infrastructure/compose.yaml exec pi cat /var/log/pi/permission-gate/calls.jsonl
 ```
+
+Each line carries two independent fields: `outcome` (`allowed` / `blocked`) says
+whether the call ran, and `confirmation` says whether a human was involved and
+what they said. Keeping them apart is what lets a review separate a policy
+refusal from an operator's rejection by field rather than by reading prose:
+
+The image has no `jq` — it is a hardened runtime, not an analysis box — so pipe
+the log out to the host and query it there:
+
+```sh
+LOG='docker compose -f src/infrastructure/compose.yaml exec -T pi cat /var/log/pi/permission-gate/calls.jsonl'
+
+# Everything that did not run, and why — by cause, not by grepping English.
+$LOG | jq -r 'select(.outcome=="blocked") | [.confirmation, .tool, .detail] | @tsv'
+
+# Refused outright by policy: no approval path was ever offered.
+$LOG | jq 'select(.confirmation=="not-offered")'
+
+# Which MCP tools are actually in use — the working set for the gateway's
+# `--tools` allowlist, which should be established from this, not guessed.
+$LOG | jq -r .tool | sort | uniq -c | sort -rn
+```
+
+Two limits to know before relying on it:
+
+- **It records attempts, not results.** The `tool_call` hook fires before the
+  call runs, so a read the MCP server then refuses — traversal, or a path
+  outside the allowed directory — appears here as `allowed`. Closing that needs
+  the `tool_result` hook or a gateway-side `after:` interceptor; see `TODO.md`.
+- **Paths, never content.** `detail` carries the path a call named and nothing
+  it returned. Logging what was read would copy the secrets out of the files and
+  into the audit trail.
 
 > [!IMPORTANT]
 > The `pi-logs` volume must be owned by the agent's uid (1001) or the log fails
@@ -299,7 +334,7 @@ the obvious checks all pass:
 | Check | What it shows |
 |---|---|
 | `docker logs pi-secure-agent-mcp-gateway-1` | gateway up, 11 tools listed, client initialized — but no `Calling tool …` lines |
-| `/var/log/pi/*/audit.jsonl` | absent or stale: no tool call reached an extension |
+| `/var/log/pi/permission-gate/calls.jsonl` | absent or stale: no tool call reached an extension |
 | a `curl` tool test against the proxy | **passes** — non-streaming works under both prefixes |
 | the session transcript | one assistant message, `"stopReason":"stop"`, thinking only, no `tool_call` entry |
 

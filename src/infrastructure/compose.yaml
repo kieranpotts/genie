@@ -241,8 +241,11 @@ services:
       PI_PROJECT_DIR: "/workspace"
       # Interactive approval: the permission-gate extension requires confirmation
       # for mutating tool calls, refuses sensitive filenames outright on every
-      # call (including the mcp_* ones), and logs every decision here.
-      PERMISSION_GATE_LOG: "/var/log/pi/permission-gate/audit.jsonl"
+      # call (including the mcp_* ones), and logs EVERY call here — reads
+      # included, which are never prompted for but are still actions against the
+      # filesystem. Since `audited-tools` was removed this is the system's only
+      # audit trail, so what it omits is not recorded anywhere.
+      PERMISSION_GATE_CALL_LOG: "/var/log/pi/permission-gate/calls.jsonl"
       # Role `start-pi` launches on. The proxy exposes one route per role —
       # computer-programmer, technical-lead, technical-writer, security-analyst
       # — each backed by a capability-tuned Ollama model (litellm.config.yaml).

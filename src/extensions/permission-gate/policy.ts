@@ -6,6 +6,8 @@
  * can be unit-tested without the `ExtensionAPI` or a real confirmation dialog.
  */
 
+import type { CallOutcome, Confirmation } from './call-log.ts'
+
 /**
  * Tool names that mutate state, matched by suffix so the `mcp_` prefix from
  * `mcp-client` is covered (`mcp_write_file`, `mcp_edit_file`, …). The bare forms
@@ -58,28 +60,38 @@ function truncate (s: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max - 1) + '…'
 }
 
-/** The raw outcome of asking the user, including the no-UI / timeout cases. */
-export type ConfirmOutcome = 'approved' | 'rejected' | 'timeout' | 'no-ui'
+/**
+ * The raw outcome of actually asking the user, including the no-UI / timeout
+ * cases. Derived from `Confirmation` so the two cannot drift: it is exactly the
+ * subset that can come back from a prompt, excluding the two values that mean
+ * no prompt was shown at all.
+ */
+export type ConfirmOutcome = Exclude<Confirmation, 'not-required' | 'not-offered'>
 
-/** A gate decision: whether to block, and why (for the audit log + reason). */
+/** A gate decision: what happens to the call, and why. */
 export interface GateDecision {
-  block: boolean
-  status: 'approved' | 'denied'
-  reason: string
+  outcome: CallOutcome
+  confirmation: ConfirmOutcome
+  /** Populated only when blocked; surfaced to the model and logged. */
+  reason?: string
 }
 
 /**
  * Map a confirmation outcome to a gate decision. Default-deny: anything other
  * than an explicit approval blocks the call. Pure.
+ *
+ * Only ever called for a call that was actually prompted for — read-only
+ * pass-throughs and sensitive-file refusals are decided before this point,
+ * which is why its input type excludes them.
  */
 export function decide (toolName: string, outcome: ConfirmOutcome): GateDecision {
   if (outcome === 'approved') {
-    return { block: false, status: 'approved', reason: 'user approved' }
+    return { outcome: 'allowed', confirmation: 'approved' }
   }
   const why = outcome === 'rejected'
     ? 'user rejected'
     : outcome === 'timeout'
       ? 'confirmation timed out (default deny)'
       : 'no interactive UI to confirm (default deny)'
-  return { block: true, status: 'denied', reason: `${toolName} blocked: ${why}` }
+  return { outcome: 'blocked', confirmation: outcome, reason: `${toolName} blocked: ${why}` }
 }
