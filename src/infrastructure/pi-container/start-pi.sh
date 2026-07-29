@@ -30,6 +30,26 @@
 #                      That extension's removal is exactly why this flag is now
 #                      the whole of the agent's local-tool posture. See TODO.md.
 #
+#   --no-approve       Project trust, decided up front instead of by a prompt.
+#                      Pi asks "Trust project folder?" whenever the working tree
+#                      holds trust-requiring resources — `.agents/skills` in cwd
+#                      or ANY ancestor, or `.pi/{settings.json,extensions,skills,
+#                      prompts,themes,SYSTEM.md,APPEND_SYSTEM.md}`. That prompt
+#                      blocks a non-interactive run, and because the agent
+#                      directory is a tmpfs (see seed-agent-dir), the answer is
+#                      not remembered — so it would block EVERY run.
+#
+#                      Trust is not cosmetic: it lets Pi load project settings,
+#                      install missing project packages, and EXECUTE project
+#                      extensions inside Pi's own process, where they could
+#                      shadow or interfere with permission-gate. Default-deny
+#                      is therefore the harness's posture, and it matches what
+#                      Pi does headlessly anyway (no UI ⇒ not trusted).
+#
+#                      Set PI_PROJECT_TRUST=approve to opt in per container.
+#                      Both flags short-circuit ahead of the trust store, so
+#                      either way the decision is deterministic and silent.
+#
 # Any additional arguments are passed through to Pi.
 #
 
@@ -42,12 +62,17 @@ set -euo pipefail
 # per-container by overriding PI_MODEL, without rebuilding the image.
 model="${PI_MODEL:-litellm/computer-programmer}"
 
-# Pi's agent directory is a tmpfs (it must be writable — see seed-agent-dir),
-# so it starts every container empty and has to be populated from the image
-# template before Pi looks for its extensions and models.json. Idempotent, and
-# done here as well as in ~/.bashrc so that `compose exec pi start-pi` works
-# without an interactive shell having run first.
-seed-agent-dir
+# Project trust. Deny by default; `approve` is the only value that grants it,
+# so a typo fails closed rather than silently trusting the project.
+trust="${PI_PROJECT_TRUST:-deny}"
+case "${trust}" in
+  approve) trust_flag="--approve"    ;;
+  deny)    trust_flag="--no-approve" ;;
+  *)
+    printf 'start-pi: PI_PROJECT_TRUST must be "approve" or "deny", got "%s".\n' "${trust}" >&2
+    exit 1
+    ;;
+esac
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   echo "Usage: start-pi [pi-arguments...]"
@@ -55,10 +80,18 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   echo "Start the Pi coding agent with this container's security profile:"
   printf '  %-26s (override with the PI_MODEL environment variable)\n' "--model ${model}"
   printf '  %-26s (the mcp_* tools are the only file tools)\n' "--no-builtin-tools"
+  printf '  %-26s (override with PI_PROJECT_TRUST=approve)\n' "${trust_flag}"
   echo ""
   echo "Extra arguments are passed through to Pi. To start Pi without the"
   echo "security profile — for debugging the harness itself — run \`pi\` directly."
   exit 0
 fi
 
-exec pi --model "${model}" --no-builtin-tools "$@"
+# Pi's agent directory is a tmpfs (it must be writable — see seed-agent-dir),
+# so it starts every container empty and has to be populated from the image
+# template before Pi looks for its extensions and models.json. Idempotent, and
+# done here as well as in ~/.bashrc so that `compose exec pi start-pi` works
+# without an interactive shell having run first.
+seed-agent-dir
+
+exec pi --model "${model}" --no-builtin-tools "${trust_flag}" "$@"

@@ -249,6 +249,23 @@ services:
       # All four are declared in the image's models.json; Pi's /model command
       # switches between them at runtime.
       PI_MODEL: "litellm/computer-programmer"
+      # Project trust, decided here rather than by an interactive prompt.
+      #
+      # Pi asks "Trust project folder?" when the working tree holds
+      # trust-requiring resources — `.agents/skills` in cwd or any ancestor, or
+      # a `.pi/` config directory. Trust lets it load project settings, install
+      # project packages, and EXECUTE project extensions in Pi's own process,
+      # alongside permission-gate rather than behind it.
+      #
+      # `deny` keeps that shut and, just as importantly, makes the run
+      # deterministic: the prompt would otherwise block any non-interactive
+      # invocation, and since the agent directory is a tmpfs it is never
+      # remembered, so it would block EVERY run rather than just the first.
+      #
+      # Set to `approve` to load a project's own skills and settings. Only do
+      # that for a project whose contents you trust as much as this repo's,
+      # because from then on its extensions run inside the agent.
+      PI_PROJECT_TRUST: "deny"
       PI_OFFLINE: "1"
       PI_SKIP_VERSION_CHECK: "1"
       PI_CODING_AGENT_SESSION_DIR: "/home/pi/sessions"

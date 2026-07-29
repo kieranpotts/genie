@@ -170,12 +170,39 @@ back in, or `harnesses` to re-show the list.
 ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 ```
 
-`start-pi` supplies `--model` (the proxy route, from `PI_MODEL`) and
+`start-pi` supplies `--model` (the proxy route, from `PI_MODEL`),
 `--no-builtin-tools`, so the `mcp_*` tools are the only file tools and the agent
-has no shell. These flags live in the image, not in `compose.yaml`, precisely so
-they cannot be lost by an override. Running `pi` directly bypasses them — use it
-only when debugging the harness itself, and note that doing so re-enables Pi's
-built-in `read`/`grep`/`find`/`edit` against the project mount below.
+has no shell, and `--no-approve` (see below). These flags live in the image, not
+in `compose.yaml`, precisely so they cannot be lost by an override. Running `pi`
+directly bypasses them — use it only when debugging the harness itself, and note
+that doing so re-enables Pi's built-in `read`/`grep`/`find`/`edit` against the
+project mount below.
+
+### Project trust
+
+Pi asks `Trust project folder?` whenever the working tree holds trust-requiring
+resources — `.agents/skills` in the project **or any ancestor directory**, or a
+`.pi/` config directory. Trust is not cosmetic: it lets Pi load project
+settings, install missing project packages, and **execute project extensions
+inside Pi's own process** — alongside `permission-gate` rather than behind it.
+
+The harness therefore decides this up front rather than prompting, via
+`PI_PROJECT_TRUST` (`compose.yaml`), which `start-pi` turns into Pi's
+`--approve` / `--no-approve`:
+
+| `PI_PROJECT_TRUST` | Flag           | Effect                                                          |
+| ------------------ | -------------- | --------------------------------------------------------------- |
+| `deny` (default)   | `--no-approve` | Project skills and settings are not loaded. No project code runs. |
+| `approve`          | `--approve`    | Project skills and settings load. Project extensions execute.     |
+
+Anything else is an error, so a typo fails closed rather than silently granting
+trust.
+
+Deciding it here is what makes a **non-interactive** run possible: the prompt
+would otherwise block, and because the agent directory is a tmpfs that never
+persists `trust.json`, it would block on *every* run rather than just the first.
+Both flags short-circuit ahead of the trust store, so the decision is
+deterministic either way.
 
 To land in the shell without starting an agent — inspecting the boundary, or
 running the checks below — set `PI_AUTOSTART=0`:
