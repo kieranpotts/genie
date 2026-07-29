@@ -55,9 +55,25 @@ RUN npm install -g @earendil-works/pi-coding-agent \
 # Build context is the repo root:
 #   docker build -f src/infra/pi-container/Dockerfile -t pi-agent:hardened .
 # ---------------------------------------------------------------------------
-RUN mkdir -p /home/pi/.pi/agent/extensions && chown -R pi:pi /home/pi/.pi
-COPY --chown=pi:pi src/extensions/mcp-client/             /home/pi/.pi/agent/extensions/mcp-client/
-COPY --chown=pi:pi src/extensions/permission-gate/        /home/pi/.pi/agent/extensions/permission-gate/
+#
+# NOTE THE DESTINATION: these are baked into /opt/pi/agent, NOT into
+# ~/.pi/agent where Pi actually looks. Pi needs its agent directory to be
+# WRITABLE — it takes a lockfile on `trust.json` at startup (mkdir, via
+# proper-lockfile) and dies with EROFS on the read-only rootfs otherwise. That
+# directory is therefore a tmpfs at runtime (see compose.yaml), and a tmpfs
+# MASKS whatever the image had at the same path. So the image keeps a read-only
+# TEMPLATE here, and `seed-agent-dir` copies it into the tmpfs on entry.
+#
+# The indirection buys something beyond just working: the image stays the single
+# source of truth for extensions. A writable named volume would have been the
+# obvious alternative, but Docker seeds a named volume only when it is EMPTY, so
+# every later `docker build` would leave the old extensions in place and the
+# staleness would be silent — the same trap documented for pi-logs below.
+# Copying from the image on every entry cannot go stale.
+#
+RUN mkdir -p /opt/pi/agent/extensions
+COPY src/extensions/mcp-client/             /opt/pi/agent/extensions/mcp-client/
+COPY src/extensions/permission-gate/        /opt/pi/agent/extensions/permission-gate/
 
 # ---------------------------------------------------------------------------
 # Model routing. Pi has no built-in knowledge of the host LiteLLM proxy; it
@@ -71,7 +87,14 @@ COPY --chown=pi:pi src/extensions/permission-gate/        /home/pi/.pi/agent/ext
 # is a literal in models.json and MUST match the host proxy's LITELLM_PORT
 # (default 4000). Change one, change the other.
 # ---------------------------------------------------------------------------
-COPY --chown=pi:pi src/infrastructure/pi-container/models.json /home/pi/.pi/agent/models.json
+COPY src/infrastructure/pi-container/models.json /opt/pi/agent/models.json
+
+# The agent directory Pi reads. Stated explicitly rather than left to Pi's
+# `homedir()` default, because `seed-agent-dir` and the compose tmpfs target
+# have to agree with it, and an implicit path is not something they can agree
+# with. Pi resolves this via ENV_AGENT_DIR (`<APP>_CODING_AGENT_DIR`), the same
+# mechanism as the session dir below.
+ENV PI_CODING_AGENT_DIR=/home/pi/.pi/agent
 
 # ---------------------------------------------------------------------------
 # Network posture: no telemetry, no version check, no startup network calls.
@@ -129,9 +152,10 @@ VOLUME ["/var/log/pi"]
 # --no-builtin-tools) so they live WITH the image rather than in a compose
 # `command:` that any caller can silently replace.
 # ---------------------------------------------------------------------------
-COPY src/infrastructure/pi-container/harnesses.sh /usr/local/bin/harnesses
-COPY src/infrastructure/pi-container/start-pi.sh  /usr/local/bin/start-pi
-RUN chmod 0555 /usr/local/bin/harnesses /usr/local/bin/start-pi
+COPY src/infrastructure/pi-container/harnesses.sh      /usr/local/bin/harnesses
+COPY src/infrastructure/pi-container/start-pi.sh       /usr/local/bin/start-pi
+COPY src/infrastructure/pi-container/seed-agent-dir.sh /usr/local/bin/seed-agent-dir
+RUN chmod 0555 /usr/local/bin/harnesses /usr/local/bin/start-pi /usr/local/bin/seed-agent-dir
 COPY --chown=pi:pi src/infrastructure/pi-container/bashrc /home/pi/.bashrc
 
 # Drop to the unprivileged user for everything that follows.
@@ -154,8 +178,13 @@ CMD ["bash"]
 #   user: "1001:1001"                 # belt-and-braces over USER above
 #   cap_drop: [ALL]                   # restore none unless proven necessary
 #   security_opt: [no-new-privileges:true]
-#   read_only: true                   # rootfs read-only; writable tmpfs for /tmp
+#   read_only: true                   # rootfs read-only; writable tmpfs below
 #   tmpfs: [/tmp]
+#   tmpfs mount at /home/pi/.pi       # Pi's agent dir MUST be writable (it locks
+#                                     # trust.json on startup). Needs mode 1777:
+#                                     # a default tmpfs is root-owned and this
+#                                     # container is uid 1001. Populated from the
+#                                     # image template by `seed-agent-dir`.
 #   mem_limit / cpus / pids_limit     # resource limits
 #   networks: [agent-net]             # no host networking
 #   environment:

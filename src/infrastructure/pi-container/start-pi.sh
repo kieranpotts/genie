@@ -42,6 +42,13 @@ set -euo pipefail
 # per-container by overriding PI_MODEL, without rebuilding the image.
 model="${PI_MODEL:-litellm/computer-programmer}"
 
+# Pi's agent directory is a tmpfs (it must be writable — see seed-agent-dir),
+# so it starts every container empty and has to be populated from the image
+# template before Pi looks for its extensions and models.json. Idempotent, and
+# done here as well as in ~/.bashrc so that `compose exec pi start-pi` works
+# without an interactive shell having run first.
+seed-agent-dir
+
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   echo "Usage: start-pi [pi-arguments...]"
   echo ""

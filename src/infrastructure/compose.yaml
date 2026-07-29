@@ -198,6 +198,29 @@ services:
       - project:/workspace:ro
       # Keep this path in step with PI_PROJECT_DIR below, which is where an
       # operator's shell lands.
+      #
+      # Pi's agent directory, on a tmpfs. NOT optional, and not a convenience:
+      # Pi takes a lockfile on `trust.json` at startup (proper-lockfile, which
+      # locks by `mkdir`), so on the read-only rootfs it died before reaching a
+      # prompt with `EROFS: read-only file system, mkdir
+      # '/home/pi/.pi/agent/trust.json.lock'`.
+      #
+      # `mode` is load-bearing. A tmpfs mounts root-owned 0755 by default and
+      # this container runs as uid 1001, so without 1777 the mount is present
+      # and unwritable — the same failure, one directory further in.
+      # `seed-agent-dir` then creates the agent dir inside it as the agent's own
+      # user, mode 0700, so the loose mode is on the mount point only.
+      #
+      # Long syntax because the `tmpfs:` short list below cannot express a mode.
+      #
+      # Being a tmpfs, this MASKS whatever the image has at the path — which is
+      # why the extensions and models.json are baked to /opt/pi/agent instead
+      # and copied in on entry. Nothing here survives a restart, deliberately:
+      # the image is the only source of truth for what extensions run.
+      - type: tmpfs
+        target: /home/pi/.pi
+        tmpfs:
+          mode: 01777
     environment:
       # Model access: proxy token ONLY. No cloud API keys. The proxy ENDPOINT is
       # declared in the image's models.json (pi-container/models.json) — Pi reads

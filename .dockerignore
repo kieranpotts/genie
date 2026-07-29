@@ -28,8 +28,13 @@ PLAN.md
 # here but are read by the host, not shipped inside the agent)...
 src/infrastructure
 # ...except the few files the image explicitly bakes in: Pi's model routing
-# config, the harness launcher and greeting, and the shell rc that prints it.
+# config, the harness launcher and greeting, the agent-dir seeder, and the
+# shell rc that prints it.
+#
+# Adding a file under pi-container/ is NOT enough on its own — it must be
+# re-included here too, or the build fails with "not found" on the COPY.
 !src/infrastructure/pi-container/models.json
 !src/infrastructure/pi-container/harnesses.sh
 !src/infrastructure/pi-container/start-pi.sh
+!src/infrastructure/pi-container/seed-agent-dir.sh
 !src/infrastructure/pi-container/bashrc

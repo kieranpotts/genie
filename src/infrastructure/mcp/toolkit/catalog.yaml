@@ -34,5 +34,21 @@ registry:
       - /workspace
     # What the spawned server container can see. The named project volume only;
     # nothing else of the host or the gateway.
+    #
+    # ⚠️ THIS MUST BE THE FULL, COMPOSE-NAMESPACED VOLUME NAME.
+    #
+    # The gateway spawns this container through the Docker socket directly. It
+    # has no notion of the compose project, so this string is resolved as a raw
+    # Docker volume name — it is NOT interpreted in compose's namespace the way
+    # the identically-named `project:` key in compose.yaml is.
+    #
+    # Writing a bare `project:` here does not fail. Docker silently CREATES an
+    # empty local volume called `project` and mounts that instead, so the
+    # filesystem server confines itself to an empty directory while the operator
+    # (whose read-only mount compose resolves correctly) still sees every file.
+    # The boundary appears to work and the agent sees nothing.
+    #
+    # So: `<compose `name:`>_<volume key>`. Keep in step with compose.yaml's
+    # `name:` field and with `compose_project` in run/startup.
     volumes:
-      - "project:/workspace"
+      - "pi-secure-agent_project:/workspace"

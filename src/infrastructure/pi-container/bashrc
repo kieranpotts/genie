@@ -1,3 +1,7 @@
+# An rc file is sourced, never executed, so it carries no shebang — which
+# leaves shellcheck unable to infer the dialect (SC2148). Declare it instead.
+# shellcheck shell=bash
+
 #
 # Interactive shell setup for the `pi` user inside the hardened container.
 #
@@ -22,6 +26,13 @@ case $- in
   *i*) ;;
     *) return ;;
 esac
+
+# Populate Pi's agent directory from the image template. It lives on a tmpfs
+# (Pi requires it writable, and the rootfs is not), so it is empty at the start
+# of every container and must be seeded before Pi runs. Done here rather than
+# only in `start-pi` so that running `pi` directly — the documented way to debug
+# the harness itself — also finds its extensions.
+seed-agent-dir || printf 'Warning: could not seed the agent directory; Pi may not find its extensions.\n' >&2
 
 # The rootfs is read-only, so bash cannot write a history file; disable it
 # rather than let every shell exit fail noisily. Shell history in a disposable

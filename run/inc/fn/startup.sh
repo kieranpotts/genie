@@ -10,9 +10,10 @@
 # secrets — but is validated here before anything is started.
 #
 # These read the globals defined in `run/startup`:
-#   infra_dir     - src/infrastructure, where .env/compose.yaml/proxy live.
-#   env_file      - Absolute path to src/infrastructure/.env.
-#   proxy_log     - Where the backgrounded LiteLLM proxy's output is captured.
+#   infra_dir       - src/infrastructure, where .env/compose.yaml/proxy live.
+#   env_file        - Absolute path to src/infrastructure/.env.
+#   proxy_log       - Where the backgrounded LiteLLM proxy's output is captured.
+#   compose_project - Compose project name; namespaces this stack's volumes.
 #
 
 # Globals above are assigned in `run/startup` and sourced before this file.
@@ -270,6 +271,78 @@ build_image() {
   print_info "Building the hardened agent image (pi-agent:hardened)."
   docker build -f "${infra_dir}/pi-container/Dockerfile" -t pi-agent:hardened "${repo_root}"
   print_success "Image built: pi-agent:hardened."
+}
+
+# reset_project_volume - Recreate the `project` volume from the current
+# PROJECT_PATH. Unconditional, on every run.
+#
+# WHY THIS IS SAFE: the volume is a bind POINTER, not storage. compose.yaml
+# declares it `type: none, o: bind, device: ${PROJECT_PATH}`, so Docker records
+# a host path and mounts it; the bytes live on the host and are never copied
+# in. Destroying and recreating the volume therefore loses nothing, which is
+# what makes doing it every run reasonable — and why compose's "data will be
+# lost" prompt is a false alarm for THIS volume specifically.
+#
+# WHY IT IS NEEDED: change PROJECT_PATH in `.env` and the existing volume keeps
+# its old `device`. Compose notices the mismatch and stops to ask an
+# interactive `Recreate (data will be lost)? (y/N)` — which HANGS this script,
+# because at that point nothing is feeding its stdin. Recreating unconditionally
+# makes `.env` the single source of truth for which project the stack is scoped
+# to, the same argument stop_stale_proxy makes for the proxy's config.
+#
+# ONLY the `project` volume is touched. `pi-logs` (audit trails) and
+# `pi-sessions` (transcripts) hold real data with no host-side copy, so the
+# teardown below is a bare `down` and MUST NEVER become `down -v`: `-v` takes
+# all three, and the audit trail is the one thing this architecture exists to
+# produce.
+#
+reset_project_volume() {
+  local volume old_device
+
+  # Look the volume up by its compose labels rather than assuming Docker's
+  # `<project>_<key>` naming, so the only coupling is the project name itself.
+  volume=$(docker volume ls --quiet \
+             --filter "label=com.docker.compose.project=${compose_project}" \
+             --filter "label=com.docker.compose.volume=project" 2>/dev/null | head -1)
+
+  if [[ -n "${volume}" ]]; then
+    # `<no value>` when a volume has no Options; harmless, only used for the
+    # message below.
+    old_device=$(docker volume inspect --format '{{ index .Options "device" }}' \
+                   "${volume}" 2>/dev/null || true)
+  fi
+
+  # A volume still attached to a container cannot be removed. Normally cleanup
+  # has already torn the boundary down, but a run that was killed rather than
+  # exited leaves containers holding it.
+  docker compose -f "${infra_dir}/compose.yaml" --env-file "${env_file}" \
+    down --remove-orphans &> /dev/null || true
+
+  if [[ -z "${volume}" ]]; then
+    print_info "No existing project volume; compose will create it from ${PROJECT_PATH}."
+    return 0
+  fi
+
+  if ! docker volume rm "${volume}" &> /dev/null; then
+    print_error "Could not remove the ${volume} volume; a container still holds it."
+    # The likely culprit is NOT a compose service. The mcp-gateway spawns the
+    # filesystem-server container itself, through the Docker socket, so that
+    # container carries no compose labels and the `down` above does not touch
+    # it. A gateway that was killed rather than stopped leaves it behind,
+    # holding this volume.
+    print_info "The mcp-gateway spawns its filesystem server outside compose, so"
+    print_info "a leftover from a killed gateway is not removed by \`compose down\`."
+    print_info "Find and remove it, then re-run:"
+    print_info "  docker ps -a --filter volume=${volume}"
+    print_info "  docker rm -f \$(docker ps -aq --filter volume=${volume})"
+    exit 1
+  fi
+
+  if [[ -n "${old_device:-}" && "${old_device}" != "${PROJECT_PATH}" ]]; then
+    print_success "Project volume re-pointed: ${old_device} -> ${PROJECT_PATH}."
+  else
+    print_success "Project volume recreated from ${PROJECT_PATH}."
+  fi
 }
 
 # bring_up_boundary - Bring up the docker compose boundary.

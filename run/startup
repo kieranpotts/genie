@@ -32,6 +32,11 @@
 # it was started with, silently ignoring later edits to `.env` and to
 # proxy/litellm.config.yaml.
 #
+# The `project` volume is likewise RECREATED on every run, so PROJECT_PATH in
+# `.env` is always the project the stack is scoped to. That volume is a bind
+# pointer to a host directory, not storage, so recreating it loses nothing.
+# The `pi-logs` and `pi-sessions` volumes hold real data and are preserved.
+#
 
 set -euo pipefail
 
@@ -72,6 +77,12 @@ env_file="${infra_dir}/.env"
 # shellcheck disable=SC2034
 proxy_log="$(mktemp -t litellm-proxy.XXXXXX.log)"
 
+# Compose project name. MUST match the `name:` field in compose.yaml — it is
+# what namespaces this stack's volumes, and `reset_project_volume` uses it to
+# find the `project` volume without having to assume Docker's naming scheme.
+# shellcheck disable=SC2034
+compose_project="pi-secure-agent"
+
 #
 # Includes.
 #
@@ -91,5 +102,6 @@ check_env
 check_ollama
 start_proxy
 build_image
+reset_project_volume
 bring_up_boundary
 enter_container
