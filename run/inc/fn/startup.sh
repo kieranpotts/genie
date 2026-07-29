@@ -169,14 +169,72 @@ build_image() {
 
 # bring_up_boundary - Bring up the docker compose boundary.
 #
-# Runs in the foreground so the operator sees container output; Ctrl-C
-# triggers cleanup (see `run/startup`), which tears compose back down and
-# stops the proxy this script started.
+# DETACHED, deliberately. An attached `up` multiplexes every container's output
+# into one log stream and gives the operator no terminal on any of them -- so
+# the shell inside the pi container would be running but unreachable. The
+# container is entered separately, by `enter_container` below.
 #
 bring_up_boundary() {
   print_info "Bringing up the compose boundary (agent-net, mcp-gateway, pi)."
   boundary_started="yes"
-  docker compose -f "${infra_dir}/compose.yaml" --env-file "${env_file}" up
+  docker compose -f "${infra_dir}/compose.yaml" --env-file "${env_file}" up -d
+
+  # `up -d` returns once the containers are created and started, which is not
+  # the same as the gateway having finished listing its tools. Give the pi
+  # container a moment to still be running -- if it exited immediately, the
+  # shell below would fail with a much less obvious error.
+  local waited=0
+  local timeout=15
+  while ! compose_service_running "pi"; do
+    if (( waited >= timeout )); then
+      print_error "The pi container is not running ${timeout}s after starting."
+      print_info "Inspect it with: docker compose -f ${infra_dir}/compose.yaml logs pi"
+      exit 1
+    fi
+    sleep 1
+    (( waited += 1 ))
+  done
+
+  print_success "Boundary is up (mcp-gateway, pi)."
+}
+
+# compose_service_running - True if the named compose service has a running
+# container.
+#
+# Arguments:
+#   $1 - Compose service name.
+#
+compose_service_running() {
+  local service="$1"
+  local running
+
+  running=$(docker compose -f "${infra_dir}/compose.yaml" --env-file "${env_file}" \
+              ps --status running --services 2>/dev/null || true)
+
+  grep -qx "${service}" <<< "${running}"
+}
+
+# enter_container - Open an interactive shell inside the hardened container.
+#
+# This is the foreground step: it holds the script open for as long as the
+# operator is working, and exiting the shell falls through to cleanup, which
+# tears the boundary down and stops the proxy this script started.
+#
+# The container's greeting (~/.bashrc -> `harnesses`) prints on entry, listing
+# the harnesses available inside. No agent has been started at this point --
+# `start-pi` does that.
+#
+enter_container() {
+  print_info "Entering the hardened container. Exit the shell to tear everything down."
+  echo ""
+
+  # `exec` (not `attach`): attaching would share PID 1's terminal with the
+  # detached shell rather than giving this operator their own.
+  #
+  # Failure here must not skip cleanup, and the operator's own exit code from
+  # the shell is not the script's -- so swallow it and let the EXIT trap run.
+  docker compose -f "${infra_dir}/compose.yaml" --env-file "${env_file}" \
+    exec pi bash || true
 }
 
 # cleanup - Stop what this script started. Registered as an EXIT trap.
