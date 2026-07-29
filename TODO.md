@@ -276,12 +276,31 @@ claimed and what is enforced.
 
   - `--tools strings` (and `--tools-config`) is a **tool-surface allowlist
     enforced at the boundary, out of process**. `compose.yaml` currently enables
-    the `filesystem` server whole, so the agent gets `move_file`,
-    `create_directory`, `read_media_file`, and the rest whether or not it needs
-    them. Naming only the tools actually used is a real tightening, and a
-    stronger one than anything `permission-gate` can offer, since that extension
-    is cooperative and in-process. Establish the working set first — do not guess
-    the list.
+    the `filesystem` server whole, so the agent gets every tool it exposes
+    whether or not it needs them. Naming only the tools actually used is a real
+    tightening, and a stronger one than anything `permission-gate` can offer,
+    since that extension is cooperative and in-process.
+
+    **The exposed surface, now measured** (`tools/list` against the running
+    gateway, not guessed — the tool-surface check in the runbook reproduces it):
+
+    ```
+    read_file  read_multiple_files  list_directory  directory_tree
+    search_files  get_file_info  list_allowed_directories
+    write_file  edit_file  move_file  create_directory
+    ```
+
+    Eleven, not the larger set assumed above: this entry previously cited
+    `read_media_file` as an example of the excess, and the pinned
+    `mcp/filesystem` image does **not** expose it. Correcting that is the point
+    of measuring.
+
+    What remains is the *use* question, which the call log now answers: run
+    `jq -r .tool calls.jsonl | sort | uniq -c` after real work and drop what
+    never appears. `list_allowed_directories` and `directory_tree` are the
+    obvious first candidates. Note the honest ceiling — with all eleven being
+    filesystem tools confined to `/workspace`, this is defence in depth, not a
+    new boundary; the containment is already the MCP server's.
   - `--verify-signatures` is off. Largely redundant against digest pinning, but
     close to free; turn it on unless it breaks the bring-up.
 
@@ -426,17 +445,60 @@ claimed and what is enforced.
   actually *did* rather than what it attempted. Either implement them or rewrite the section as
   stated intent.
 
-- [ ] **Document the `docker.sock` grant in `docs/solution.md`.**
-  `compose.yaml:101` binds the host Docker socket into `mcp-gateway`.
+  **A second place makes the same overclaim,** found while documenting the
+  `docker.sock` grant: `README.md`'s security section says "every model request,
+  tool call, and filesystem action an agent performs is logged". Tool calls and
+  filesystem actions are now genuinely covered, but *model requests* are not —
+  that is precisely the missing `before_provider_request` handler. The host
+  LiteLLM proxy may log them, but nothing in this repository asserts or verifies
+  that. Left alone deliberately: whether to fix by implementing the hook or by
+  rewording is the decision this item exists to make, and it should be made once
+  for both places.
+
+- [x] **Document the `docker.sock` grant in `docs/solution.md`.**
+  `compose.yaml` binds the host Docker socket into `mcp-gateway`.
   `src/infrastructure/README.md`'s "The docker.sock trade-off (read this)"
-  section documents and justifies this honestly and at length, but
-  `docs/solution.md` never mentions it: the trust-boundary diagram labels the
+  section documented and justified this honestly and at length, but
+  `docs/solution.md` never mentioned it: the trust-boundary diagram labelled the
   pi-container "no agent file tools, no docker.sock, no keys" and the hardening
-  table says "no `docker.sock`" — both true of the *agent*, but together they
-  read as though no component holds one. Neither that diagram nor any other in
-  `docs/solution.md` shows `mcp-gateway` at all, which is the component that
-  actually holds the socket. `docs/requirements.md` names host Docker control
-  explicitly, so this is the most important of the documentation gaps.
+  table said "no `docker.sock`" — both true of the *agent*, but together they
+  read as though no component holds one.
+
+  **Done.** The gap turned out to be structural, not just a missing label: both
+  diagrams drew `pi-container → mcp-server-container` **directly**, when the
+  gateway sits between them and *spawns* that server through the socket. So the
+  diagrams were not merely quiet about the privilege — they depicted a topology
+  in which it has no reason to exist. Fixed in four places:
+
+  - **New section**, "The gateway, and the `docker.sock` trade-off", under
+    *Containerized MCP server*: the gateway spawns the filesystem server, which
+    is why it needs the socket; the privilege is **confined, not absent**; and
+    the requirement in `docs/requirements.md` is met at the boundary that matters
+    (the agent), not by the stack holding no privilege anywhere. Carries both
+    escape hatches (socket-proxy, stdio) with a pointer to the runbook.
+  - **Trust-boundary diagram**: `mcp-gateway` and the host Docker daemon added,
+    with the spawn edge and the socket grant drawn explicitly. The gateway is
+    styled `danger` — it is the one component holding host privilege, and the
+    diagram should say so. The transport label was also wrong (`HTTP/SSE or
+    stdio`); the deployed stack is HTTP streaming on :8811.
+  - **Mount view**: `mcp-gateway` added with its three mounts, the socket among
+    them, and `mcp-server-container` re-labelled "spawned BY THE GATEWAY, not by
+    compose". The agent's `/var/log/pi` audit volume was missing too, and is now
+    shown.
+  - **Hardening table**: the "Container hardening" row is now explicitly scoped
+    to the agent, and a new **"Host Docker control"** row states the grant, its
+    justification, and its confinement.
+
+  `README.md` gained a one-clause qualifier for the same reason — its claim
+  ("no Docker control") was already scoped to the agent and therefore accurate,
+  but invited exactly the inference this item exists to prevent.
+
+  **Not restated as fact:** the draft of the new section originally said the
+  agent's "entire outbound surface is MCP tool calls and inference requests".
+  That is the very claim the still-open network-egress item flags as unenforced,
+  so it was rewritten to say only what is true — the agent has no local
+  execution tool and its `mcp_*` tools resolve in another container. Documenting
+  one gap is not a licence to reassert another.
 
 - [x] **Reconcile multi-project diagrams with the single-project reality.**
   The diagrams and the mount view showed `proj-a`/`proj-b` volumes and
@@ -523,6 +585,41 @@ claimed and what is enforced.
 
   Worth keeping: that link check is three lines of shell and found more than the
   manual audit did.
+
+  **Reopened once, then finished.** The first pass matched *filenames*, so five
+  PROSE references to "the architecture doc" survived it — a dead pointer is
+  still dead when it is spelled out in words. Found by re-sweeping on the phrase
+  rather than the path:
+
+  - `compose.yaml` ×2 — the `docker.sock` rationale and the socket-proxy note.
+    Both now point at the new trade-off section in `docs/solution.md` and at
+    `docs/alternatives.md` respectively.
+  - `src/infrastructure/README.md` ×3 — the boundary-diagram pointer, the
+    "Option C" reference, and a traversal/prefix-collision reference.
+
+  Two of those were more than broken links:
+
+  - **"Option C" does not exist anywhere.** `docs/alternatives.md` lists three
+    alternatives as unlettered bullets; the `docker.sock` one is the third.
+    Both citations now name it that way, and say what the connection actually is
+    — the concern that got it rejected is the concern this design confines
+    rather than eliminates.
+  - **"See the architecture doc on traversal and prefix-collision defence"
+    promised documentation that has never existed** in any doc, for a topic
+    nothing here covers. Rewritten to say the truth: the allowed directory is
+    the catalog `command` argument, how the upstream `mcp/filesystem` server
+    defends that boundary internally is its implementation and is not documented
+    in this repository, and the runbook's traversal check is the functional
+    proof — to be re-run when the pinned image or catalog schema changes.
+
+  The runbook's own trust-boundary summary also had the structural gap fixed in
+  `docs/solution.md`: it listed `agent-net` as holding the pi-container and "the
+  MCP server", when it holds the pi-container and the **gateway**, whose child
+  the MCP server is. Corrected, with the note that compose starts two containers
+  and not three — which is precisely why the socket grant exists.
+
+  One rename leftover, same class: `run/inc/fn/extensions.sh` described
+  `permission-gate` as "logging every decision". It logs every call now.
 
 - [x] **Copy-edit `docs/solution.md`.**
   All five fixed — the missing word after "if you have another", "to" → "so"

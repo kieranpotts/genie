@@ -36,9 +36,10 @@ under `src/extensions/`.
 ## Trust boundaries
 
 - **Host:** Ollama (local inference) and the LiteLLM proxy (holds the keys). Both bind to the Docker bridge gateway, not `0.0.0.0`.
-- **`agent-net`:** the pi-container (no keys, no FS, no socket) and the MCP server (the sole filesystem gatekeeper). The agent reaches files only through MCP tool calls and reaches models only through the proxy endpoint.
+- **`agent-net`:** the pi-container (no keys, no FS, no socket) and the **mcp-gateway**, which is the agent's only MCP endpoint and which spawns the filesystem MCP server (the sole filesystem gatekeeper) through the Docker socket. The agent reaches files only through MCP tool calls and reaches models only through the proxy endpoint. Note that compose starts two containers here, not three: the MCP server is the gateway's child, which is why the socket grant below exists.
 
-See the architecture doc for the full boundary diagrams.
+See [../../docs/solution.md](../../docs/solution.md) for the full boundary
+diagrams.
 
 ## Operator runbook
 
@@ -259,7 +260,31 @@ what keeps the change trail complete.
 | Write requires approval | ask it to write a file | a confirmation prompt appears; on approve, write succeeds |
 | Default-deny on timeout | ignore the prompt for 60s | the write is blocked; the call log shows `"confirmation":"timeout"` |
 | Reads are recorded | ask it to read any ordinary project file | the call log gains an `"outcome":"allowed","confirmation":"not-required"` line naming the path |
+| Tool surface is the documented eleven | the tool-surface check below | exactly the eleven `mcp_*` tools listed in `docs/solution.md`; no `bash`, no Git, no web fetch |
+| No network binaries | `docker compose ... exec pi sh -c 'for b in git curl wget nc ssh; do command -v $b \|\| echo "$b absent"; done'` | all five absent |
 | Gateway starts hardened | `docker compose ... up` then `docker compose ... ps` | `mcp-gateway` is healthy with `cap_drop: ALL` + read-only rootfs. If it fails to start, relax `cap_drop` to the minimum it reports needing (see the compose comment). |
+
+**The tool-surface check.** `docs/solution.md` enumerates the agent's entire
+tool surface, so that list has to be checkable rather than trusted. This asks
+the gateway directly, using the same client the agent uses:
+
+```sh
+docker compose -f src/infrastructure/compose.yaml exec -T pi \
+  sh -c 'node --input-type=module -e "$(cat)"' <<'EOF'
+const { McpClient } = await import('/opt/pi/agent/extensions/mcp-client/mcp-client.ts')
+const c = new McpClient({ url: process.env.MCP_GATEWAY_URL, fetch: globalThis.fetch })
+await c.initialize()
+const tools = await c.listTools()
+console.log(`${tools.length} tools the agent can call:`)
+for (const t of tools) console.log('  mcp_' + t.name)
+EOF
+```
+
+Expect exactly eleven, all `mcp_*`, all filesystem. Anything else — especially
+anything that executes, fetches a URL, or reaches outside `/workspace` — means
+the surface has grown and `docs/solution.md` is out of date. Re-run this after
+changing the gateway's `--servers`/`--tools` flags, the catalog, or the pinned
+`mcp/filesystem` image.
 
 **8. Inspect the audit trail**
 
@@ -366,9 +391,12 @@ model is offered, or by watching for audit-log entries.
 The Docker MCP Toolkit gateway **spawns and manages** the filesystem MCP server
 itself, so it requires the Docker socket. The architecture confines that
 privilege to the **gateway** — the agent (`pi`) still has no socket, no keys, and
-no project mount. This is the deliberate, contained version of the Option C
-docker.sock concern from the architecture doc: the privilege exists, but on a
-component the agent cannot reach, not on the agent itself.
+no project mount. This is the deliberate, contained version of the concern that
+got the third alternative in [../../docs/alternatives.md](../../docs/alternatives.md)
+rejected — granting broad host privilege via `docker.sock`: the privilege
+exists, but on a component the agent cannot reach, not on the agent itself.
+[../../docs/solution.md](../../docs/solution.md) carries the same trade-off in
+the design's own terms.
 
 The gateway is still hardened as far as its role allows: `cap_drop: [ALL]`,
 `no-new-privileges`, a read-only rootfs with in-memory tmpfs, and resource
@@ -398,5 +426,5 @@ cost of the Toolkit's catalog/secret/network controls.
 
 - The real `.env` is gitignored (`.env`, `.env.*`, except `.env.example`). It holds cloud API keys; never commit it.
 - Keys live only on the host (in the proxy). They are never injected into the pi-container and never baked into any image.
-- The MCP server is the only component with filesystem access. Path enforcement lives in its configuration/code, not only in the volume mount (see the architecture doc on traversal and prefix-collision defence).
+- The MCP server is the only component with filesystem access. Path enforcement lives in its configuration/code, not only in the volume mount — the allowed directory is the `command` argument in `mcp/toolkit/catalog.yaml`. How the upstream `mcp/filesystem` server defends that boundary internally (traversal, prefix collisions such as `/workspace` vs `/workspace-evil`) is **its** implementation and is not documented in this repository; the traversal check in the verification table above is the functional proof that it holds, and it should be re-run whenever the pinned image or the catalog schema changes.
 - Pi runs with `PI_OFFLINE=1` and a session directory on a controlled volume outside any project tree.

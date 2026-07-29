@@ -26,6 +26,34 @@ for Ollama, this is my custom AI agent harness.
 > use it as a basis for engineering your own agent harness around Pi. But I
 > don't recommend you use these tools as-is.
 
+## 🎯 Intended use: away-from-keyboard
+
+This harness is built for **away-from-keyboard agentic workflows** — an agent
+working with minimal human oversight, where nobody is reading each tool call as
+it happens. Every design decision follows from that one premise, and the
+[requirements](./docs/requirements.md) state it first for that reason.
+
+The cost is real and deliberate. Inside the hardened container the agent has no
+shell, no Git, no network tools, and no route to the filesystem except a
+mediated MCP server that logs every call — so it **cannot run your tests, build
+the project, or install a dependency**. That is capability traded for
+accountability, and the trade only pays when there is no human in the loop to
+notice something going wrong.
+
+**If you are at the keyboard, watching what the agent does, you do not need
+this.** Eyes-on AI-assisted development in a normal editor is well served by a
+much more minimal harness — Pi in a devcontainer with a mounted workspace, for
+instance. You keep the agent's ability to run tests and builds, and *you* are
+the control that this infrastructure otherwise has to reconstruct out of a
+boundary and an audit trail. [Alternative designs](./docs/alternatives.md)
+covers that setup and why it was rejected **for this use case** — not in
+general; it is a perfectly reasonable way to work when someone is watching.
+
+You can of course drive Pi interactively inside the hardened container, and the
+operator affordances exist for exactly that: a read-only project mount to browse,
+and an approval prompt before every write. But that is the harness being *usable*
+by a human, not the case it was designed around.
+
 ## ☑️ Requirements
 
 The core requirement, of course, is the [Pi coding agent][pi], installed locally
@@ -167,11 +195,15 @@ already in Pi, use the `/reload` prompt to reload all extensions, skills, etc.:
 
 Beyond the extensions above, this repository also provisions a wider agent
 harness infrastructure: a hardened container, a gated MCP filesystem server,
-and a host-side model proxy.
+and a host-side model proxy. This is the part built for
+[away-from-keyboard use](#-intended-use-away-from-keyboard) — if you are working
+eyes-on, it buys you less than it costs you.
 
 The effect of this hardened infrastructure is that a compromised agent or a
 misbehaving model will have no access to host files, API keys or other secrets,
-and no Docker control.
+and no Docker control. (The MCP gateway does hold a host Docker socket, because
+it spawns the MCP server — confined to a component the agent cannot reach. See
+[the trade-off](./docs/solution.md#the-gateway-and-the-dockersock-trade-off).)
 
 Plus every model request, tool call, and filesystem action an agent performs
 is logged.
