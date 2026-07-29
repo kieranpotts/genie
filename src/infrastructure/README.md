@@ -142,11 +142,22 @@ and the hardened `pi` container.
 
 **5. Start an agent**
 
-Entering the container lands you in the hardened Pi harness:
+Entering the container lands you in the hardened Pi harness, with your shell's
+working directory set to the project at `/projects/active`:
 
 ```sh
 docker compose -f src/infrastructure/compose.yaml exec pi bash
 ```
+
+```
+pi-container:/projects/active$
+```
+
+If you land in `~` instead, the shell says so on entry — the project volume is
+not mounted, and `PROJECT_PATH` in `.env` is the thing to check. That directory
+is the operator's, and is set by `PI_PROJECT_DIR`; the agent's `bash` runs
+somewhere else entirely (`AUDITED_BASH_CWD`, outside the fence), so do not point
+one at the other.
 
 The agent starts automatically. It is launched by the shell (`~/.bashrc` calls
 `start-pi`) rather than being the container's main process, which is what makes
@@ -179,12 +190,12 @@ exist only for the length of a session someone is actually sitting in.
 
 **6. Browse the project (as the operator)**
 
-The project is mounted **read-only** at `/projects/active`, so from that shell
-you can see exactly what the agent is working against:
+The project is mounted **read-only** at `/projects/active`, which is where your
+shell starts — so `ls` shows exactly what the agent is working against. To look
+without starting an agent at all:
 
 ```sh
-docker compose -f src/infrastructure/compose.yaml exec -e PI_AUTOSTART=0 pi \
-  bash -c 'ls -la /projects/active'
+docker compose -f src/infrastructure/compose.yaml exec -e PI_AUTOSTART=0 pi bash
 ```
 
 This mount is for **you**, not the agent. The agent's `bash` tool is fenced out

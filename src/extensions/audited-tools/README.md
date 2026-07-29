@@ -167,7 +167,14 @@ These are set in the `compose.yaml` file for the hardened container.
 
 `AUDITED_BASH_CWD` is a working directory, not a security boundary. It defaults
 to the agent's home because that is the one directory guaranteed to exist in the
-hardened image, and because it sits outside the default fence. It doubles as the
+hardened image, and because it sits outside the default fence.
+
+> [!CAUTION]
+> Do not set this to the project path to "match" where an operator's shell lands
+> (`PI_PROJECT_DIR`). They are two different directories for two different users
+> of the container. Putting the agent's working directory inside the fence would
+> make every relative path it uses resolve into the mediated project, so ordinary
+> commands would be refused for a reason that reads as nonsense. It doubles as the
 base that relative arguments are resolved against when fencing — deliberately one
 value for both, since vetting and executing against different directories would
 make the fence bypassable with a relative path.

@@ -31,6 +31,30 @@ unset HISTFILE
 
 PS1='\[\033[34m\]pi-container\[\033[0m\]:\w\$ '
 
+# Land in the project, not in $HOME. The image's WORKDIR is /home/pi because
+# that is the only directory guaranteed to exist at build time, but an operator
+# entering the container wants to be where the work is — and starting in an
+# empty home is what makes a correctly-mounted project look absent.
+#
+# This is the OPERATOR's working directory only. It is deliberately NOT
+# AUDITED_BASH_CWD, which is where the agent's `bash` tool runs and the base its
+# fenced paths resolve against: that must stay OUTSIDE the fence, or every
+# relative path the agent uses would resolve into the mediated project and be
+# refused. Two different directories, for two different users of this container.
+#
+# Guarded on existence so the image still works unmounted (a plain `docker run`,
+# or a compose file without the project volume), and noisy when the mount is
+# missing, because silently sitting in $HOME is precisely the confusing symptom
+# this exists to prevent.
+project_dir="${PI_PROJECT_DIR:-/projects/active}"
+if [[ -d "${project_dir}" ]]; then
+  cd "${project_dir}" || true
+else
+  printf 'Note: %s is not mounted; staying in %s.\n' "${project_dir}" "${PWD}"
+  printf 'The project is mounted by compose — check PROJECT_PATH in .env.\n\n'
+fi
+unset project_dir
+
 # Start the hardened harness, then fall back to this shell when it exits.
 #
 # Guards:

@@ -191,6 +191,9 @@ services:
       # Do not drop it without re-reading the fence's stated limits in
       # src/extensions/audited-tools/bash-policy.ts.
       - project:/projects/active:ro
+      # Keep this path in step with PI_PROJECT_DIR below, which is where an
+      # operator's shell lands, and with AUDITED_BASH_FENCE, which keeps the
+      # agent out of it.
     environment:
       # Model access: proxy token ONLY. No cloud API keys. The proxy ENDPOINT is
       # declared in the image's models.json (pi-container/models.json) — Pi reads
@@ -205,9 +208,14 @@ services:
       # --transport=streaming (above); the old /sse path only 307-redirects here.
       # No auth token — see the note on the gateway service.
       MCP_GATEWAY_URL: "http://mcp-gateway:8811/mcp"
-      # Working directory for the audited-tools `bash` replacement, and the base
-      # that relative arguments are resolved against when fencing. Outside the
-      # fence by construction.
+      # Where an OPERATOR's interactive shell lands (see the image's ~/.bashrc),
+      # so entering the container puts you in the project rather than an empty
+      # home. Nothing about the agent's own access is derived from this.
+      PI_PROJECT_DIR: "/projects/active"
+      # Working directory for the AGENT's audited `bash`, and the base that
+      # relative arguments are resolved against when fencing. Outside the fence
+      # by construction — pointing this into the project would make every
+      # relative path the agent uses resolve into the fence and be refused.
       AUDITED_BASH_CWD: "/home/pi"
       # Directories the agent's `bash` may not reach. This is what keeps the
       # read-only project mount an OPERATOR convenience rather than an agent
