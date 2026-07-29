@@ -72,6 +72,7 @@ proxy_log="$(mktemp -t litellm-proxy.XXXXXX.log)"
 
 trap cleanup EXIT INT TERM
 
+check_dependencies
 check_env
 start_proxy
 build_image

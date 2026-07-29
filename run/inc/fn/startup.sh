@@ -21,6 +21,47 @@
 # PID of the backgrounded LiteLLM proxy, set by start_proxy. Read by cleanup.
 proxy_pid=""
 
+# Whether `docker compose up` was reached. Read by cleanup so a failure during
+# the preflight checks does not announce a teardown of something never started.
+boundary_started=""
+
+# check_dependencies - Verify the host tools the runbook requires are present.
+#
+# Checked before anything is started, so a missing tool is reported by name
+# here rather than surfacing later as a backgrounded process that "exited
+# before becoming healthy" with the real cause buried in a temp log.
+#
+check_dependencies() {
+  local missing=0
+
+  if ! command -v docker &> /dev/null; then
+    print_error "docker is not installed or not on PATH."
+    print_info "Install Docker: https://docs.docker.com/engine/install/"
+    missing=1
+  fi
+
+  if ! command -v curl &> /dev/null; then
+    print_error "curl is not installed or not on PATH."
+    missing=1
+  fi
+
+  # NOTE: the proxy server is an EXTRA. A bare `pip install litellm` provides
+  # the SDK but no `litellm` command, so the install hint must keep the
+  # `[proxy]` extra.
+  if ! command -v litellm &> /dev/null; then
+    print_error "litellm is not installed or not on PATH."
+    print_info "Install the LiteLLM proxy, eg: pipx install 'litellm[proxy]'"
+    print_info "(or: python3 -m pip install --user 'litellm[proxy]')"
+    missing=1
+  fi
+
+  if (( missing )); then
+    exit 1
+  fi
+
+  print_success "Host dependencies found (docker, curl, litellm)."
+}
+
 # check_env - Verify `.env` exists and required values have been filled in.
 #
 # Fails fast with a pointer to the manual step 1 in the runbook, rather than
@@ -82,11 +123,13 @@ start_proxy() {
   local timeout=30
   while ! curl -sf "http://${LITELLM_HOST}:${LITELLM_PORT}/health/liveliness" &> /dev/null; do
     if ! kill -0 "${proxy_pid}" 2>/dev/null; then
-      print_error "LiteLLM proxy exited before becoming healthy. See ${proxy_log}."
+      print_error "LiteLLM proxy exited before becoming healthy."
+      print_proxy_log
       exit 1
     fi
     if (( waited >= timeout )); then
-      print_error "LiteLLM proxy did not become healthy within ${timeout}s. See ${proxy_log}."
+      print_error "LiteLLM proxy did not become healthy within ${timeout}s."
+      print_proxy_log
       exit 1
     fi
     sleep 1
@@ -94,6 +137,26 @@ start_proxy() {
   done
 
   print_success "LiteLLM proxy is up (pid ${proxy_pid})."
+}
+
+# print_proxy_log - Show the tail of the proxy log inline, on failure.
+#
+# The proxy runs backgrounded with its output redirected, so its own error --
+# which is usually the whole story -- is invisible unless it is surfaced here.
+# The full log path is still printed for the cases where the tail is not enough.
+#
+print_proxy_log() {
+  if [[ -s "${proxy_log}" ]]; then
+    print_info "Last lines of ${proxy_log}:"
+    echo ""
+    local line
+    while IFS= read -r line; do
+      printf '    %s\n' "${line}"
+    done < <(tail -n 20 "${proxy_log}")
+    echo ""
+  else
+    print_info "The proxy log (${proxy_log}) is empty."
+  fi
 }
 
 # build_image - Build the hardened agent image.
@@ -112,14 +175,20 @@ build_image() {
 #
 bring_up_boundary() {
   print_info "Bringing up the compose boundary (agent-net, mcp-gateway, pi)."
+  boundary_started="yes"
   docker compose -f "${infra_dir}/compose.yaml" --env-file "${env_file}" up
 }
 
 # cleanup - Stop what this script started. Registered as an EXIT trap.
 #
 cleanup() {
-  print_info "Tearing down the compose boundary."
-  docker compose -f "${infra_dir}/compose.yaml" --env-file "${env_file}" down 2>/dev/null || true
+  # Only tear down what was actually brought up. A failure during the preflight
+  # checks used to announce a teardown of a boundary that was never started,
+  # which reads as though the failure happened later than it did.
+  if [[ -n "${boundary_started}" ]]; then
+    print_info "Tearing down the compose boundary."
+    docker compose -f "${infra_dir}/compose.yaml" --env-file "${env_file}" down 2>/dev/null || true
+  fi
 
   if [[ -n "${proxy_pid}" ]] && kill -0 "${proxy_pid}" 2>/dev/null; then
     print_info "Stopping the LiteLLM proxy (pid ${proxy_pid})."
