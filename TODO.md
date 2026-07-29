@@ -72,7 +72,7 @@ claimed and what is enforced.
   by the private `agent-net` bridge, which is now stated as the actual control.
   The `mcp-client` still sends the header if the variable is ever set.
 
-- [ ] **Decide whether interpreters stay on the default bash allowlist.**
+- [x] **Decide whether interpreters stay on the default bash allowlist.**
   The path fence added with the read-only project mount is only as strong as the
   allowlist it sits behind, and the default allowlist includes `node`, `npm`,
   `npx`, `python`, `python3`, `pip`, `make`, `cargo`, and `go`. Each is a
@@ -126,16 +126,15 @@ claimed and what is enforced.
   exec-server option below), the interpreter question returns exactly as
   written, and option 1 is the answer to carry forward.
 
-- [ ] **Remove the `audited-tools` extension; the agent gets no execution.**
-  *(decided; not done)*
+- [x] **Remove the `audited-tools` extension; the agent gets no execution.**
 
-  The extension is now scoped to `bash` alone, and its own documentation
-  concedes the two limits that matter: the guard is **lexical**, and it is
-  **self-enforced**, running inside the agent's own process. It is a cooperative
-  guard, not a boundary — so it cannot be strengthened in place, only moved or
-  removed.
+  The extension had been reduced to `bash` alone, and its own documentation
+  conceded the two limits that mattered: the guard was **lexical**, and it was
+  **self-enforced**, running inside the agent's own process. It was a
+  cooperative guard, not a boundary — so it could not be strengthened in place,
+  only moved or removed.
 
-  Removing it, rather than moving it, is the decision. The reasoning:
+  Removing it, rather than moving it, was the decision. The reasoning:
 
   - **MCP becomes genuinely the sole route to files.** That is the design's
     central claim (`docs/solution.md`), and it has not been true while a second,
@@ -145,10 +144,10 @@ claimed and what is enforced.
   - **The fence and its caveats disappear** rather than being restated. No
     lexical resolution, no symlink assumption, no "only as strong as the
     allowlist".
-  - **Nothing demonstrably depends on it.** The tool runs in `/home/pi`, fenced
-    out of `/projects/active`, on a read-only rootfs. It cannot run project
+  - **Nothing demonstrably depended on it.** The tool ran in `/home/pi`, fenced
+    out of `/projects/active`, on a read-only rootfs. It could not run project
     tests or builds. Its main demonstrated capability was being the interpreter
-    that defeated the fence — which is the thing being removed.
+    that defeated the fence — which is the thing that was removed.
 
   What this does **not** change, and must not be claimed:
 
@@ -162,9 +161,9 @@ claimed and what is enforced.
     only; reads pass silently). The flag is required in every branch. It is also
     already free: `start-pi` bakes it into the image, so no operator types it.
 
-  Removal covers, verified by grep:
+  What was removed, found by grep across the repo:
 
-  - **Delete:** `src/extensions/audited-tools/` and
+  - **Deleted:** `src/extensions/audited-tools/` and
     `test/extensions/audited-tools/`.
   - **Infrastructure:** the four `AUDITED_*` variables, the fence rationale on
     the `project:/projects/active:ro` mount, and the `pi-logs` comment in
@@ -172,41 +171,41 @@ claimed and what is enforced.
     header note and the footer hardening block in the Dockerfile; the
     `AUDITED_BASH_CWD` comment in `bashrc`; the "audited tools only" greeting in
     `harnesses.sh`.
-  - **`start-pi.sh` needs care.** The `--no-builtin-tools` flag *stays*, but its
-    comment justifies it in terms of `audited-tools` shadowing built-ins by
-    name. That rationale dies with the extension; the real one — built-in
-    `read`/`grep`/`find`/`edit` reaching the project mount directly — must
-    replace it, or the flag will look vestigial and get removed later by
-    someone tidying up.
+  - **`start-pi.sh` needed care.** The `--no-builtin-tools` flag *stayed*, but
+    its comment justified it in terms of `audited-tools` shadowing built-ins by
+    name. That rationale died with the extension, so it was replaced with the
+    real one — built-in `read`/`grep`/`find`/`edit` reaching the project mount
+    directly — plus an explicit warning not to remove the flag on the grounds
+    that there is no longer an extension to shadow anything.
   - **Tooling:** the entry in `run/install` and the case branch in
     `run/inc/fn/extensions.sh`.
   - **Docs:** the Mermaid node and extension-list entry in `README.md` (the
-    latter is already stale — it still describes the `read`/`write`/`ls` tools
-    removed earlier); `docs/solution.md` line 69 and the "Command execution
-    control" row of the hardening table, which becomes "none — the agent cannot
-    execute"; and `src/infrastructure/README.md`.
-  - **`permission-gate` cross-references:** historical rationale in
-    `index.ts`, `decision-log.ts`, `sensitive-files.ts`, and its README explains
-    that the sensitive-file rule "used to live in `audited-tools`". Keep the
-    rule, rewrite the provenance.
+    latter was already stale — it still described the `read`/`write`/`ls` tools
+    removed earlier); the tool-overriding passage and both affected hardening
+    table rows in `docs/solution.md`; the runbook, boundary-check table, and
+    audit-trail section in `src/infrastructure/README.md`; and the body of
+    `src/extensions/permission-gate/README.md`.
+  - **`permission-gate` cross-references:** historical rationale in `index.ts`,
+    `decision-log.ts`, `sensitive-files.ts`, and its README explained that the
+    sensitive-file rule "used to live in `audited-tools`". The rule was kept and
+    the provenance rewritten.
 
-  **This leaves dead code in `permission-gate`, which should go in the same
-  change.** With no `bash` tool and `--no-builtin-tools` in force, there is no
-  tool call carrying a `command` argument and no built-in `write`/`edit`/`bash`
-  to match:
+  **Dead code in `permission-gate` was removed in the same change.** With no
+  `bash` tool and `--no-builtin-tools` in force, there is no tool call carrying
+  a `command` argument and no built-in `write`/`edit`/`bash` to match:
 
-  - `policy.ts`: `MUTATING_BUILTINS` (`write`, `edit`, `bash`) can never match.
+  - `policy.ts`: `MUTATING_BUILTINS` (`write`, `edit`, `bash`) could never
+    match; folded into the single suffix list.
   - `policy.ts`: the `command` branch of `describeCall`, and with it the
-    truncation bug recorded below — which this change makes moot rather than
-    fixing.
+    truncation bug recorded below — made moot rather than fixed.
   - `sensitive-files.ts`: the `input.command` tokenising branch of
     `pathArguments`, which existed so `cat id_rsa` could be caught.
 
-  Decide deliberately whether to delete these or keep them as defence against a
-  future tool reintroducing a `command` argument. Deleting is the honest choice
-  and matches the reasoning for removing the extension; if they stay, they need
-  a comment saying they are dormant, or the next reader will assume `bash` is
-  still gated somewhere.
+  These were deleted rather than left dormant, which is the honest choice and
+  matches the reasoning for removing the extension. The tests that covered them
+  were kept as *inverted* assertions — `requiresConfirmation('bash') === false`,
+  `pathArguments({ command }) === []` — so reintroducing execution without also
+  gating it fails in the suite rather than in production.
 
   Note the `:ro` project mount **stays**. It is for the operator, and with no
   agent execution there is nothing left to fence it against — the agent has no
@@ -216,7 +215,7 @@ claimed and what is enforced.
   do not restore the extension — put it behind a process boundary instead: a
   container exposing a single `run_command` tool, carrying the same
   `shell: false` execution and control-operator rejection, with **no project
-  mount** and `--block-network`. That is strictly stronger than what is being
+  mount** and `--block-network`. That is strictly stronger than what was
   removed, because a compromised agent cannot reach around it.
 
   Design work already done, should this be picked up:
@@ -247,11 +246,11 @@ claimed and what is enforced.
   file access; or the project mount becoming writable, which would change the
   calculus entirely.
 
-- [ ] **`permission-gate` truncates the command it asks you to approve.**
-  *(Likely moot — removing `audited-tools`, above, deletes the only tool with a
-  `command` argument. Recorded because the analysis is what justifies deleting
-  the branch rather than leaving it dormant, and because it returns intact if
-  the deferred exec server is ever built.)*
+- [x] **`permission-gate` truncates the command it asks you to approve.**
+  *(Resolved by removal, not by fixing. The `command` branch is gone with
+  `audited-tools`, so no call reaches it. Kept as a record because the analysis
+  is what justified deleting the branch rather than leaving it dormant — and
+  because it returns intact if the deferred exec server is ever built.)*
 
   `policy.ts`'s `describeCall` runs `truncate(command, 120)`, and that string is
   both what the confirmation dialog shows and what lands in the audit trail as
