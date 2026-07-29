@@ -128,11 +128,14 @@ services:
       context: ../..
       dockerfile: src/infrastructure/pi-container/Dockerfile
     image: pi-agent:hardened
-    # Launch on the `capable` route (the proxy falls back to `fast` when the
-    # cloud model is unreachable — see litellm.config.yaml). The route is
-    # declared in the image's models.json; without an explicit --model Pi starts
-    # on its default provider (google) and reports "No models available".
-    command: ["--model", "litellm/capable"]
+    # NO `command:` here, deliberately. The image's default command is a shell
+    # that greets you with the available harnesses; you then start an agent
+    # explicitly with `start-pi`. Overriding it here is what previously dropped
+    # `--no-builtin-tools` from the launch, silently weakening the tool profile —
+    # those flags now live in `start-pi` inside the image.
+    #
+    # To go straight into the agent instead:
+    #   docker compose -f src/infrastructure/compose.yaml run --rm pi start-pi
     networks:
       - agent-net
     depends_on:
@@ -170,6 +173,10 @@ services:
       # Interactive approval: the permission-gate extension (step 7) requires
       # confirmation for mutating tool calls and logs every decision here.
       PERMISSION_GATE_LOG: "/var/log/pi/permission-gate/audit.jsonl"
+      # Model route `start-pi` launches on. `capable` falls back to `fast` at
+      # the proxy when the cloud model is unreachable (see litellm.config.yaml).
+      # Both routes are declared in the image's models.json.
+      PI_MODEL: "litellm/capable"
       PI_OFFLINE: "1"
       PI_SKIP_VERSION_CHECK: "1"
       PI_CODING_AGENT_SESSION_DIR: "/home/pi/sessions"

@@ -84,12 +84,34 @@ ENV PI_CODING_AGENT_SESSION_DIR=/home/pi/sessions
 RUN mkdir -p /home/pi/sessions && chown -R pi:pi /home/pi/sessions
 VOLUME ["/home/pi/sessions"]
 
+# ---------------------------------------------------------------------------
+# Harness launcher and greeting.
+#
+# The container deliberately does NOT start an agent. Entering it drops you in a
+# shell, and `.bashrc` prints the list of harnesses available inside. Starting an
+# agent is then an explicit act, not a side effect of `docker run`.
+#
+# `start-pi` carries the security-critical launch flags (--model,
+# --no-builtin-tools) so they live WITH the image rather than in a compose
+# `command:` that any caller can silently replace.
+# ---------------------------------------------------------------------------
+COPY src/infrastructure/pi-container/harnesses.sh /usr/local/bin/harnesses
+COPY src/infrastructure/pi-container/start-pi.sh  /usr/local/bin/start-pi
+RUN chmod 0555 /usr/local/bin/harnesses /usr/local/bin/start-pi
+COPY --chown=pi:pi src/infrastructure/pi-container/bashrc /home/pi/.bashrc
+
 # Drop to the unprivileged user for everything that follows.
 USER pi
 WORKDIR /home/pi
 
-# Pi is the entrypoint; model + MCP endpoints are supplied at runtime (compose).
-ENTRYPOINT ["pi"]
+# A shell, not an agent. `bash` is interactive-by-default here only because
+# compose allocates a TTY (stdin_open/tty); the greeting comes from .bashrc, so
+# it appears for `docker compose exec pi bash` too, which never runs an
+# entrypoint. Explicit commands still work: `docker run <image> start-pi`.
+#
+# No ENTRYPOINT: a compose `command:` should REPLACE the default shell (with,
+# say, `start-pi`), not be appended as arguments to it.
+CMD ["bash"]
 
 # ===========================================================================
 # RUNTIME hardening — applied by compose (step 4), NOT settable in a Dockerfile:

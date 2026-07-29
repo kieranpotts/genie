@@ -1,0 +1,32 @@
+#
+# Interactive shell setup for the `pi` user inside the hardened container.
+#
+# Installed to /home/pi/.bashrc. Bash reads this for interactive non-login
+# shells, which covers both ways into the container:
+#
+#   docker compose run --rm pi        (the image's default command)
+#   docker compose exec pi bash       (a second shell in a running container)
+#
+# An entrypoint script would only cover the first.
+#
+
+# Nothing below is useful to a non-interactive shell, and printing to one would
+# corrupt the output of `docker compose exec pi <command>`.
+case $- in
+  *i*) ;;
+    *) return ;;
+esac
+
+# The rootfs is read-only, so bash cannot write a history file; disable it
+# rather than let every shell exit fail noisily. Shell history in a disposable
+# agent container is not worth a writable mount, and the audit trails in
+# /var/log/pi are the record that matters.
+unset HISTFILE
+
+PS1='\[\033[34m\]pi-container\[\033[0m\]:\w\$ '
+
+# Greet with the harness menu. Guarded on a TTY so that a piped or redirected
+# interactive shell is not polluted.
+if [[ -t 1 ]] && command -v harnesses >/dev/null 2>&1; then
+  harnesses
+fi

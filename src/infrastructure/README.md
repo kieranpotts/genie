@@ -84,15 +84,47 @@ extensions are copied into `~/.pi/agent/extensions/` inside it.
 **4. Bring up the boundary**
 
 ```sh
-docker compose -f src/infrastructure/compose.yaml --env-file src/infrastructure/.env up
+docker compose -f src/infrastructure/compose.yaml --env-file src/infrastructure/.env up -d
 ```
 
 This starts `agent-net`, the project volume (bound to `PROJECT_PATH`), the
 `mcp-gateway` (which spawns and fronts the `mcp/filesystem` server over SSE),
-and the hardened `pi` container. Run Pi with `--no-builtin-tools` so the
-audited replacements are the only file tools.
+and the hardened `pi` container.
 
-**5. Verify the boundary**
+**5. Start an agent**
+
+The container does not start an agent by itself. Entering it drops you into a
+shell that lists the harnesses available inside:
+
+```sh
+docker compose -f src/infrastructure/compose.yaml exec pi bash
+```
+
+```
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ HARDENED AGENT CONTAINER                                                     ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+```
+
+Then start Pi with the security profile applied:
+
+```sh
+start-pi
+```
+
+`start-pi` supplies `--model` (the proxy route, from `PI_MODEL`) and
+`--no-builtin-tools`, so the audited replacements are the only file tools. These
+flags live in the image, not in `compose.yaml`, precisely so they cannot be lost
+by an override. Running `pi` directly bypasses them — use it only when debugging
+the harness itself. Re-show the harness list at any time with `harnesses`.
+
+To skip the shell and go straight into a throwaway agent session:
+
+```sh
+docker compose -f src/infrastructure/compose.yaml run --rm pi start-pi
+```
+
+**6. Verify the boundary**
 
 | Check | How | Expect |
 |---|---|---|
@@ -106,7 +138,7 @@ audited replacements are the only file tools.
 | Default-deny on timeout | ignore the prompt for 60s | the write is blocked; the permission-gate log shows `timed out (default deny)` |
 | Gateway starts hardened | `docker compose ... up` then `docker compose ... ps` | `mcp-gateway` is healthy with `cap_drop: ALL` + read-only rootfs. If it fails to start, relax `cap_drop` to the minimum it reports needing (see the compose comment). |
 
-**6. Inspect the audit trail**
+**7. Inspect the audit trail**
 
 Both logs live on the `pi-logs` volume, outside the agent's read-only rootfs:
 
