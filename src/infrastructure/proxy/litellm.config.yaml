@@ -1,11 +1,16 @@
 # =============================================================================
 # LiteLLM proxy configuration — the host-side model router.
 #
-# This is the ONLY component that holds cloud API keys. The agent container is
-# given only this proxy's endpoint and a master key; it never receives an
-# ANTHROPIC_API_KEY / OPENAI_API_KEY. See:
-#   - docs/local-agent-architecture.md  (Model routing, Approach 2)
-#   - src/infrastructure/.env.example            (the host env contract)
+# The agent container is given only this proxy's endpoint and a master key. No
+# provider credential of any kind reaches it. See:
+#   - docs/solution.md                  (Model routing)
+#   - src/infrastructure/.env.example   (the host env contract)
+#
+# NOTE ON CREDENTIALS: every route now targets the host Ollama daemon, so this
+# proxy holds no cloud API key at all. When a modelfiles profile is cloud-backed,
+# the daemon relays to ollama.com under ITS OWN identity (~/.ollama/id_ed25519) —
+# so the secret that reaches a provider belongs to the daemon, not to this file.
+# ANTHROPIC_API_KEY / OPENAI_API_KEY in `.env` are currently unused.
 #
 # All `os.environ/NAME` values are resolved at runtime from the host `.env`
 # (loaded by the proxy process), never written literally into this file.
@@ -18,42 +23,61 @@
 model_list:
   # ---------------------------------------------------------------------------
   # Routing aliases — what the agent selects with Pi's /model command.
-  # `fast` keeps data on the machine; `capable` reaches a frontier cloud model.
+  #
+  # Each route is a ROLE. Each target is a CAPABILITY: a custom Ollama model
+  # built by the modelfiles project, named for what it is good at rather than
+  # for who is using it. The role/capability split is the seam between the two
+  # projects, and it runs in both directions:
+  #
+  #   role          this file          the agent's job    (Pi's system prompt)
+  #   capability    models.yaml        the model's tuning (temperature, num_ctx)
+  #
+  # WHETHER A CAPABILITY IS CLOUD OR LOCAL IS NOT DECIDED HERE. That is the
+  # modelfiles profile — `./run/build` for cloud-backed models, `./run/build
+  # workstation` for local ones — and it is deliberately out of scope for this
+  # project. These names resolve to whichever profile was built and created in
+  # Ollama, so the same config serves a laptop and a workstation unchanged.
+  #
+  # Every route therefore goes to the host Ollama daemon. That holds even for
+  # cloud-backed profiles: the daemon relays those to ollama.com itself, so the
+  # proxy's view is uniform and OLLAMA_HOST is the only endpoint it needs.
+  #
+  # Each name must exist in Ollama (`ollama list`) or requests 404. Create them
+  # from the modelfiles project:
+  #   ollama create <capability> -f ./dist/<profile>/<capability>/Modelfile
   # ---------------------------------------------------------------------------
 
-  # Local, low-latency, no data leaves the machine. Ollama on the host,
-  # reachable from the proxy via the bridge gateway.
-  - model_name: fast
+  # Writes and modifies code. Lowest temperature (0.2) and the largest context
+  # of the set — the capability is tuned for correct, deterministic output.
+  - model_name: computer-programmer
     litellm_params:
-      model: ollama/llama3.1
+      model: ollama/computer-programming
       api_base: os.environ/OLLAMA_HOST
       api_key: none
 
-  # Frontier capability for harder tasks. Key held here, on the host, only.
-  - model_name: capable
+  # Reasons about requirements, designs, and trade-offs. Balanced temperature
+  # (0.5) to explore options without drifting from the requirements.
+  - model_name: technical-lead
     litellm_params:
-      model: anthropic/claude-sonnet-4-6
-      api_key: os.environ/ANTHROPIC_API_KEY
-
-  # ---------------------------------------------------------------------------
-  # Explicit provider models — available by exact name for deliberate selection.
-  # Each cloud entry reads its key from the environment only.
-  # ---------------------------------------------------------------------------
-  - model_name: ollama/llama3.1
-    litellm_params:
-      model: ollama/llama3.1
+      model: ollama/technical-reasoning
       api_base: os.environ/OLLAMA_HOST
       api_key: none
 
-  - model_name: claude-sonnet-4-6
+  # Writes documentation and prose. Backed by the `prose-writing` capability —
+  # the role is a writer, the capability is the writing itself.
+  - model_name: technical-writer
     litellm_params:
-      model: anthropic/claude-sonnet-4-6
-      api_key: os.environ/ANTHROPIC_API_KEY
+      model: ollama/prose-writing
+      api_base: os.environ/OLLAMA_HOST
+      api_key: none
 
-  - model_name: gpt-4o
+  # Threat modeling and risk assessment. Temperature 0.4 — rigorous, but with
+  # enough latitude to surface non-obvious attack paths.
+  - model_name: security-analyst
     litellm_params:
-      model: openai/gpt-4o
-      api_key: os.environ/OPENAI_API_KEY
+      model: ollama/security-analysis
+      api_base: os.environ/OLLAMA_HOST
+      api_key: none
 
 litellm_settings:
   # Retry transient provider failures before surfacing an error to the agent.
@@ -62,11 +86,11 @@ litellm_settings:
   # Drop unsupported params rather than erroring when routing between providers
   # with different parameter sets (e.g. local Ollama vs. cloud).
   drop_params: true
-  # If the cloud "capable" route is unreachable (offline, outage, missing key),
-  # fall back to the local model so the agent keeps working without leaking
-  # data to a provider it could not otherwise reach.
-  fallbacks:
-    - capable: ["fast"]
+  # NO fallbacks. The previous `capable: ["fast"]` chain made sense when the
+  # routes differed by POWER and a cloud outage could degrade to local. These
+  # routes differ by ROLE: silently serving a security-analyst request from the
+  # prose-writing model would answer with the wrong tuning and no signal to the
+  # operator. A role that cannot be served should fail loudly.
 
 general_settings:
   # The agent authenticates to the proxy with this token. It is a low-value,

@@ -55,7 +55,7 @@ COPY --chown=pi:pi src/extensions/permission-gate/        /home/pi/.pi/agent/ext
 
 # ---------------------------------------------------------------------------
 # Model routing. Pi has no built-in knowledge of the host LiteLLM proxy; it
-# discovers the `capable`/`fast` routes ONLY through this models.json, which
+# discovers the role routes ONLY through this models.json, which
 # declares the proxy as an OpenAI-compatible provider. Without it Pi falls back
 # to its default provider (google) with no key and reports "No models
 # available". The proxy token is interpolated at runtime from

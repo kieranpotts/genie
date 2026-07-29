@@ -194,11 +194,11 @@ The diagram below shows the trust boundaries, and what data crosses them.
 ```mermaid
 flowchart TB
   subgraph Host["Host machine"]
-    Ollama["<b>Ollama :11434</b><br/>(bridge gateway only)"]
-    Proxy["<b>LiteLLM proxy :4000</b><br/>(holds cloud model API keys)"]
-    Cloud["<b>Anthropic / OpenAI</b><br/>(cloud)"]
-    Proxy -->|"capable route"| Cloud
-    Proxy -->|"fast or cheap route"| Ollama
+    Ollama["<b>Ollama :11434</b><br/>(capability models)"]
+    Proxy["<b>LiteLLM proxy :4000</b><br/>(role → capability routing)"]
+    Cloud["<b>ollama.com</b><br/>(cloud-backed profiles only)"]
+    Proxy -->|"role routes"| Ollama
+    Ollama -.->|"relayed by the daemon,<br/>cloud profiles only"| Cloud
   end
 
   subgraph Net["Docker network: agent-net"]
@@ -227,11 +227,16 @@ The view below adds some concrete mount/volume detail.
 ```
 Host Machine
 │
-├── Ollama :11434 - bound to bridge gateway only, not 0.0.0.0
+├── Ollama :11434 - on loopback; the proxy runs on the host and reaches it there
+│     └── capability models built by the modelfiles project. The profile built
+│         there decides local vs. cloud-backed; cloud ones are relayed to
+│         ollama.com by the daemon, under the daemon's own identity.
 │
-├── LiteLLM proxy :4000 - holds cloud model API keys, dynamic routing
-│     ├── routes "fast/cheap" → Ollama local model
-│     └── routes "capable"    → Anthropic / OpenAI cloud
+├── LiteLLM proxy :4000 - routes a ROLE to a CAPABILITY; holds no provider key
+│     ├── "computer-programmer" → Ollama computer-programming
+│     ├── "technical-lead"      → Ollama technical-reasoning
+│     ├── "technical-writer"    → Ollama prose-writing
+│     └── "security-analyst"    → Ollama security-analysis
 │
 └── Docker network: agent-net
     │

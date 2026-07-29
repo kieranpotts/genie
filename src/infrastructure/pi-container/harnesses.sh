@@ -63,7 +63,7 @@ echo ""
 
 printf '%b%bThis environment:%b\n' "${BOLD}" "${BLUE}" "${RESET}"
 echo ""
-printf '  Model routes        %s (via the host LiteLLM proxy)\n' "${PI_MODEL:-litellm/capable}"
+printf '  Role                %s (via the host LiteLLM proxy)\n' "${PI_MODEL:-litellm/computer-programmer}"
 printf '  Project files       only through the MCP gateway (%s)\n' "${MCP_GATEWAY_URL:-unset}"
 printf '  Sessions            %s\n' "${PI_CODING_AGENT_SESSION_DIR:-unset}"
 echo "  Audit trails        /var/log/pi/"

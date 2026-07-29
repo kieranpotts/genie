@@ -103,15 +103,121 @@ check_env() {
   print_success "Host env contract validated (${env_file})."
 }
 
+# check_ollama - Verify OLLAMA_HOST points at a daemon that has models.
+#
+# The proxy resolves `os.environ/OLLAMA_HOST` as the `api_base` for the Ollama
+# routes, and it runs ON THE HOST -- so this should be loopback, not the bridge
+# gateway. Nothing in a container talks to Ollama directly.
+#
+# The failure this catches: a SECOND `ollama serve` bound to the bridge gateway
+# runs under a different home directory, so it has an empty model store and a
+# freshly generated ~/.ollama/id_ed25519 that is not associated with any
+# ollama.com account. Every `:cloud` model then fails with
+# `{"error":"Unauthorized"}`, which reaches the operator as an opaque LiteLLM
+# 500 mid-conversation rather than as a startup error. An empty model list is
+# the cheap, reliable tell.
+#
+# Warns rather than exits: a purely cloud-routed config needs no local models.
+#
+check_ollama() {
+  if [[ -z "${OLLAMA_HOST:-}" ]]; then
+    print_warning "OLLAMA_HOST is not set in ${env_file}; the Ollama routes will not resolve."
+    return 0
+  fi
+
+  # Tolerate a bare host:port -- `api_base` needs a scheme, but the variable is
+  # also documented as an Ollama bind address, which has none.
+  local base="${OLLAMA_HOST}"
+  [[ "${base}" == http://* || "${base}" == https://* ]] || base="http://${base}"
+
+  local tags
+  if ! tags=$(curl -sf -m 5 "${base}/api/tags" 2>/dev/null); then
+    print_warning "No Ollama daemon answered at ${base}. The Ollama routes will fail."
+    print_info "The proxy runs on the host, so this is usually http://127.0.0.1:11434."
+    return 0
+  fi
+
+  # Matching the empty-list shape, whitespace-insensitively.
+  if [[ "${tags//[[:space:]]/}" == '{"models":[]}' ]]; then
+    print_warning "The Ollama daemon at ${base} has NO models."
+    print_info "This is the wrong daemon -- a second 'ollama serve' has its own empty"
+    print_info "model store and an unregistered identity, so :cloud models return"
+    print_info "Unauthorized. Point OLLAMA_HOST at the daemon holding your models"
+    print_info "(usually http://127.0.0.1:11434) rather than at the bridge gateway."
+    return 0
+  fi
+
+  print_success "Ollama reachable at ${base}."
+}
+
+# stop_stale_proxy - Stop any LiteLLM proxy already on the configured port.
+#
+# The proxy reads litellm.config.yaml ONCE and resolves every `os.environ/NAME`
+# ONCE, both at startup. A proxy left over from an earlier run therefore keeps
+# serving the OLD routes with the OLD environment, however much has changed on
+# disk since. Reusing it -- which this function used to do -- silently discards
+# every edit to `.env` and to the proxy config, and the failure surfaces much
+# later as a confusing model error rather than as a config problem.
+#
+# So a running proxy is always REPLACED, never reused.
+#
+stop_stale_proxy() {
+  if ! curl -sf "http://${LITELLM_HOST}:${LITELLM_PORT}/health/liveliness" &> /dev/null; then
+    return 0
+  fi
+
+  print_info "A LiteLLM proxy is already running on ${LITELLM_HOST}:${LITELLM_PORT}."
+  print_info "Restarting it so it picks up the current config and environment."
+
+  # `ss` reports the PID only for processes owned by this user, which the proxy
+  # is when started by this script. pgrep is the fallback for a proxy started
+  # by hand (eg. the runbook's step 2).
+  local pid
+  pid=$(ss -lntpH "sport = :${LITELLM_PORT}" 2>/dev/null | grep -oP 'pid=\K[0-9]+' | head -1)
+  if [[ -z "${pid}" ]]; then
+    pid=$(pgrep -f "litellm .*--port ${LITELLM_PORT}" | head -1)
+  fi
+
+  if [[ -z "${pid}" ]]; then
+    print_error "Could not identify the process listening on ${LITELLM_HOST}:${LITELLM_PORT}."
+    print_info "It may belong to another user. Stop it, then re-run this script."
+    exit 1
+  fi
+
+  kill "${pid}" 2>/dev/null || true
+
+  # Wait for the port to actually free; binding while the old process still
+  # holds it would fail in a much less obvious way.
+  local waited=0
+  local timeout=15
+  while curl -sf "http://${LITELLM_HOST}:${LITELLM_PORT}/health/liveliness" &> /dev/null; do
+    if (( waited >= timeout )); then
+      print_warning "Proxy ${pid} did not stop within ${timeout}s; sending SIGKILL."
+      kill -9 "${pid}" 2>/dev/null || true
+      sleep 2
+      break
+    fi
+    sleep 1
+    (( waited += 1 ))
+  done
+
+  if curl -sf "http://${LITELLM_HOST}:${LITELLM_PORT}/health/liveliness" &> /dev/null; then
+    print_error "Could not free ${LITELLM_HOST}:${LITELLM_PORT} (process ${pid} still listening)."
+    exit 1
+  fi
+
+  print_success "Previous proxy (pid ${pid}) stopped."
+}
+
 # start_proxy - Start the LiteLLM proxy on the host, in the background.
+#
+# Always starts a FRESH process, so the run reflects the current
+# litellm.config.yaml and `.env`. See stop_stale_proxy.
 #
 # Sets the module-level `proxy_pid`, used by cleanup to stop it on exit.
 #
 start_proxy() {
-  if curl -sf "http://${LITELLM_HOST}:${LITELLM_PORT}/health/liveliness" &> /dev/null; then
-    print_info "LiteLLM proxy already running on ${LITELLM_HOST}:${LITELLM_PORT}. Reusing it."
-    return 0
-  fi
+  stop_stale_proxy
 
   print_info "Starting LiteLLM proxy on ${LITELLM_HOST}:${LITELLM_PORT} (log: ${proxy_log})."
   litellm --config "${infra_dir}/proxy/litellm.config.yaml" \

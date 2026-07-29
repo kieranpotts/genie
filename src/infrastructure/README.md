@@ -58,7 +58,29 @@ cp src/infrastructure/.env.example src/infrastructure/.env
 #   - MCP_GATEWAY_AUTH_TOKEN  = $(openssl rand -hex 32)
 ```
 
-Ensure Ollama is bound to the bridge gateway (`OLLAMA_HOST`), not `0.0.0.0`.
+`OLLAMA_HOST` is the address **the proxy** uses to reach Ollama, and the proxy
+runs on the host — so it should point at your existing Ollama daemon on
+loopback:
+
+```sh
+OLLAMA_HOST=http://127.0.0.1:11434
+```
+
+Nothing in a container ever talks to Ollama directly. The agent reaches models
+only through LiteLLM, and reaches LiteLLM via `LITELLM_HOST` — which *is* the
+bridge gateway. Only that one needs to be.
+
+> [!WARNING]
+> Do not start a second `ollama serve` bound to the bridge gateway to satisfy
+> this. A second daemon runs under a different home directory, so it has its own
+> (empty) model store and its own freshly generated `~/.ollama/id_ed25519` — an
+> identity not associated with your ollama.com account. Requests to it fail with
+> `{"error":"Unauthorized"}` for any `:cloud` model, which surfaces in the agent
+> as a LiteLLM `APIConnectionError - OllamaException`. Check with:
+>
+> ```sh
+> curl -s "$OLLAMA_HOST/api/tags"   # must list your models, not {"models":[]}
+> ```
 
 **2. Start the model proxy on the host**
 
@@ -68,9 +90,29 @@ litellm --config src/infrastructure/proxy/litellm.config.yaml \
         --host "$LITELLM_HOST" --port "$LITELLM_PORT"
 ```
 
-Exposes `fast` (local Ollama) and `capable` (cloud); `capable` falls back to
-`fast` when the cloud is unreachable. The proxy holds the cloud keys; the agent
-never will.
+Exposes one route per role — `computer-programmer`, `technical-lead`,
+`technical-writer`, `security-analyst` — each backed by a capability-tuned
+Ollama model from the [modelfiles][modelfiles] project. The agent never holds a
+provider credential of any kind.
+
+Those Ollama models must exist before the routes resolve:
+
+```sh
+ollama list   # expects computer-programming, technical-reasoning,
+              #         prose-writing, security-analysis
+```
+
+If any are missing, build and create them from the modelfiles project. Whether
+they are cloud-backed or local is that project's `profile` decision, and is
+deliberately out of scope here:
+
+```sh
+./run/build                # cloud-backed models
+./run/build workstation    # local models
+ollama create <capability> -f ./dist/<profile>/<capability>/Modelfile
+```
+
+[modelfiles]: https://github.com/kieranpotts/modelfiles
 
 **3. Build the hardened agent image**
 

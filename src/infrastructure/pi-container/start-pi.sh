@@ -25,10 +25,12 @@
 
 set -euo pipefail
 
-# Model route. Overridable from compose via PI_MODEL so the route can be
-# switched without rebuilding the image; `capable` falls back to `fast` at the
-# proxy when the cloud model is unreachable (see proxy/litellm.config.yaml).
-model="${PI_MODEL:-litellm/capable}"
+# Model route. Each proxy route is a ROLE (computer-programmer, technical-lead,
+# technical-writer, security-analyst) backed by a capability-tuned Ollama model
+# — see proxy/litellm.config.yaml. `computer-programmer` is the default because
+# this is a coding agent; switch roles at runtime with Pi's /model command, or
+# per-container by overriding PI_MODEL, without rebuilding the image.
+model="${PI_MODEL:-litellm/computer-programmer}"
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   echo "Usage: start-pi [pi-arguments...]"

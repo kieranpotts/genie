@@ -162,7 +162,7 @@ services:
     environment:
       # Model access: proxy token ONLY. No cloud API keys. The proxy ENDPOINT is
       # declared in the image's models.json (pi-container/models.json) — Pi reads
-      # that to expose the `capable`/`fast` routes; it does not read a bare
+      # that to expose the role routes; it does not read a bare
       # endpoint env var. models.json pins host-gateway:4000, so keep it in sync
       # with LITELLM_PORT if you change the proxy port. This token is interpolated
       # into models.json's `apiKey` at runtime (`$LITELLM_MASTER_KEY`).
@@ -182,10 +182,12 @@ services:
       # Interactive approval: the permission-gate extension (step 7) requires
       # confirmation for mutating tool calls and logs every decision here.
       PERMISSION_GATE_LOG: "/var/log/pi/permission-gate/audit.jsonl"
-      # Model route `start-pi` launches on. `capable` falls back to `fast` at
-      # the proxy when the cloud model is unreachable (see litellm.config.yaml).
-      # Both routes are declared in the image's models.json.
-      PI_MODEL: "litellm/capable"
+      # Role `start-pi` launches on. The proxy exposes one route per role —
+      # computer-programmer, technical-lead, technical-writer, security-analyst
+      # — each backed by a capability-tuned Ollama model (litellm.config.yaml).
+      # All four are declared in the image's models.json; Pi's /model command
+      # switches between them at runtime.
+      PI_MODEL: "litellm/computer-programmer"
       PI_OFFLINE: "1"
       PI_SKIP_VERSION_CHECK: "1"
       PI_CODING_AGENT_SESSION_DIR: "/home/pi/sessions"
