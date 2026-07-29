@@ -55,8 +55,15 @@ cp src/infrastructure/.env.example src/infrastructure/.env
 #   - ANTHROPIC_API_KEY / OPENAI_API_KEY   (held by the proxy only)
 #   - PROJECT_PATH=/absolute/path/to/the/one/project
 #   - LITELLM_MASTER_KEY      = $(openssl rand -hex 32)
-#   - MCP_GATEWAY_AUTH_TOKEN  = $(openssl rand -hex 32)
 ```
+
+> [!NOTE]
+> There is no `MCP_GATEWAY_AUTH_TOKEN`. The Docker MCP gateway enforces bearer
+> auth only when bound to localhost outside a container; in the compose stack it
+> logs `Authentication disabled (running in container)` and ignores any token
+> set. Reachability of port 8811 is scoped by the private `agent-net` bridge
+> instead — it is not published to the host, and the pi container is its only
+> other member. If you have the variable in an existing `.env`, delete it.
 
 `OLLAMA_HOST` is the address **the proxy** uses to reach Ollama, and the proxy
 runs on the host — so it should point at your existing Ollama daemon on

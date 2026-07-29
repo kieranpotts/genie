@@ -30,7 +30,14 @@ import {
 
 /** Where to reach the MCP gateway. Set by compose for the hardened container. */
 const GATEWAY_URL_ENV = 'MCP_GATEWAY_URL'
-/** Bearer token guarding the gateway's localhost endpoint (anti-DNS-rebinding). */
+/**
+ * Optional bearer token for the gateway endpoint. Unset in the hardened
+ * container: the Docker MCP gateway enforces auth only when bound to localhost
+ * outside a container, and reachability there is scoped by a private bridge
+ * network instead. Kept because a deployment that fronts the gateway with a
+ * reverse proxy — or a future Toolkit that enforces it — needs the header; when
+ * the variable is absent no Authorization header is sent.
+ */
 const GATEWAY_TOKEN_ENV = 'MCP_GATEWAY_AUTH_TOKEN'
 
 export default function (pi: ExtensionAPI): void {

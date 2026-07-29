@@ -16,16 +16,37 @@ does not do what the design says.
   and `start-pi` is the supported way in — so `--model` and
   `--no-builtin-tools` can no longer be lost to an override.
 
-- [ ] **Resolve the `AUDITED_TOOLS_ROOT` mismatch.**
-  `compose.yaml:168` sets `AUDITED_TOOLS_ROOT=/projects/active`, but the `pi`
-  service mounts only `pi-sessions` and `pi-logs` — deliberately no project
-  mount. Every audited `read`/`write`/`ls` therefore resolves into a directory
-  that does not exist, and `bash` sets `cwd` to it so spawns fail outright. The
-  "even if the MCP boundary is bypassed" defence-in-depth claim
-  (`src/extensions/audited-tools/index.ts:8-11`, and the first row of the
-  hardening table) does not hold as deployed: all real file access is via
-  `mcp_*`, and `audited-tools` guards nothing reachable. Either give the
-  extension something to guard, or reclassify it in the design.
+- [x] **Resolve the `AUDITED_TOOLS_ROOT` mismatch.**
+  Resolved by reclassifying the extension rather than giving it a project mount,
+  which would have contradicted the design's central claim that the agent never
+  holds one. The audited `read`/`write`/`ls` and their path guard were removed:
+  they were rooted at a path that exists only in the MCP filesystem server's
+  container, so every call failed while being audited as *allowed*. MCP is now
+  the sole, honest route to files. `bash` remains, re-rooted to `AUDITED_BASH_CWD`
+  (`/home/pi`) and documented as a guard on local execution only.
+
+  The one control the removed tools carried that the MCP server does not
+  replicate — refusing sensitive filenames — was lifted into `permission-gate`
+  (`sensitive-files.ts`), whose `tool_call` hook sees every call including the
+  `mcp_*` ones. Net effect: a strictly wider guarantee than the one that was
+  claimed but not delivered. `mcp_read_file` on a project's `.env` was possible
+  before this change and is refused now.
+
+- [x] **Make the audit trails actually write.**
+  The `pi-logs` volume mounted at `/var/log/pi` was owned `root:root` while the
+  agent runs as uid 1001, so neither extension could create its log directory —
+  and both swallow write failures by design, so the audit trail was silently
+  absent rather than erroring. The image now creates `/var/log/pi/{audited-tools,
+  permission-gate}` owned by `pi`, which Docker uses to seed a new named volume.
+  An existing volume keeps its old ownership and must be removed once to re-seed.
+
+- [x] **Drop the inert `MCP_GATEWAY_AUTH_TOKEN`.**
+  The gateway enforces bearer auth only when bound to localhost outside a
+  container; in the compose stack it logs `Authentication disabled (running in
+  container)` and ignores the token. It was a control in name only. Removed from
+  both services, the startup preflight, and the runbook; reachability is scoped
+  by the private `agent-net` bridge, which is now stated as the actual control.
+  The `mcp-client` still sends the header if the variable is ever set.
 
 - [ ] **Enforce network egress control, or drop the claim.**
   The hardening table says the container "reaches the model only via the host

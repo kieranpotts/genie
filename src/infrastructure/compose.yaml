@@ -43,6 +43,11 @@ volumes:
   # Audit trails (permission-gate + audited-tools). A separate volume from
   # sessions so the accountability logs have their own lifecycle and can be
   # retained/shipped independently of transcripts.
+  #
+  # The agent runs as uid 1001, so this volume must be owned by it or the logs
+  # fail silently. Ownership is seeded from the image's /var/log/pi, which means
+  # a volume created before that Dockerfile layer existed is still root-owned:
+  # `docker volume rm pi-secure-agent_pi-logs` to re-seed it. See the Dockerfile.
   pi-logs:
 
 services:
@@ -91,9 +96,15 @@ services:
       # Required because the gateway orchestrates MCP server containers. This is
       # the ONE place a Docker socket is granted — never to the agent.
       - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      # Localhost auth token guarding the SSE endpoint against DNS rebinding.
-      MCP_GATEWAY_AUTH_TOKEN: "${MCP_GATEWAY_AUTH_TOKEN:?set MCP_GATEWAY_AUTH_TOKEN in src/infrastructure/.env}"
+    # No auth token on this endpoint, deliberately. The gateway enforces bearer
+    # auth only when it binds to localhost OUTSIDE a container, where the threat
+    # is DNS rebinding from a browser on the same host; running in a container it
+    # logs "Authentication disabled" and ignores the token entirely. Setting one
+    # bought nothing except the appearance of a control.
+    #
+    # What actually scopes reachability is the network: `agent-net` is a private
+    # bridge, port 8811 is not published to the host, and the only other member
+    # is the pi container. Nothing outside the compose project can address it.
     # Hardening. The gateway is the most privileged container here (it holds the
     # Docker socket), so it is hardened as far as that role allows:
     #   - no-new-privileges: cannot gain privileges via setuid binaries.
@@ -168,19 +179,20 @@ services:
       # into models.json's `apiKey` at runtime (`$LITELLM_MASTER_KEY`).
       LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in src/infrastructure/.env}"
       # Filesystem access: the MCP gateway's streamable-HTTP endpoint on
-      # agent-net (used by the mcp-client extension, step 5) plus the auth token
-      # guarding it. The path is /mcp because the gateway runs
+      # agent-net, used by the mcp-client extension. This is the agent's ONLY
+      # route to project files. The path is /mcp because the gateway runs
       # --transport=streaming (above); the old /sse path only 307-redirects here.
+      # No auth token — see the note on the gateway service.
       MCP_GATEWAY_URL: "http://mcp-gateway:8811/mcp"
-      MCP_GATEWAY_AUTH_TOKEN: "${MCP_GATEWAY_AUTH_TOKEN:?set MCP_GATEWAY_AUTH_TOKEN in src/infrastructure/.env}"
-      # Defence in depth: the audited-tools extension (step 6) confines its
-      # read/write/ls replacements to this root and logs every call. The log
-      # lives on the dedicated pi-logs volume, outside the read-only rootfs; the
-      # extension creates its subdirectory on first write.
-      AUDITED_TOOLS_ROOT: "/projects/active"
+      # Working directory for the audited-tools `bash` replacement. NOT a project
+      # path: this container has no project mount, so bash cannot reach project
+      # files and is a guard on local execution only. /home/pi is used because it
+      # is the one directory guaranteed to exist here.
+      AUDITED_BASH_CWD: "/home/pi"
       AUDITED_TOOLS_LOG: "/var/log/pi/audited-tools/audit.jsonl"
-      # Interactive approval: the permission-gate extension (step 7) requires
-      # confirmation for mutating tool calls and logs every decision here.
+      # Interactive approval: the permission-gate extension requires confirmation
+      # for mutating tool calls, refuses sensitive filenames outright on every
+      # call (including the mcp_* ones), and logs every decision here.
       PERMISSION_GATE_LOG: "/var/log/pi/permission-gate/audit.jsonl"
       # Role `start-pi` launches on. The proxy exposes one route per role —
       # computer-programmer, technical-lead, technical-writer, security-analyst

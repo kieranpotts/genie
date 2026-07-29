@@ -80,7 +80,7 @@ check_env() {
   set +a
 
   local var
-  for var in LITELLM_HOST LITELLM_PORT LITELLM_MASTER_KEY MCP_GATEWAY_AUTH_TOKEN PROJECT_PATH; do
+  for var in LITELLM_HOST LITELLM_PORT LITELLM_MASTER_KEY PROJECT_PATH; do
     if [[ -z "${!var:-}" ]]; then
       print_error "${var} is not set in ${env_file}."
       exit 1
@@ -90,15 +90,14 @@ check_env() {
   # Catch the common mistake of pasting the *instruction* rather than running
   # it: `.env` files are not shell-evaluated, so a literal `$(openssl ...)`
   # is used as-is rather than expanded.
-  for var in LITELLM_MASTER_KEY MCP_GATEWAY_AUTH_TOKEN; do
-    # Matching the literal characters `$(`, not expanding them.
-    # shellcheck disable=SC2016
-    if [[ "${!var}" == '$('* ]]; then
-      print_error "${var} in ${env_file} looks like an unevaluated command substitution: ${!var}"
-      print_info "Generate a real value, eg: sed -i \"s|^${var}=.*|${var}=\$(openssl rand -hex 32)|\" ${env_file}"
-      exit 1
-    fi
-  done
+  #
+  # Matching the literal characters `$(`, not expanding them.
+  # shellcheck disable=SC2016
+  if [[ "${LITELLM_MASTER_KEY}" == '$('* ]]; then
+    print_error "LITELLM_MASTER_KEY in ${env_file} looks like an unevaluated command substitution: ${LITELLM_MASTER_KEY}"
+    print_info "Generate a real value, eg: sed -i \"s|^LITELLM_MASTER_KEY=.*|LITELLM_MASTER_KEY=\$(openssl rand -hex 32)|\" ${env_file}"
+    exit 1
+  fi
 
   print_success "Host env contract validated (${env_file})."
 }

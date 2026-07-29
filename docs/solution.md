@@ -258,10 +258,11 @@ to what's described above.
 
 | Requirement                         | Hardening solution                                                                                                                                                      |
 |-------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Filesystem access control           | File access mediated by MCP server, connected by `mcp-client` extension. Plus `audited-tools` extension enforces a path allowlist and blocks access to sensitive files. |
-| Command execution control           | `bash` replacement (via `audited-tools`) never invokes a shell, rejects control operators, and runs only allowlisted programs.                                          |
+| Filesystem access control           | ALL file access mediated by the MCP server, reached by the `mcp-client` extension. The agent container has no project mount, so there is no unmediated path to guard.   |
+| Command execution control           | `bash` replacement (via `audited-tools`) never invokes a shell, rejects control operators, and runs only allowlisted programs. Guards local execution; cannot reach project files. |
 | Permission prompts / approval gates | `permission-gate` extension requires interactive confirmation for writes/edits/execution (`tool_call` events). Denies access by default.                                |
-| Audit log of tool calls             | Append-only JSONL logs, on a dedicated volume, for every fs/bash call and every tool approve/deny decision.                                                             |
+| Sensitive-file refusal              | `permission-gate` refuses any call naming secrets or key material (`.env*`, `id_rsa`, `*.pem`, `*.key`, …) on filename patterns. Absolute — no approval path — and applied to every tool call, `mcp_*` included. |
+| Audit log of tool calls             | Append-only JSONL logs, on a dedicated volume, for every bash call and every tool approve/deny decision. The volume must be owned by the agent's uid or logging fails silently. |
 | API key isolation from agent        | Host-side LiteLLM proxy holds API keys (eg. `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`). Agent container gets a proxy endpoint + low-value rotatable proxy token.             |
 | Extension vetting / signing         | Extensions require manual review. Third-party packages MUST be pinned to exact versions/commit hashes.                                                                  |
 | Network egress control              | Container has no host networking. Reaches the model only via the host proxy over a private bridge network.                                                              |
@@ -269,7 +270,7 @@ to what's described above.
 | Startup telemetry / network calls   | `PI_OFFLINE=1` / `PI_SKIP_VERSION_CHECK=1` disable Pi's built-in telemetry and version-check calls, so the only outbound network is the proxy and the MCP gateway.      |
 | Session data retention              | `sessionDir` set to a named volume outside the project tree (`pi-sessions`). JSONL logs hold the full conversation, including file content reads.                       |
 | Session data encryption at rest     | NOT IMPLEMENTED. Depends on the host volume back-end (eg. an encrypted disk).                                                                                           |
-| Data classification                 | NOT IMPLEMENTED. No extension currently inspects tool content by sensitivity beyond the filename-pattern refusal in `path-guard.ts`.                                    |
+| Data classification                 | NOT IMPLEMENTED. No extension inspects tool *content* by sensitivity; the filename-pattern refusal in `permission-gate/sensitive-files.ts` classifies by name only.     |
 | Prompt injection defense            | OUT-OF-SCOPE for the agent harness. This is a model-level concern.                                                                                                      |
 
 [docker-mcp-toolkit]: https://docs.docker.com/ai/mcp-catalog-and-toolkit/toolkit/

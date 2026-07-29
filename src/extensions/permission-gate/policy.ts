@@ -27,12 +27,26 @@ export function requiresConfirmation (toolName: string): boolean {
   return MUTATING_CUSTOM_SUFFIXES.some((s) => lower === s || lower.endsWith(`_${s}`) || lower.endsWith(s))
 }
 
-/** A short, human-readable summary of what is being confirmed. Pure. */
+/**
+ * A short, human-readable summary of what is being confirmed — shown in the
+ * approval prompt and recorded as the audit trail's `detail`. Covers the MCP
+ * filesystem server's argument shapes as well as the simple `path`/`command`
+ * ones, so a multi-file read or a move is not logged as a bare tool name. Pure.
+ */
 export function describeCall (toolName: string, input: Record<string, unknown>): string {
-  const path = typeof input.path === 'string' ? input.path : undefined
   const command = typeof input.command === 'string' ? input.command : undefined
   if (command) return `${toolName}: ${truncate(command, 120)}`
+
+  const path = typeof input.path === 'string' ? input.path : undefined
   if (path) return `${toolName}: ${path}`
+
+  const source = typeof input.source === 'string' ? input.source : undefined
+  const destination = typeof input.destination === 'string' ? input.destination : undefined
+  if (source && destination) return `${toolName}: ${source} -> ${destination}`
+
+  const paths = Array.isArray(input.paths) ? input.paths.filter((p) => typeof p === 'string') : []
+  if (paths.length > 0) return `${toolName}: ${truncate(paths.join(', '), 120)}`
+
   return toolName
 }
 

@@ -1,9 +1,9 @@
 /**
- * Shared tool-result shapes for the audited tool replacements.
+ * Tool-result shapes for the audited tool replacement.
  *
- * Both the filesystem tools (`register-fs.ts`) and the command tool
- * (`register-bash.ts`) return results in the same `{ content, isError }` shape
- * Pi expects, so those constructors live here rather than being duplicated.
+ * The command tool (`register-bash.ts`) returns results in the `{ content,
+ * isError }` shape Pi expects. These constructors keep that shape in one place,
+ * so a second audited tool would not have to restate it.
  */
 
 /** A denied/errored tool result carrying a message back to the model. */

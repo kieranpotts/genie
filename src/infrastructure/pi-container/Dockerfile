@@ -85,6 +85,30 @@ RUN mkdir -p /home/pi/sessions && chown -R pi:pi /home/pi/sessions
 VOLUME ["/home/pi/sessions"]
 
 # ---------------------------------------------------------------------------
+# Audit trails. The agent runs as uid 1001 and the rootfs is read-only, so the
+# ONLY way it can write its audit logs is a volume it owns.
+#
+# Ownership is established HERE, not at runtime, and the mechanism is subtle
+# enough to be worth stating: when Docker mounts an EMPTY named volume over a
+# path that exists in the image, it seeds the volume with that path's contents
+# AND its ownership. Creating these directories as `pi` at build time is
+# therefore what makes the mounted volume writable by the agent.
+#
+# The corollary is that this only takes effect for a volume created after this
+# layer is built. A pi-logs volume that already exists keeps its old ownership
+# (root:root, unwritable by the agent) — remove it to re-seed:
+#   docker compose -f src/infrastructure/compose.yaml down
+#   docker volume rm pi-secure-agent_pi-logs
+#
+# Both extensions create their own log file and parent directory on first write,
+# but they cannot create them under a root-owned mount point, and both swallow
+# write failures by design so the audit trail would go silently missing.
+# ---------------------------------------------------------------------------
+RUN mkdir -p /var/log/pi/audited-tools /var/log/pi/permission-gate \
+ && chown -R pi:pi /var/log/pi
+VOLUME ["/var/log/pi"]
+
+# ---------------------------------------------------------------------------
 # Harness launcher and greeting.
 #
 # An interactive session lands in the hardened Pi harness, but the agent is

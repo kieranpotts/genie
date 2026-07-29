@@ -1,23 +1,38 @@
 /**
  * Interactive permission gate.
  *
- * Intercepts every tool call before it runs (`tool_call` event) and requires
- * explicit user confirmation for any mutating operation — writes, edits, and
- * shell execution. Confirmation times out to DENY, and a missing interactive UI
- * also denies. Every decision, approved or denied, is logged to an append-only
- * file outside the agent's writable tree.
+ * Intercepts every tool call before it runs (`tool_call` event) and applies two
+ * controls in order:
+ *
+ *   1. An ABSOLUTE refusal of calls naming a sensitive file — secrets and key
+ *      material — which is not offered to the user for approval at all.
+ *   2. Explicit user confirmation for any mutating operation — writes, edits,
+ *      and shell execution. Confirmation times out to DENY, and a missing
+ *      interactive UI also denies.
+ *
+ * Every decision, approved or denied, is logged to an append-only file outside
+ * the agent's writable tree.
  *
  * This is the ecosystem gap the architecture doc calls out: interactive
- * approve/deny prompting. Read-only tools pass straight through; only
- * state-changing calls are gated.
+ * approve/deny prompting. Read-only tools pass the second control straight
+ * through; only state-changing calls are gated. The first control applies to
+ * every call, read-only included — reading a private key is the exfiltration
+ * this exists to stop.
  *
- * The policy and the log format live in pure, unit-tested helpers
- * (`policy.ts`, `decision-log.ts`); this entry point is the thin glue to the
- * `ExtensionAPI`.
+ * Being the only hook that sees every tool call is why the sensitive-file rule
+ * lives here rather than in `audited-tools`: it must cover the `mcp_*` tools,
+ * which are the sole route to project files and enforce directory containment
+ * but not filename sensitivity.
+ *
+ * The policy, the sensitive-file rule, and the log format live in pure,
+ * unit-tested helpers (`policy.ts`, `sensitive-files.ts`, `decision-log.ts`);
+ * this entry point is the thin glue to the `ExtensionAPI`.
  */
 
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
+import { basename } from 'node:path'
 import { decide, describeCall, requiresConfirmation, type ConfirmOutcome } from './policy.ts'
+import { findSensitiveArgument } from './sensitive-files.ts'
 import { DecisionLog, makeDecision } from './decision-log.ts'
 
 /** Where decisions are logged. Outside the writable tree (see compose). */
@@ -31,9 +46,21 @@ export default function (pi: ExtensionAPI): void {
   const log = new DecisionLog(process.env[LOG_ENV] ?? DEFAULT_LOG)
 
   pi.on('tool_call', async (event, ctx) => {
+    const input = event.input as Record<string, unknown>
+    const detail = describeCall(event.toolName, input)
+
+    /* Absolute refusal, checked on every call — including read-only ones, which
+       are exactly the ones that would exfiltrate a key. Not a prompt: there is
+       no approval path, so a model cannot socially engineer its way past it. */
+    const sensitive = findSensitiveArgument(input)
+    if (sensitive !== undefined) {
+      const reason = `${event.toolName} blocked: sensitive file refused: ${basename(sensitive)}`
+      await log.record(makeDecision(event.toolName, 'denied', reason, detail))
+      return { block: true, reason }
+    }
+
     if (!requiresConfirmation(event.toolName)) return // read-only: allow silently
 
-    const detail = describeCall(event.toolName, event.input as Record<string, unknown>)
     const outcome = await askUser(ctx, event.toolName, detail)
     const decision = decide(event.toolName, outcome)
 
