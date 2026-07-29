@@ -3,19 +3,19 @@
 #
 # Builds a container that runs the Pi coding agent with the smallest viable
 # surface. The image itself bakes in NONE of the dangerous things:
-#   - no cloud API keys (held by the host proxy; see src/infra/proxy/)
+#   - no cloud API keys (held by the host proxy; see src/infrastructure/proxy/)
 #   - no Docker socket
 #   - no project source (compose mounts it read-only at runtime, for the
 #     operator to browse; the agent has no local tool that can read it)
 #   - runs as a non-root user
 #
 # Capability dropping, no-new-privileges, read-only rootfs, and resource limits
-# are RUNTIME concerns and are applied by the compose file in step 4 — a
-# Dockerfile cannot set them itself. They are listed at the foot of this file so
-# the compose wiring stays in sync.
+# are RUNTIME concerns and are applied by the compose file — a Dockerfile cannot
+# set them itself. They are listed at the foot of this file so the compose
+# wiring stays in sync.
 #
-# See docs/local-agent-architecture.md (hardening checklist) and
-# docs/local-agent-implementation-plan.md (step 3).
+# See docs/solution.md (the hardening table) and src/infrastructure/README.md
+# (the operator runbook).
 # =============================================================================
 
 # Pin to a Node version Pi supports (22.18+; dev uses 24). Digest-pinned for
@@ -33,8 +33,39 @@ RUN groupadd --system --gid 1001 pi \
 # ---------------------------------------------------------------------------
 # Install the Pi coding agent globally. This is the only network-fetched
 # software in the image; everything else is local.
+#
+# PINNED TO AN EXACT VERSION AND VERIFIED BY HASH, per the hardening rule that
+# third-party packages carry exact versions or commit hashes. A floating
+# `npm install -g @earendil-works/pi-coding-agent` silently changed what shipped
+# on every rebuild — and had already drifted seven minor versions from the
+# `package.json` devDependency the extensions are type-checked against, so the
+# code was being CHECKED against one ExtensionAPI and RUN against another.
+#
+# Keep PI_VERSION identical to the `@earendil-works/pi-coding-agent`
+# devDependency in package.json. That dependency is what `run/typecheck` checks
+# the extensions against; this is what executes them. They must not drift.
+#
+# The tarball is fetched, hashed, and compared BEFORE it is installed, so a
+# substituted artefact fails the build rather than shipping. PI_SHA512 is the
+# hex form of the registry's `dist.integrity`, which is also what
+# package-lock.json records in base64 — the two are the same digest, and either
+# can be checked against the other:
+#
+#   sha512-Qnqgn9zhJFQ2HZ8R4iNuGhyCk93XX6+eUw9i+TjTuo47amzCy93ft3bB6yaUCleCrNO58dJDHYSGNHv/GAPWKg==
+#
+# Re-pin (both values, together) with:
+#   npm view @earendil-works/pi-coding-agent@<version> dist.integrity
+#   node -e 'process.stdout.write(Buffer.from(process.argv[1],"base64").toString("hex"))' <base64-without-the-sha512--prefix>
 # ---------------------------------------------------------------------------
-RUN npm install -g @earendil-works/pi-coding-agent \
+ARG PI_VERSION=0.82.0
+ARG PI_SHA512=427aa09fdce12454361d9f11e2236e1a1c8293ddd75faf9e530f62f938d3ba8e3b6a6cc2cbdddfb776c1eb26940a5782acd3b9f1d2431d8486347bff1803d62a
+
+RUN set -eu \
+ && TARBALL="earendil-works-pi-coding-agent-${PI_VERSION}.tgz" \
+ && npm pack "@earendil-works/pi-coding-agent@${PI_VERSION}" \
+ && echo "${PI_SHA512}  ${TARBALL}" | sha512sum -c - \
+ && npm install -g "./${TARBALL}" \
+ && rm -f "${TARBALL}" \
  && npm cache clean --force
 
 # ---------------------------------------------------------------------------
@@ -49,11 +80,12 @@ RUN npm install -g @earendil-works/pi-coding-agent \
 # the agent's own process is cooperative, not a boundary. See TODO.md.
 #
 # Rather than copy `src/extensions/` wholesale, the build copies only the named
-# security extensions. Each name is appended below as its step lands; until
-# then the agent's extension directory is created empty.
+# security extensions, one COPY each. Adding an extension to the image means
+# adding its line below — deliberately explicit, so nothing reaches the agent's
+# extension directory just by existing in the repo.
 #
 # Build context is the repo root:
-#   docker build -f src/infra/pi-container/Dockerfile -t pi-agent:hardened .
+#   docker build -f src/infrastructure/pi-container/Dockerfile -t pi-agent:hardened .
 # ---------------------------------------------------------------------------
 #
 # NOTE THE DESTINATION: these are baked into /opt/pi/agent, NOT into
@@ -173,7 +205,7 @@ WORKDIR /home/pi
 CMD ["bash"]
 
 # ===========================================================================
-# RUNTIME hardening — applied by compose (step 4), NOT settable in a Dockerfile:
+# RUNTIME hardening — applied by compose, NOT settable in a Dockerfile:
 #
 #   user: "1001:1001"                 # belt-and-braces over USER above
 #   cap_drop: [ALL]                   # restore none unless proven necessary

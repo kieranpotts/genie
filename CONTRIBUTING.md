@@ -5,8 +5,8 @@
 > project. These contributing guidelines are for the benefit of the author.
 
 This page covers working on the extensions themselves. To just install and use
-them, see [Requirements](./docs/requirements.md) and
-[Installation](./docs/installation.md) instead.
+them, see the Requirements and Usage sections of the
+[README](./README.md) instead.
 
 The [Pi extension docs](https://pi.dev/docs/latest/extensions) are the primary
 reference for writing extensions — the `ExtensionAPI`, lifecycle events, custom
@@ -16,8 +16,8 @@ repository.
 ## Prerequisites
 
 Development needs [Node.js][node] (with `npm`) for the linting toolchain, in
-addition to the [runtime requirements](./docs/requirements.md). Install the dev
-dependencies once, from the repository root:
+addition to the runtime requirements in the [README](./README.md). Install the
+dev dependencies once, from the repository root:
 
 ```sh
 npm install
@@ -27,17 +27,30 @@ npm install
 
 ## Project layout
 
-Each extension lives in its own directory under `src/`, with an `index.ts` entry
-point:
+Each extension lives in its own directory under `src/extensions/`, with an
+`index.ts` entry point:
 
 ```text
 src/
-└── <name>/
-    └── index.ts
+└── extensions/
+    └── <name>/
+        └── index.ts
 ```
 
-See the section on adding a new extension in the [installation](./docs/installation.md)
-instructions for details on how to register a new extension with the installer.
+Everything else under `src/` is **not** an extension and is not installable —
+`src/infrastructure/` holds the container, compose, proxy, and MCP wiring, and
+`./run/install` copies only from `src/extensions/`.
+
+A new extension is not picked up by existing in the repo. Register it in two
+places, both of which list extensions explicitly so that nothing installs by
+accident:
+
+- `run/install` — add the name to the `available_extensions` array.
+- `run/inc/fn/extensions.sh` — add a `case` branch giving its one-line
+  description.
+
+To ship it inside the hardened container as well, add a `COPY` line to
+[`src/infrastructure/pi-container/Dockerfile`](./src/infrastructure/pi-container/Dockerfile).
 
 ## Linting
 

@@ -13,7 +13,8 @@ Non-extension infrastructure for the secure local agent architecture
 (Docker images, compose files, the model proxy, MCP server wiring) lives
 under `src/infrastructure/`. This is NOT  installable and `run/install`
 MUST NOT copy it into Pi's extensions directory.
-See [docs/local-agent-architecture.md](./docs/local-agent-architecture.md).
+See [docs/solution.md](./docs/solution.md) for the design, and
+[src/infrastructure/README.md](./src/infrastructure/README.md) for the runbook.
 
 The repository ships several extensions, including `pickling-penguins`,
 which replaces the default "Working…" status with randomly composed

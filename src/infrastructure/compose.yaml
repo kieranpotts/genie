@@ -1,7 +1,7 @@
 # =============================================================================
 # Secure local agent — container wiring.
 #
-# Brings up the three-part boundary from docs/local-agent-architecture.md:
+# Brings up the three-part boundary described in docs/solution.md:
 #
 #   pi-container  ──MCP (HTTP/SSE)──▶  mcp-gateway ──▶ mcp-filesystem ──▶ volume
 #         │

@@ -93,16 +93,16 @@ flowchart LR
 This repository packages the following Pi extensions. Click the links to see
 their READMEs, which provide detailed usage instructions.
 
-- [**`permission-gate`**](../src/extensions/permission-gate/README.md): \
+- [**`permission-gate`**](./src/extensions/permission-gate/README.md): \
   Interactive, default-deny confirmation gate on mutating tool calls, plus an
   absolute refusal of sensitive filenames on every call. Part of the security
   hardening infrastructure (see below).
 
-- [**`mcp-client`**](../src/extensions/mcp-client/README.md): \
+- [**`mcp-client`**](./src/extensions/mcp-client/README.md): \
   MCP client giving Pi mediated filesystem access through the Docker MCP Toolkit
   gateway. Part of the security hardening infrastructure (see below)
 
-- [**`pickling-penguins`**](../src/extensions/pickling-penguins/README.md): \
+- [**`pickling-penguins`**](./src/extensions/pickling-penguins/README.md): \
   Cosmetic-only replacement for Pi's "Working..." status line. Just for fun.
 
 An install script is provided to automate the installation of these extensions
@@ -193,7 +193,7 @@ Copyright © 2020-present Kieran Potts, [MIT license](./LICENSE.txt)
 Acknowledgements: The structure of this project was inspired by
 Owain Lewis's [`pi-extensions`][owain-pi-extensions].
 Owain's "funny status" extension was the direct inspiration for
-[`pickling-penguins`](../src/extensions/pickling-penguins/README.md),
+[`pickling-penguins`](./src/extensions/pickling-penguins/README.md),
 my first Pi extension. The [Pi example extensions][pi-example-extensions]
 are another useful reference point.
 

@@ -2,10 +2,10 @@
 
 The Pi extensions are designed to be used in the context of a wider agent
 harness infrastructure, provisioned through the configuration in this
-directory. It is defined in
-[../../docs/local-agent-architecture.md](../../docs/local-agent-architecture.md),
-which is the source of truth; this document is the operator's entry point to
-the runnable pieces here.
+directory. It is designed in
+[../../docs/solution.md](../../docs/solution.md), which is the source of truth
+for *why* the boundary is shaped as it is; this document is the operator's
+entry point to the runnable pieces here.
 
 > [!IMPORTANT]
 > This directory is **not** a Pi extension and is **not** installable.

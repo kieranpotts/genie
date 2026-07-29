@@ -18,14 +18,14 @@ flowchart LR
     end
 
     subgraph MCPContainer["MCP server container"]
-      MCP["MCP server\n(holds file path & operation allowlists, implements call logging)"]
+      MCP["MCP server<br/>(holds file path & operation allowlists, implements call logging)"]
     end
 
-    Proxy["Model proxy\n(holds API keys)"]
-    LocalModel[("Local model\nmanager")]
+    Proxy["Model proxy<br/>(holds API keys)"]
+    LocalModel[("Local model<br/>manager")]
   end
 
-  RemoteModel[("Remote model\ninference provider")]
+  RemoteModel[("Remote model<br/>inference provider")]
 
   Pi -- "scoped file ops" --> MCP
   MCP -- "allowlisted access" --> FS
@@ -105,7 +105,8 @@ Only the plumbing beneath the agent changes.
 An alternative to Docker would be to use Nvidia's
 [OpenShell](https://build.nvidia.com/openshell). This provides a sandboxed
 environment that keeps API credentials outside of the agent process. However,
-Docker is acceptable if you have another keeping secrets away from the model.
+Docker is acceptable if you have another mechanism keeping secrets away from
+the model.
 
 ## Containerized MCP server
 
@@ -166,16 +167,16 @@ Tooling in this solution space is mature. I've chosen to use
 [Docker MCP Toolkit][docker-mcp-toolkit]. It runs MCP servers in containers
 and handles the plumbing to the agent client. Docker MCP Toolkit can also be
 configured with environment variables, API keys, and any other secrets required
-by an agent. It acts as a proxy for this information, to secrets never enter
+by an agent. It acts as a proxy for this information, so secrets never enter
 a model's context.
 
-Docker MCP TOols also has built-in security checks for both tool calls and the
+Docker MCP Toolkit also has built-in security checks for both tool calls and the
 resulting outputs.
 
 ## Model traffic proxy
 
 Similar to how an MCP server mediates an agent's access to tools and data, so
-another proxy sites between the agent and the model runtimes. This proxy holds
+another proxy sits between the agent and the model runtimes. This proxy holds
 the access credentials required to access model inference providers.
 
 This design means that cloud credentials and other secrets are never injected

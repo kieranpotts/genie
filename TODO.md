@@ -462,27 +462,72 @@ claimed and what is enforced.
 
 ## Hygiene
 
-- [ ] **Pin the Pi package, per the project's own rule.**
-  The hardening table requires third-party packages pinned to exact
-  versions or commit hashes. All three container images are digest-pinned, but
-  `src/infrastructure/pi-container/Dockerfile:37` is a bare
-  `npm install -g @earendil-works/pi-coding-agent`, floating to latest at build
-  time.
+- [x] **Pin the Pi package, per the project's own rule.**
+  The hardening table requires third-party packages pinned to exact versions or
+  commit hashes. All three container images were digest-pinned, but the
+  Dockerfile had a bare `npm install -g @earendil-works/pi-coding-agent`,
+  floating to latest at build time.
 
-- [ ] **Fix stale cross-references.**
-  `compose.yaml:4`, `src/infrastructure/pi-container/Dockerfile:17-18`, and
-  `src/infrastructure/README.md:6` all cite `docs/local-agent-architecture.md`
-  and `docs/local-agent-implementation-plan.md`, neither of which exists —
-  `docs/` holds `problem.md`, `requirements.md`, `solution.md`, and
-  `alternatives.md`. The Dockerfile also says `src/infra/` where the tree is
-  `src/infrastructure/`, and several comments reference "step 3/4/…/8" of a
-  plan that is not in the repository.
+  **The float had already bitten.** The image was installing **0.82.0** while
+  `package.json` declared `^0.75.5` — so the extensions were being type-checked
+  against one `ExtensionAPI` and executed against another, seven minor versions
+  apart. That is the actual cost of the floating install, and it was invisible
+  because both halves independently "worked".
 
-- [ ] **Copy-edit `docs/solution.md`.**
-  - Line 98: "if you have another keeping secrets away from the model" — a word
-    is missing.
-  - Line 146: "to secrets never enter" → "so secrets never enter".
-  - Line 149: "Docker MCP TOols" → "Docker MCP Toolkit".
-  - Line 155: "so another proxy sites between" → "sits".
-  - Lines 21, 24, 25, 28: these Mermaid node labels use `\n` for line breaks
-    where lines 205-207 use `<br/>`; current Mermaid renders `\n` literally.
+  Pinned to **0.82.0** in both places, chosen because it is the version the
+  verified stack actually runs. The devDependency is now an exact `0.82.0`
+  rather than a caret range, so the two cannot drift again without someone
+  editing both.
+
+  The install is also **hash-verified**, matching how the base image and gateway
+  are digest-pinned: `npm pack` fetches the tarball, `sha512sum -c` checks it
+  against `PI_SHA512`, and only then does `npm install -g` run. `PI_SHA512` is
+  the hex form of the registry's `dist.integrity` — the same digest
+  `package-lock.json` records in base64, so the two can be checked against each
+  other. Both values sit in `ARG`s with a re-pinning recipe in the comment.
+
+  Verified two ways: the build passes (`…tgz: OK`), and a build forced with a
+  wrong `PI_SHA512` **fails** before `npm install` runs — so it is a control,
+  not decoration. Typecheck, lint, and 114 tests pass against 0.82.0, and the
+  gate was re-driven on the rebuilt image with all seven cases correct.
+
+  **Left open deliberately:** `npm audit` reports two high-severity DoS
+  advisories (`brace-expansion`, `js-yaml`). Most are in the eslint toolchain,
+  but `brace-expansion` also sits inside Pi's own dependencies and therefore
+  ships in the image. `npm audit fix` was NOT run: it works against the pin just
+  established, and a DoS-class issue in a single-operator local tool is a
+  different risk calculus from the confidentiality controls this project is
+  built around. Worth a decision of its own.
+
+- [x] **Fix stale cross-references.**
+  `compose.yaml`, the Dockerfile, and `src/infrastructure/README.md` all cited
+  `docs/local-agent-architecture.md` and `docs/local-agent-implementation-plan.md`,
+  neither of which exists. All now point at `docs/solution.md` (the design) and
+  `src/infrastructure/README.md` (the runbook). `src/infra/` → `src/infrastructure/`
+  in two Dockerfile comments, and the "step 3/4" citations of the absent plan are
+  gone. `AGENTS.md` had the same dead link and was not in the original list.
+
+  A systematic check of every relative Markdown link — rather than re-reading the
+  audit — found three more the audit had missed:
+
+  - `README.md` linked the three extension READMEs as `../src/extensions/…` from
+    the repository root, so all four links resolved outside the repo.
+  - `CONTRIBUTING.md` cited `docs/installation.md` twice; the file does not exist
+    and never has. Installation lives in the README's Usage section.
+  - `CONTRIBUTING.md`'s "Project layout" showed extensions at `src/<name>/` when
+    the tree is `src/extensions/<name>/`, and pointed at the non-existent doc for
+    how to register a new extension. Replaced with the real procedure, verified
+    against the installer: the `available_extensions` array in `run/install`, the
+    `case` branch in `run/inc/fn/extensions.sh`, and the `COPY` line in the
+    Dockerfile for shipping it inside the container.
+
+  Worth keeping: that link check is three lines of shell and found more than the
+  manual audit did.
+
+- [x] **Copy-edit `docs/solution.md`.**
+  All five fixed — the missing word after "if you have another", "to" → "so"
+  secrets never enter, "Docker MCP TOols" → "Toolkit", "sites" → "sits", and the
+  four Mermaid labels using `\n` where current Mermaid renders it literally, now
+  `<br/>` to match the diagrams further down. (The audit's line numbers had gone
+  stale; located by string instead.) A sweep for doubled words and common
+  misspellings across the docs found nothing further.
