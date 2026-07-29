@@ -6,5 +6,4 @@ and its supporting infrastructure.
 - [**The problem**](./problem.md)
 - [**Requirements**](./requirements.md)
 - [**The solution**](./solution.md)
-- [**Hardening**](./hardening.md)
 - [**Alternatives**](./alternatives.md)

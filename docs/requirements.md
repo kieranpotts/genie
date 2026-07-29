@@ -1,6 +1,7 @@
 # Requirements
 
-I require a secure architecture for running agents. Specifically, I require:
+I require a secure architecture for running agents away-from-keyboard (ie. with
+minimal human oversight). Specifically, I require:
 
 * A security profile suitable for using agents in the context of regulated
   industries like finance. I work in these problem spaces.

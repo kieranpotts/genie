@@ -4,10 +4,12 @@
 framework on which you program your own custom harness, rather than a finished
 product.
 
-Out-of-the-box, Pi runs with full system permissions with zero security
-controls. This is a deliberate design choice, not a bug. But running such
-an agent directly on your host machine carries non-trivial risks, since doing
-so exposes:
+Out-of-the-box, Pi runs with full system permissions with no security
+controls. For example, Pi's built-in tools are run without any permission
+gates, so models can use them however they like — no restrictions.
+
+This is a deliberate design choice, not a bug. But running such an agent
+directly on your host machine carries non-trivial risks, since doing so exposes:
 
 - Your host dotfiles – `~/.ssh/*`, `~/.config/*`, `~/.gitconfig` – and the
   security credentials they contain.
@@ -28,12 +30,12 @@ in their training cycles.
 Therefore, to create secure and reliable agents, we must thoughtfully engineer
 isolated environments in which the underlying models run.
 
-The most important design constraint is **filesystem isolation**. We want an
-architecture will keep a misbehaving model or a compromised model isolated
+The most important design constraint is filesystem isolation. We want an
+architecture that will keep a misbehaving model or a compromised model isolated
 from files outside of the project scope, and isolated from the cloud credentials
 and other secrets required by the agent.
 
 In addition, every action the agent takes against the host filesystem should
-be fully observable and leave a detailed audit trail.
+be fully observable and captured in a detailed audit trail.
 
 [pi]: https://pi.dev/
