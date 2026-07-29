@@ -473,30 +473,63 @@ claimed and what is enforced.
 
   </details>
 
-- [ ] **Decide retention for `permission-gate/calls.jsonl`.**
-  Raised by the change above. Now that every read is recorded, the log grows with
-  agent *activity* rather than with approvals — reads are the bulk of what the
-  agent does, so the file grows far faster than it used to. Nothing rotates,
-  caps, or prunes it today.
+- [x] **Decide retention for `permission-gate/calls.jsonl`.**
+  **Decided: the log grows without bound. Nothing in the stack ever deletes a
+  line. Pruning and archival are the operator's, from the host.** Recorded as a
+  policy in three places — the runbook's new *Retention* section
+  (`src/infrastructure/README.md`), the extension's README, and the `pi-logs`
+  comment in `compose.yaml` — plus the header of `call-log.ts`, which is where
+  a future cap would be tempting to add.
 
-  Note the tension before reaching for `logrotate`: rotation that discards old
-  lines is data loss from an accountability record, and `docs/requirements.md`
-  asks for auditability without saying for how long. The options are size-capped
-  rotation, ship-then-truncate to somewhere durable, or an explicit "grows
-  unbounded, the operator prunes" stance — but it should be a stated decision
-  rather than a default inherited from whatever tool is convenient.
+  The item asked for a stated decision rather than a default inherited from
+  whatever tool was convenient, and the deciding input was a measurement that
+  had not been taken. **A call costs ~316 bytes** across its two lines (a `call`
+  line with a realistic deep path, 215 B, plus its `result` line, 101 B):
 
-  **Doubled since this was written.** The `tool_result` work means a call now
-  writes two lines, not one, so the growth rate is roughly twice what this item
-  was raised about. The argument is unchanged, the number is worse.
+  | Tool calls | Log size |
+  |---|---|
+  | 1,000 | 0.3 MB |
+  | 10,000 | 3.2 MB |
+  | 100,000 | 32 MB |
+  | 1,000,000 | 316 MB |
 
-  Decide this **before** the turn-markers item below, which would add a third
-  line kind. Sequencing them the other way means choosing a retention policy for
-  a format that is still moving.
+  That reframes the item that raised it. The growth *rate* doubled with
+  `tool_result`, which is what prompted the concern, but the absolute number is
+  small: a million tool calls is years of heavy single-operator use. Size-capped
+  rotation would answer "how much disk" by discarding the oldest evidence, which
+  is the wrong axis for a record whose entire purpose is answering questions
+  about the past — and `docs/requirements.md` asks for auditability without
+  naming a horizon, so there is no period to expire against either.
 
-  Not urgent: the volume is host-side, outside the read-only rootfs, and a
-  failure to write is swallowed by design, so the failure mode is a large file
-  rather than a broken agent.
+  **A second argument turned out to matter more than the disk one**, and it is
+  the one that constrains future changes. The agent's rootfs is read-only, so
+  rotation state would have to sit on the `pi-logs` volume itself, and an
+  in-process cap in `permission-gate` would put truncation logic *inside the
+  audited process*. `compose.yaml` already leans on the volume outliving the
+  container so a compromised session cannot erase its own history; a rotation
+  step running as the agent's uid would spend that property. Append-only is
+  worth keeping as an invariant, not just as a current fact.
+
+  Ship-then-truncate was rejected as the most machinery for the least present
+  pressure — it needs a nominated durable destination before it means anything.
+  The runbook instead documents the manual version (size check, and piping the
+  log out to a dated `.gz` over the existing `exec` route, so there is no second
+  image to pin), and is explicit that truncating afterwards is the operator's
+  choice and not part of the supported flow.
+
+  The `pi-logs` volume **stays a named Docker volume**; switching it to a host
+  bind mount would have made operator pruning more ergonomic but was declined,
+  keeping the audit trail out of casual reach and consistent with `pi-sessions`.
+
+  Stated revisit triggers, so "unbounded" cannot quietly become permanent
+  through inattention: the log passing **1 GB** or growth departing from the
+  table above; the stack ceasing to be single-operator or the volume ceasing to
+  be local; or a compliance obligation naming an actual retention period — in
+  which case the replacement is that period and an expiry mechanism, not a size
+  cap.
+
+  Note what this does *not* resolve: a failure to write is still swallowed by
+  design, so the failure mode remains a large file rather than a broken agent.
 
 - [x] **Enforce network egress control, or drop the claim.**
   Enforced. `agent-net` is now `internal: true`, so Docker installs no default
@@ -741,10 +774,32 @@ claimed and what is enforced.
   *that* instruction" is answerable only by timestamp correlation against a
   session transcript on a different volume with different retention.
 
-  Small and low-risk — it records a boundary, not content. The reason it is not
-  done: it adds a third line kind to a log whose retention is already an open
-  question, and the two should be decided together. Do this one after retention,
-  not before.
+  Small and low-risk — it records a boundary, not content.
+
+  **Unblocked.** This was held back because it adds a third line kind to a log
+  whose retention was an open question, and the two had to be decided together.
+  Retention is now settled (see the closed item above) and the decision does not
+  constrain the format: the policy is append-only and unbounded, so a third line
+  kind costs nothing but its own bytes. A `turn_start` line is far cheaper than
+  the ~316 B per call already being written, since it is emitted per turn rather
+  than per call, and it does not perturb the growth table.
+
+  Two things to carry over from that decision when implementing this:
+
+  - **Append-only is an invariant now, not just a current fact.** The turn
+    handler appends and does nothing else — no buffering until the turn ends, for
+    the same reason the `call`/`result` pair is written as two lines rather than
+    one enriched one.
+  - **Keep the key set closed**, matching the `result` line's test. `turn_start`
+    should carry named scalars only, so it cannot grow into a record of what the
+    turn was *about*.
+
+  One compatibility point, checked rather than assumed: the runbook's `jq`
+  recipes all filter on `.phase`, and the line sketched above carries `kind`
+  instead. That is safe — a line without `.phase` yields `null`, which matches
+  none of `"call"` or `"result"`, so every documented query still returns
+  exactly what it did before. Re-check this if a recipe is ever written that
+  selects lines by *absence* of a field rather than by its value.
 
 - [x] **Document the `docker.sock` grant in `docs/solution.md`.**
   `compose.yaml` binds the host Docker socket into `mcp-gateway`.

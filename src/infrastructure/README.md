@@ -446,10 +446,9 @@ Limits to know before relying on it:
 - **It covers tool calls, not model requests.** Nothing here records what was
   sent to the model. The host-side proxy is the component positioned to do that,
   and this repository neither implements nor verifies it; see `TODO.md`.
-- **It grows with activity, and nothing prunes it.** Two lines per call, and
-  reads are most of what an agent does. Retention is an open decision in
-  `TODO.md`; the failure mode is a large file on a host volume, not a broken
-  agent.
+- **It grows without bound, and that is the stated policy, not an oversight.**
+  Nothing in the stack rotates, caps, or prunes it. See *Retention* below for
+  the reasoning and for the operator's part in it.
 - **No turn boundaries.** The trail is a flat sequence of calls, so grouping
   them by the agent turn that caused them is not possible today. Also `TODO.md`.
 
@@ -463,6 +462,75 @@ Limits to know before relying on it:
 > docker compose -f src/infrastructure/compose.yaml down
 > docker volume rm pi-secure-agent_pi-logs
 > ```
+
+### Retention
+
+**The policy: the call log grows without bound. Nothing in the stack ever
+deletes a line from it. Pruning and archival are the operator's, done from the
+host, deliberately.**
+
+This is a decision, not a default inherited from whichever tool was convenient.
+The reasoning, in the order it matters:
+
+- **Deletion is data loss from an accountability record.** `docs/requirements.md`
+  asks for auditability of every filesystem action and does not put a horizon on
+  it. Size-capped rotation answers "how much disk" by discarding the oldest
+  evidence, which is the wrong axis to optimise for a log whose purpose is
+  answering questions about the past.
+
+- **The volume pressure it would relieve is not there.** Measured against the
+  real record format — a `call` line with a deep path plus its `result` line —
+  a call costs about **316 bytes**:
+
+  | Tool calls | Log size |
+  |---|---|
+  | 1,000 | 0.3 MB |
+  | 10,000 | 3.2 MB |
+  | 100,000 | 32 MB |
+  | 1,000,000 | 316 MB |
+
+  A million tool calls is years of heavy single-operator use. Paying real
+  accountability loss to avoid a few hundred megabytes over that horizon is a
+  bad trade, and it stays a bad trade until the numbers move.
+
+- **A cap would have to live in the wrong place.** The agent's rootfs is
+  read-only, so rotation state would have to sit on the `pi-logs` volume itself,
+  and an in-process cap in `permission-gate` would put truncation logic inside
+  the audited process — the one place from which an accountability record should
+  not be deletable. Today the extension can only append; `compose.yaml` notes
+  that the volume outliving the container is what stops a session erasing its
+  own history. Adding a delete path would spend that property.
+
+**What the operator does.** Check the size when it is worth knowing:
+
+```sh
+docker compose -f src/infrastructure/compose.yaml exec -T pi \
+  wc -c /var/log/pi/permission-gate/calls.jsonl
+```
+
+Archive by piping it out to the host — the same route the queries above use, so
+there is no second image to pin and nothing new to trust:
+
+```sh
+docker compose -f src/infrastructure/compose.yaml exec -T pi \
+  cat /var/log/pi/permission-gate/calls.jsonl \
+  | gzip > "calls-$(date +%Y%m%d).jsonl.gz"
+```
+
+JSONL concatenates, so dated archives can be `cat`-ed back together in order and
+queried as one file. Truncating the live log after archiving is a choice
+available to the operator and is **not** part of the supported flow — if you do
+it, the archive is the record, so put it somewhere durable first.
+
+**Revisit this if any of these changes**, because each one breaks an assumption
+above rather than merely making the file bigger:
+
+- the log passes **1 GB**, or growth stops looking like the table above;
+- the stack stops being single-operator, or the volume stops being local — a
+  shipped, multi-tenant trail is a different retention problem;
+- a compliance obligation names an actual retention period, at which point
+  "unbounded" needs replacing with that period and an expiry mechanism, not with
+  a size cap.
 
 ## Troubleshooting
 

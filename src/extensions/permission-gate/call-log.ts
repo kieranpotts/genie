@@ -24,8 +24,13 @@
  * or an OOM between the two would erase the evidence that the call was ever
  * attempted. Append-on-observation means the trail is never less complete than
  * the events that have actually happened. The cost is volume: a busy session
- * writes twice the lines it used to, which is why retention is an open question
- * in TODO.md.
+ * writes twice the lines it used to. That cost was accepted deliberately — the
+ * log grows without bound and nothing here ever deletes from it. This sink can
+ * only APPEND, and that is a property to preserve: a cap or a rotation step
+ * would put truncation logic inside the audited process, which is the one place
+ * an accountability record should not be deletable from. Pruning is the
+ * operator's, from the host. See "Retention" in this extension's README and in
+ * src/infrastructure/README.md.
  *
  * The attempt line is also TWO-AXIS:
  *

@@ -85,6 +85,13 @@ volumes:
   # fail silently. Ownership is seeded from the image's /var/log/pi, which means
   # a volume created before that Dockerfile layer existed is still root-owned:
   # `docker volume rm pi-secure-agent_pi-logs` to re-seed it. See the Dockerfile.
+  #
+  # RETENTION: unbounded, by decision. Nothing in this stack rotates, caps, or
+  # prunes the call log — a call costs ~316 bytes, so a million of them is
+  # ~316 MB, and discarding the oldest entries of an accountability record to
+  # reclaim that is a bad trade. Pruning and archival are the operator's, from
+  # the host; the procedure and the triggers for revisiting live under
+  # "Retention" in src/infrastructure/README.md.
   pi-logs:
 
 services:

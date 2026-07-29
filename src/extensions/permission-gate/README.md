@@ -109,8 +109,9 @@ in memory until the result arrived would give one tidy line per call, but the
 only record of the attempt would live in the process for the duration of the
 call — so a crash, a kill, or an OOM between the two would erase the evidence
 that it was ever made. Appending on observation means the trail is never less
-complete than the events that have actually happened. The cost is volume, which
-is why retention is an open item in `TODO.md`.
+complete than the events that have actually happened. The cost is volume —
+roughly double — which is why retention was settled explicitly rather than left
+to a default; see *Retention* below.
 
 A blocked call has no `result` line if the harness never runs the tool. The
 absence is not ambiguous: the `call` line already says `blocked` and why.
@@ -201,3 +202,26 @@ via the `pi-logs` volume, mounted at `/var/log/pi`.
 
 The log file path does not need to exist, because the extension will create it,
 and its parent directory, on first write.
+
+### Retention
+
+**The log grows without bound. This extension never deletes from it, and that is
+deliberate.** The sink can only append; there is no cap, no rotation, and no
+truncation path in this code.
+
+Two reasons, and the second is the one that constrains future changes:
+
+- **The volume does not justify the loss.** A call costs about **316 bytes**
+  across its two lines, so a million tool calls — years of heavy single-operator
+  use — is roughly 316 MB. Discarding the oldest entries of an accountability
+  record to reclaim that is a bad trade.
+- **Truncation must not live here.** A cap inside this extension would put
+  delete-my-own-history logic inside the audited process. Append-only is a
+  property worth keeping: `compose.yaml` relies on the log volume outliving the
+  container so a compromised session cannot erase its own trail, and a rotation
+  step running as the agent's uid would spend that.
+
+Pruning and archival are the **operator's**, from the host. The procedure — a
+size check, and piping the log out to a dated `.gz` — is in the runbook
+(`src/infrastructure/README.md`, *Retention*), along with the triggers for
+revisiting the policy.
