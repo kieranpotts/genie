@@ -1269,6 +1269,87 @@ claimed and what is enforced.
   > assumption cost nothing here, but it is why the fix waited as long as it
   > did.
 
+- [x] **Decide the `npm audit` advisories.**
+  Raised by the pinning item above, which deferred them for a decision of their
+  own. **Decided: run plain `npm audit fix`; decline `npm audit fix --force`;
+  add no `overrides`.** Applied — three bumps, `package-lock.json` only,
+  `package.json` untouched, `run/check` green (lint, typecheck, 189 tests):
+
+  ```
+  js-yaml          4.1.1  → 4.3.0    (@eslint/eslintrc)
+  brace-expansion  1.1.15 → 1.1.17   (eslint → minimatch@3)
+  brace-expansion  5.0.6  → 5.0.8    (@typescript-eslint → minimatch@10)
+  ```
+
+  **The premise the deferral rested on was measured and is false.** The concern
+  was that `brace-expansion` "ships in the image" via Pi's dependencies, making
+  this a container-security question. It is not, for two independent reasons:
+
+  1. **Nothing in this repository's tree reaches the container.** All five
+     flagged packages are `devDependencies`. The eslint toolchain runs on the
+     operator's host against this repo's own source; the
+     `@earendil-works/pi-coding-agent` devDependency exists so `run/typecheck`
+     has an `ExtensionAPI` to check against and is never executed. The image
+     builds by `npm pack` + `npm install -g`, which resolves its own tree and
+     never reads `package-lock.json`.
+  2. **The copy that does ship is already patched.** Read out of the built
+     image rather than inferred:
+
+     ```
+     docker run --rm --entrypoint node pi-agent:hardened \
+       -e 'console.log(require("/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/brace-expansion/package.json").version)'
+     ```
+
+     → `5.0.8`, which is the fixed version. So the advisory that motivated the
+     deferral was never live in the container.
+
+  **But that patched copy is luck, not a control — and this is the finding
+  worth carrying forward.** Pi ships an `npm-shrinkwrap.json` naming
+  `brace-expansion` **5.0.7**, and `npm install -g <tarball>` does not honour
+  it: the image resolved past the shrinkwrap to whatever the registry offered
+  at build time. So the Dockerfile's hash-pin fixes the *tarball* and nothing
+  below it — the shipped transitive tree is reproducible neither from the
+  shrinkwrap nor from anything in this repository, and today's good outcome
+  would have been a vulnerable one had the image been built a day earlier.
+  **Left open, deliberately and separately**: closing it means either vendoring
+  the tree or installing from a lockfile, neither of which `npm install -g`
+  supports, so it is a design question rather than an edit. The one-liner above
+  is the check; run it after any rebuild.
+
+  **The residual, stated rather than rounded to zero.** One advisory survives —
+  GHSA-mh99-v99m-4gvg, the unbounded-expansion OOM — on two nodes, both
+  dev-only:
+
+  - **Pi's shrinkwrapped 5.0.7.** Unfixable from here: a dependency's
+    `npm-shrinkwrap.json` is authoritative and beats consumer `overrides`.
+    Tested, not assumed. Irrelevant in practice per point 1 above.
+  - **eslint's `minimatch@3` → `brace-expansion@1.1.17`.** There is no patched
+    1.x. The advisory range is a flat `<=5.0.7`, which by semver swallows every
+    maintenance branch (1.1.17, 2.1.3, 3.0.5), so only 5.0.8 clears it.
+
+  **`overrides` was tested and rejected**, which is why none was added:
+  a blanket `brace-expansion: ^5.0.8` drags eslint's `minimatch@3` from 1.x to
+  5.x across a major it never asked for (it declares `^1.1.7`), and a
+  version-scoped `minimatch@^10` override still cannot beat the shrinkwrap. It
+  buys nothing and risks the lint toolchain.
+
+  **`--force` is declined**, not deferred. It would install eslint 10.8.0, a
+  breaking major, to close a **DoS-class** issue in a **development** tool whose
+  input is this repository's own eslint config — reaching it means the operator
+  supplying themselves a hostile glob pattern. That is the risk calculus the
+  original note gestured at, now with the numbers behind it: every advisory
+  here is `C:N/I:N` — no confidentiality or integrity impact — and
+  confidentiality is what this project's controls exist to protect. Note also
+  that `--force` *raises* the reported count from 2 to 7 before it lowers it,
+  because npm re-attributes the unfixable root to each package depending on it;
+  the count is not the quantity to optimise.
+
+  Revisit triggers, so "declined" cannot drift into unexamined: an advisory
+  against a package that actually ships in the image (check with the one-liner
+  above, not with `npm audit`); anything above DoS-class on any of these; a
+  patched 1.x `brace-expansion` appearing; or eslint 10 being adopted for
+  unrelated reasons, at which point the residual closes for free.
+
 - [x] **Fix stale cross-references.**
   `compose.yaml`, the Dockerfile, and `src/infrastructure/README.md` all cited
   `docs/local-agent-architecture.md` and `docs/local-agent-implementation-plan.md`,
