@@ -443,6 +443,15 @@ docker compose -f src/infrastructure/compose.yaml exec pi cat /var/log/pi/audit-
 docker compose -f src/infrastructure/compose.yaml exec pi cat /var/log/pi/secret-sentry/security.jsonl
 ```
 
+`./run/log` wraps the same commands with `tail -f`, for watching a session live
+rather than dumping the whole file:
+
+```sh
+./run/log            # Both files (default).
+./run/log audit      # Just audit-log/calls.jsonl.
+./run/log security   # Just secret-sentry/security.jsonl.
+```
+
 They used to be one file, written by one extension. `secret-sentry` now
 records only what it itself decides; `audit-log` records everything else, with
 no power to decide anything. **The consequence worth knowing before you query
