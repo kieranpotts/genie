@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+
+#
+# Genie installer.
+#
+# Installs this project centrally and puts a `genie` command on PATH, so the
+# hardened agent can be driven from anywhere rather than only from a checkout.
+#
+# Usage: ./run/install [options]
+#
+#   (no args)         Install by copying the payload.
+#   --link            Install by symlinking the payload to this working tree,
+#                     so edits take effect without re-installing. For development.
+#   --uninstall       Remove the payload and the `genie` command. Keeps your
+#                     config, the proxy state, and the docker volumes.
+#   -h, --help        Show this help and exit.
+#
+# What it installs, and where (XDG, with every override honoured):
+#
+#   ${XDG_DATA_HOME:-~/.local/share}/genie   the payload: bin, lib, src
+#   ${XDG_CONFIG_HOME:-~/.config}/genie/env  your cloud API keys, mode 0600
+#   ~/.local/bin/genie                       a symlink to the payload's bin/genie
+#
+# Re-running is safe and is how you update: only the payload is replaced. The
+# config file is created once and never overwritten, because it holds the cloud
+# API keys and the generated proxy master key. An existing
+# `src/infrastructure/.env` is adopted on a first install so nothing has to be
+# re-entered.
+#
+# The payload is an explicit allowlist of paths (see `payload_paths` in
+# `lib/fn/install.sh`), so `test/`, `docs/`, and `node_modules/` are never
+# shipped. `src/extensions/` IS shipped, because the hardened image is built from
+# the payload and its Dockerfile copies the security extensions out of there.
+#
+# This installs the HOST tooling only. It puts no extension into a local Pi:
+# Genie's extensions run inside the hardened container and are baked into its
+# image at build time. See the README for how to develop them against a local Pi.
+#
+
+# Strict mode:
+#   -e            Exit on any unhandled command failure.
+#   -u            Error on references to unset variables.
+#   -o pipefail   A pipeline fails if any element fails (not just the last).
+
+set -euo pipefail
+
+# Use this instead for debugging problems with the script.
+#set -euxo pipefail
+
+#
+# Global variables.
+#
+
+# Absolute path to this script's directory and the repository root, so the
+# installer can be run from any working directory.
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/.." && pwd)"
+
+# Library path.
+lib_path="${repo_root}/lib"
+
+# Compose project name, used only to tell the operator how to stop a running
+# stack on uninstall. MUST match the `name:` field in compose.yaml.
+# shellcheck disable=SC2034
+compose_project="pi-secure-agent"
+
+#
+# Includes.
+#
+
+# Source ANSI code variables.
+. "${lib_path}/var/ansi-codes.sh"
+
+# Source utility functions.
+. "${lib_path}/fn/statuses.sh"
+. "${lib_path}/fn/paths.sh"
+. "${lib_path}/fn/install.sh"
+
+#
+# Derived paths. Resolved through the same helpers `bin/genie` uses, so the
+# installer cannot put files anywhere the CLI does not look.
+#
+
+# Read by the sourced helpers in lib/fn/.
+# shellcheck disable=SC2034
+data_dir="$(genie_data_dir)"
+# shellcheck disable=SC2034
+config_dir="$(genie_config_dir)"
+# shellcheck disable=SC2034
+config_file="${config_dir}/env"
+# shellcheck disable=SC2034
+bin_dir="$(genie_bin_dir)"
+# shellcheck disable=SC2034
+bin_link="${bin_dir}/genie"
+
+# Whether to symlink rather than copy the payload.
+# shellcheck disable=SC2034
+link_mode=""
+
+# What to do.
+mode="install"
+
+#
+# Argument parsing.
+#
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      # The header block above, minus its `#` prefixes. Runs from the title line
+      # to the end of that contiguous comment block, so neither editing the
+      # header nor changing its length can truncate `--help`.
+      awk '/^# Genie installer/ { found = 1 }
+           found && !/^#/        { exit }
+           found                 { sub(/^# ?/, ""); print }' "$0"
+      exit 0
+      ;;
+    --link)
+      # Read by install_payload in lib/fn/install.sh.
+      # shellcheck disable=SC2034
+      link_mode="yes"
+      shift
+      ;;
+    --uninstall)
+      mode="uninstall"
+      shift
+      ;;
+    *)
+      print_error "Unknown argument: $1"
+      print_info "Run \`./run/install --help\` to see available options."
+      exit 1
+      ;;
+  esac
+done
+
+#
+# Main script.
+#
+
+main() {
+  if [[ "${mode}" == "uninstall" ]]; then
+    uninstall
+    return 0
+  fi
+
+  check_prerequisites
+  install_payload
+  install_entry_point
+  install_config
+  check_path
+
+  print_blank
+  print_info "Next steps:"
+  print_detail "genie --help              What it can do."
+  print_detail "genie --status            What is running."
+  print_detail "genie --tui               An interactive session in this project."
+  print_detail "genie -p \"...\"            One prompt, response on stdout."
+  print_blank
+  print_info "The first run builds the hardened image, so it takes a while."
+  print_info "After that the stack is reused until you run \`genie --down\`."
+}
+
+main

@@ -40,13 +40,60 @@ src/
 Everything else under `src/` is **not** an extension — `src/infrastructure/`
 holds the container, compose, proxy, and MCP wiring.
 
-There is no installer: extensions are not copied into a host Pi install.
-A new extension is picked up only by being explicitly `COPY`'d into the
-hardened image. Add a line to
+Extensions are never copied into a host Pi install. A new extension is picked up
+only by being explicitly `COPY`'d into the hardened image. Add a line to
 [`src/infrastructure/pi-container/Dockerfile`](./src/infrastructure/pi-container/Dockerfile)
 to ship it. To develop or test an extension against a local, unhardened Pi
 install first, copy it manually — see [Usage](./README.md#-usage) in the
 README.
+
+`run/install` installs the **host** tooling, not extensions, so an extension
+needs no registration with it.
+
+## Host tooling
+
+The `genie` CLI lives in `bin/genie`, with its implementation in `lib/fn/`:
+
+```text
+bin/genie           argument parsing, then dispatch
+lib/fn/statuses.sh  status printers — all output goes to STDERR
+lib/fn/paths.sh     XDG locations, and finding the config file
+lib/fn/boundary.sh  bring the boundary up, reuse it, tear it down
+lib/fn/agent.sh     resolve arguments; the TUI and headless run modes
+lib/fn/logs.sh      tail the audit trail
+lib/fn/install.sh   install the payload
+```
+
+`run/startup` and `run/log` are thin wrappers around `bin/genie`, so there is one
+implementation of the bring-up and the dev loop cannot drift from the installed
+tool.
+
+Three constraints are easy to break and worth stating:
+
+- **Stdout belongs to the agent.** `genie` without `--tui` prints the model's
+  response on stdout and nothing else, so every message goes through the
+  `lib/fn/statuses.sh` helpers, which write to stderr. A bare `echo` anywhere on
+  that path corrupts the output of every scripted caller.
+
+- **Security flags belong in the image.** `start-pi` inside the container owns
+  `--no-builtin-tools`, `--model`, and the project-trust decision, precisely so
+  no host-side caller can drop one. `genie` passes a role and a prompt; if you
+  find yourself adding a `pi` flag on the host, it belongs in `start-pi` instead.
+
+- **What the installer ships is an allowlist.** `payload_paths` in
+  `lib/fn/install.sh` is what gets installed. A runtime file outside it works
+  from a checkout and is missing once installed.
+
+Install from a checkout with `./run/install --link`, which symlinks the payload
+to the working tree so edits take effect on the next run without re-installing.
+
+The shell scripts are linted with [ShellCheck][shellcheck], which `./run/check`
+does not cover — so run it by hand before committing:
+
+```sh
+shellcheck bin/genie run/install run/startup run/log run/lint run/fix \
+           run/test run/check run/typecheck lib/**/*.sh
+```
 
 ## Linting
 
@@ -113,10 +160,19 @@ pre-commit install
 ```
 
 [pre-commit]: https://pre-commit.com
+[shellcheck]: https://www.shellcheck.net
 
 ## Versioning
 
 The extensions and infrastructure are not versioned. There are no release
 tags, version numbers, or changelog — the latest commit on the default branch
-is the only supported state. Rebuild the image with `./run/startup` to pick
-up changes.
+is the only supported state, which is why `genie --version` reports the payload
+path and the pinned Pi version rather than a version of its own.
+
+To pick up changes:
+
+- **Extensions or the Dockerfile** — `genie --rebuild`, which rebuilds the image
+  and recreates the containers even when the boundary is already up. A plain
+  `genie --up` reuses a running boundary and would not see the edit.
+- **The host tooling** — `./run/install` again, or install once with
+  `./run/install --link` and skip this step entirely.

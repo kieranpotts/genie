@@ -4,11 +4,14 @@ My hardened agent harness, built around the [Pi coding agent](https://pi.dev)
 (`@earendil-works/pi-coding-agent`). Each extension is a TypeScript module
 that hooks into Pi's lifecycle events or registers tools, commands, or UI.
 
-Extensions live under `src/extensions/<name>/`. There is no host installer:
-extensions are baked directly into the hardened container image at build time
+Extensions live under `src/extensions/<name>/`. They are never installed into a
+host Pi: they are baked directly into the hardened container image at build time
 by `COPY` lines in
 [`src/infrastructure/pi-container/Dockerfile`](./src/infrastructure/pi-container/Dockerfile).
 Pi runs the TypeScript directly – there is no build step.
+
+`run/install` installs the HOST tooling – the `genie` CLI and the files it needs
+to build and run the boundary – and installs no extension anywhere.
 
 Non-extension infrastructure for the secure local agent architecture
 (Docker images, compose files, the model proxy, MCP server wiring) lives
@@ -16,15 +19,16 @@ under `src/infrastructure/`. See [docs/solution.md](./docs/solution.md) for
 the design, and [src/infrastructure/README.md](./src/infrastructure/README.md)
 for the runbook.
 
-The repository ships two extensions, forming the in-Pi half of the security
+The repository ships three extensions, forming the in-Pi half of the security
 boundary:
 
 - `mcp-client`: MCP client giving Pi mediated filesystem access through the
   Docker MCP Toolkit gateway.
 - `secret-sentry`: Unattended security controls for away-from-keyboard use —
-  absolute sensitive-filename refusal, secret redaction, and the system's only
-  audit trail. No interactive confirmation; see pi's `permission-gate` for
-  that.
+  absolute sensitive-filename refusal and secret redaction. No interactive
+  confirmation; see pi's `permission-gate` for that.
+- `audit-log`: The activity trail — every call and result, turn boundaries, and
+  model-request shapes. Records; decides nothing.
 
 See each extension's own README under `src/extensions/<name>/` for details.
 
@@ -59,6 +63,10 @@ SHOULD NOT, OPTIONAL, and MAY are to be interpreted as described in
   `(pi: ExtensionAPI) => void`. Helper modules (eg. `messages.ts`)
   sit alongside it and are imported with explicit `.ts` extensions.
 
+- **`bin/genie`**:
+  The host CLI. Parses arguments, then dispatches into `lib/fn/`. The only
+  entry point an installed Genie has.
+
 - **`src/infrastructure/`**:
   Non-extension infrastructure for the secure local agent architecture
   (Docker, compose, model proxy, MCP server wiring).
@@ -69,17 +77,23 @@ SHOULD NOT, OPTIONAL, and MAY are to be interpreted as described in
   lines never ship them.
 
 - **`run/`**:
-  Dev scripts – `startup`, `lint`, `fix`, `typecheck`, `test`, `check`.
+  Dev scripts – `install`, `startup`, `log`, `lint`, `fix`, `typecheck`, `test`,
+  `check`. `startup` and `log` are thin wrappers around `bin/genie`, so the dev
+  loop and the installed CLI cannot drift.
 
 - **`tsconfig.json`**:
   TypeScript config for the `noEmit` type-check (NodeNext, strict,
   `.ts` import extensions allowed). Not a build config.
 
-- **`run/inc/fn/`**:
-  Shared shell helpers (status printers, infrastructure startup).
+- **`lib/fn/`**:
+  Shared shell library, sourced by `bin/genie` and `run/install` –
+  `statuses.sh` (status printers, all writing to **stderr**), `paths.sh` (XDG
+  locations), `boundary.sh` (bring up, reuse, tear down), `agent.sh` (argument
+  resolution and the two run modes), `logs.sh` (audit-trail tailing),
+  `install.sh` (payload install).
 
-- **`run/inc/var/`**:
-  Shared shell variables (ANSI codes).
+- **`lib/var/`**:
+  Shared shell variables (ANSI codes, blanked when stderr is not a terminal).
 
 - **`docs/`**:
   Requirements, design decisions, and trade-offs for the hardened harness.
@@ -95,8 +109,22 @@ SHOULD NOT, OPTIONAL, and MAY are to be interpreted as described in
 
 ## Tools
 
-- **`./run/startup`** to bring up the hardened infrastructure (proxy, image,
-  compose boundary) and enter the container.
+- **`./run/install [--link|--uninstall]`** to install the host tooling: the
+  payload to `~/.local/share/genie/`, the config to `~/.config/genie/env`, and
+  a `genie` symlink in `~/.local/bin/`. `--link` points the payload at the
+  working tree instead of copying, for development.
+
+- **`genie`** (or **`./bin/genie`** from a checkout) to drive an agent inside the
+  boundary: `-p/--prompt` for one prompt with the response on stdout, `--tui` for
+  an interactive session, and `--up`/`--down`/`--status`/`--logs`/`--rebuild` for
+  the stack. `--project` scopes the agent and defaults to the working directory.
+  The stack is PERSISTENT: it is reused across invocations until `--down`.
+
+- **`./run/startup`** to open an interactive session from a checkout. A thin
+  wrapper around `genie --tui`; it no longer tears the stack down on exit.
+
+- **`./run/log [audit|security|all]`** to tail the audit trail. A thin wrapper
+  around `genie --logs`.
 
 - **`./run/lint`** and **`./run/fix`** to lint and auto-fix with ESLint.
 
@@ -109,11 +137,11 @@ SHOULD NOT, OPTIONAL, and MAY are to be interpreted as described in
 - **`./run/check`** to run the linter, then the type-check, then the tests –
   the command CI runs, and the one to run before committing.
 
-- **`shellcheck run/startup run/lint run/fix run/test run/check run/inc/**/*.sh`**
-  to lint the shell scripts.
+- **`shellcheck bin/genie run/install run/startup run/log run/lint run/fix
+  run/test run/check run/typecheck lib/**/*.sh`** to lint the shell scripts.
 
-Each `run/` script except `startup` is also exposed as an `npm run` alias
-(`lint`, `fix`, `typecheck`, `test`, `check`).
+Each `run/` script except `install`, `startup`, and `log` is also exposed as an
+`npm run` alias (`lint`, `fix`, `typecheck`, `test`, `check`).
 
 ## Rules
 
@@ -136,6 +164,26 @@ Each `run/` script except `startup` is also exposed as an `npm run` alias
 
 - MUST keep non-extension infrastructure under `src/infrastructure/`.
   Infrastructure is not a Pi extension and is never `COPY`'d as one.
+
+- MUST add any new path the installed CLI needs at runtime to the
+  `payload_paths` allowlist in `lib/fn/install.sh`. That list is what gets
+  installed; a file outside it exists in the repository and nowhere else, and the
+  failure is a `genie` that works from a checkout and breaks once installed.
+
+- MUST NOT let the security-critical launch flags migrate out of `start-pi`.
+  `--no-builtin-tools`, `--model`, and the project-trust decision live inside the
+  hardened image so no host-side caller can drop them. `bin/genie` chooses only
+  the role (via `PI_MODEL`) and the prompt; a `pi` flag added on the host would
+  be a control that a replaced command could silently remove.
+
+- MUST keep every status and progress message on **stderr** (use the helpers in
+  `lib/fn/statuses.sh`, never a bare `echo`). `genie`'s stdout is the agent's
+  response, and a single stray `echo` corrupts it for every scripted caller.
+
+- MUST give any `curl` against `LITELLM_HOST` an explicit
+  `--connect-timeout`. That address is `agent-net`'s gateway and does not exist
+  until compose creates the network, so the "nothing is up" case is unroutable
+  rather than refused, and curl's default is to retry for about two minutes.
 
 - MUST run `./run/check` and get a clean pass before committing. CI runs the
   same command on every push and pull request. `check` includes `typecheck`,

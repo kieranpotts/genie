@@ -1,85 +1,32 @@
 #!/usr/bin/env bash
 
 #
-# Tail the audit trail written by the hardened container's `audit-log` and
-# `secret-sentry` extensions, on the `pi-logs` volume.
+# Tail the audit trail, from this working tree.
+#
+# A THIN WRAPPER around `bin/genie --logs`, which holds the actual
+# implementation, for the same reason `run/startup` is one: one implementation,
+# two names, no drift between the dev loop and the installed tool.
 #
 # Usage: ./run/log [audit|security|all]
 #
 #   (no args), all   Tail both log files (default).
 #   audit            Tail only audit-log/calls.jsonl -- every call, turn
-#                     boundaries, model-request shapes.
+#                    boundaries, model-request shapes.
 #   security         Tail only secret-sentry/security.jsonl -- blocked calls
-#                     and redactions.
-#   -h, --help       Show this help and exit.
+#                    and redactions.
+#   -h, --help       Show `genie`'s help and exit.
 #
-# Requires the compose boundary to be up (./run/startup, or `docker compose
-# ... up -d`) -- the log files live inside the pi container. See "Inspect the
-# audit trail" in src/infrastructure/README.md for how to read what comes out.
+# Requires the boundary to be up (`genie --up`) -- the log files live inside the
+# pi container. See "Inspect the audit trail" in src/infrastructure/README.md for
+# how to read what comes out.
 #
 
 set -euo pipefail
 
+# Use this instead for debugging problems with the script.
+#set -euxo pipefail
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
-inc_path="${script_dir}/inc"
 
-infra_dir="${repo_root}/src/infrastructure"
-env_file="${infra_dir}/.env"
-
-. "${inc_path}/var/ansi-codes.sh"
-. "${inc_path}/fn/statuses.sh"
-
-audit_log="/var/log/pi/audit-log/calls.jsonl"
-security_log="/var/log/pi/secret-sentry/security.jsonl"
-
-case "${1:-all}" in
-  -h|--help)
-    # The header block above, minus its `#` prefixes. Runs from the title line
-    # to the end of that contiguous comment block, so neither editing the
-    # header nor changing its length can truncate `--help`.
-    awk '/^# Tail the audit trail/ { found = 1 }
-         found && !/^#/           { exit }
-         found                    { sub(/^# ?/, ""); print }' "$0"
-    exit 0
-    ;;
-  all)
-    targets=("${audit_log}" "${security_log}")
-    ;;
-  audit)
-    targets=("${audit_log}")
-    ;;
-  security)
-    targets=("${security_log}")
-    ;;
-  *)
-    echo "Unknown argument: ${1}" >&2
-    echo "Run \`./run/log --help\` to see available options." >&2
-    exit 1
-    ;;
-esac
-
-if [[ ! -f "${env_file}" ]]; then
-  print_error "Missing ${env_file}."
-  print_info "Run step 1 of the runbook first: cp ${infra_dir}/.env.example ${env_file}, then fill it in."
-  exit 1
-fi
-
-if ! docker compose -f "${infra_dir}/compose.yaml" --env-file "${env_file}" \
-    ps --status running --services 2>/dev/null | grep -qx "pi"; then
-  print_error "The pi container is not running."
-  print_info "Bring the boundary up first: ./run/startup"
-  exit 1
-fi
-
-print_info "Tailing ${targets[*]} (Ctrl-C to stop)."
-echo ""
-
-# -F (--follow=name --retry): keeps following if the file is rotated, and
-# waits rather than erroring if a log has no lines yet -- each extension only
-# creates its file on its first write, so a clean session may not have one.
-#
-# -T: no pseudo-tty. This is a one-way stream to this terminal, not an
-# interactive session.
-exec docker compose -f "${infra_dir}/compose.yaml" --env-file "${env_file}" \
-  exec -T pi tail -n 20 -F "${targets[@]}"
+exec "${repo_root}/bin/genie" --logs "$@"

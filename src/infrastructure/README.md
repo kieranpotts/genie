@@ -26,7 +26,8 @@ half; the in-Pi controls are the `mcp-client`, `secret-sentry`, and
 
 | Component | Location | Role |
 |---|---|---|
-| Host env contract | `.env.example` | Documents every value the host must provide; the real `.env` is gitignored and holds the cloud keys |
+| Host CLI | `../../bin/genie`, `../../lib/fn/boundary.sh` | Brings this stack up in the right order, reuses it across invocations, and runs an agent in it. Automates steps 3-6 below |
+| Host env contract | `.env.example` | Documents every value the host must provide; the real config (`~/.config/genie/env`, or a gitignored `.env` here) holds the cloud keys |
 | LiteLLM proxy | `proxy/litellm.config.yaml` | Host-side model router holding ALL cloud API keys; the agent gets only its endpoint and a master key |
 | Hardened agent image | `pi-container/Dockerfile` | Non-root, no-keys, no-`docker.sock`, no-mounts Pi image; capability-drop and limits applied at runtime by compose |
 | MCP filesystem boundary | `mcp/toolkit/catalog.yaml` + `compose.yaml` (`mcp-gateway`) | Catalog defines the `mcp/filesystem` server's allowed dir + mount (the actual boundary); the gateway spawns it from the catalog and fronts it over SSE. Sole holder of filesystem access — and of the Docker socket (see trade-off below) |
@@ -65,15 +66,35 @@ the security boundary. All three in-Pi extensions (`mcp-client`,
 `secret-sentry`, `audit-log`) are baked into the hardened image, so once it is
 built they are present in the agent.
 
+> [!TIP]
+> **`genie` automates steps 3 to 6.** Once installed (`./run/install`), a single
+> `genie --up` builds the image, brings up the boundary, and starts the proxy in
+> the right order; `genie --tui` or `genie -p "..."` then starts an agent. This
+> runbook remains the source of truth for **what** those steps do and **why the
+> order matters**, and steps 1, 2, 8, and 9 are still yours.
+>
+> Two differences from what this document used to describe are worth knowing:
+> `genie` reads its config from `~/.config/genie/env` rather than
+> `src/infrastructure/.env` (a checkout's `.env` is still used as a fallback, and
+> is adopted on a first install), and it takes the project from `--project`
+> rather than from `PROJECT_PATH`, defaulting to the working directory.
+>
+> The stack it brings up is **persistent** — nothing is torn down until
+> `genie --down`. See the note under step 5.
+
 **1. Configure the host**
 
 ```sh
-cp src/infrastructure/.env.example src/infrastructure/.env
-# Edit src/infrastructure/.env:
+cp src/infrastructure/.env.example ~/.config/genie/env   # or src/infrastructure/.env
+# Edit it:
 #   - ANTHROPIC_API_KEY / OPENAI_API_KEY   (held by the proxy only)
-#   - PROJECT_PATH=/absolute/path/to/the/one/project
 #   - LITELLM_MASTER_KEY      = $(openssl rand -hex 32)
+#   - PROJECT_PATH            optional; `genie --project` overrides it, and
+#                             defaults to the working directory
 ```
+
+`./run/install` creates that file from the example on a first install, so this
+step is usually "fill in the file it made" rather than "copy it yourself".
 
 > [!NOTE]
 > There is no `MCP_GATEWAY_AUTH_TOKEN`. The Docker MCP gateway enforces bearer
@@ -187,8 +208,23 @@ litellm --config src/infrastructure/proxy/litellm.config.yaml \
 > `Cannot assign requested address`.
 >
 > Nothing in step 3 needs a model: the `pi` container's PID 1 is `sleep
-> infinity`, so no agent exists until step 5. `./run/startup` performs these in
-> the same order.
+> infinity`, so no agent exists until step 5. `genie --up` performs these in the
+> same order, and `lib/fn/boundary.sh` carries the same warning where the order
+> is set.
+
+> [!NOTE]
+> **Run by hand, this proxy is a foreground process you stop with Ctrl-C. Run by
+> `genie`, it is detached and persistent** — it stays up between invocations so
+> repeated prompts do not each pay a proxy start, and `genie --down` is what stops
+> it. That means a process holding every cloud API key keeps running after your
+> command returns. It binds only to `agent-net`'s gateway, never `0.0.0.0`, so the
+> exposure is longer-lived rather than wider. `genie --status` reports it.
+>
+> `genie` will not reuse a proxy blindly. It replaces one whose
+> `litellm.config.yaml` or config file has changed since it started (the proxy
+> resolves both exactly once, at startup, so a stale one silently serves old
+> routes), and one it did not start itself — including the hand-run proxy from
+> this step, whose config it cannot know.
 
 **6. Start an agent**
 
@@ -196,6 +232,7 @@ Entering the container lands you in the hardened Pi harness, with your shell's
 working directory set to the project at `/workspace`:
 
 ```sh
+genie --tui                                                 # or, by hand:
 docker compose -f src/infrastructure/compose.yaml exec pi bash
 ```
 
@@ -203,10 +240,24 @@ docker compose -f src/infrastructure/compose.yaml exec pi bash
 pi-container:/workspace$
 ```
 
+For an agent that takes one instruction and exits, with its response on stdout —
+the scriptable path, and the reason `genie` exists — there is no interactive shell
+in the way:
+
+```sh
+genie -p "List the entries of /workspace."                  # or, by hand:
+docker compose -f src/infrastructure/compose.yaml exec -T pi start-pi -p "..."
+```
+
+Note `exec -T` on the by-hand form: with a pseudo-tty, Pi renders for a terminal
+and the captured output arrives full of control sequences.
+
 If you land in `~` instead, the shell says so on entry — the project volume is
-not mounted, and `PROJECT_PATH` in `.env` is the thing to check. That directory
-is the operator's, and is set by `PI_PROJECT_DIR`. The agent has no working
-directory in this container at all — it has no shell and no local file tools.
+not mounted. `genie --status` reports which project the stack is scoped to, and
+`--project` (or `PROJECT_PATH`, when running by hand) is the thing to check. That
+directory is the operator's, and is set by `PI_PROJECT_DIR`. The agent has no
+working directory in this container at all — it has no shell and no local file
+tools.
 
 The agent starts automatically. It is launched by the shell (`~/.bashrc` calls
 `start-pi`) rather than being the container's main process, which is what makes
@@ -306,15 +357,14 @@ what keeps the change trail complete.
 | Mediated read works | ask the agent to read a file in the project | returns content via an `mcp_*` tool |
 | Agent has no local tools | ask it to run a shell command, or to read `/workspace/README.md` without MCP | it has no such tool to call; only `mcp_*` tools are offered |
 | Traversal denied | ask it to read `../../etc/passwd` | denied at the MCP boundary |
-| Sensitive file refused | ask it to read `.env` in the project | refused before the call runs; the call log shows `"phase":"call","outcome":"blocked","confirmation":"not-offered"` |
-| Write requires approval | ask it to write a file | a confirmation prompt appears; on approve, write succeeds |
-| Default-deny on timeout | ignore the prompt for 60s | the write is blocked; the call log shows `"confirmation":"timeout"` |
-| Reads are recorded | ask it to read any ordinary project file | the call log gains a `"phase":"call","outcome":"allowed","confirmation":"not-required"` line naming the path |
+| Sensitive file refused | ask it to read `.env` in the project | refused before the call runs; `secret-sentry`'s `security.jsonl` gains a `"kind":"blocked"` line carrying the full `path` and a `reason` |
+| Writes proceed unprompted, and are recorded | ask it to write an ordinary project file | the write succeeds with NO confirmation prompt; `audit-log` gains a `call` line naming the path and a `result` line with `"result":"ok"` |
+| Reads are recorded | ask it to read any ordinary project file | the call log gains a `"phase":"call"` line naming the path. It carries no verdict: `audit-log` records, and does not decide |
 | Results are recorded | ask it to read any ordinary project file | a second `"phase":"result"` line follows with the same `id` and `"result":"ok"` |
 | Turns are delimited | give the agent two separate instructions, each causing a tool call | a `"kind":"turn_start"` line precedes each instruction's calls, with `turn` incrementing and the same `session`; the prompt text appears nowhere in the log |
 | Secrets are redacted from tool output | put a fake credential in a project file (eg. `aws_access_key_id = AKIAIOSFODNN7EXAMPLE`) and ask the agent to read it and repeat it verbatim | the agent reports `[redacted: aws-access-key-id]` and cannot produce the value; the `result` line carries `"redactions":1,"rules":["aws-access-key-id"]`; the value appears neither in the call log nor in the session transcript on `pi-sessions` |
 | Model requests are recorded, as shape only | ask the agent anything that makes it read a file | `"kind":"provider_request"` lines appear with `model`, `messages`, and `approx_bytes` climbing across the turn; no message text, no file content, and no system prompt anywhere in the log |
-| A downstream refusal is visible as one | ask it to read `../../etc/passwd` | the `call` line says `"outcome":"allowed"` (the gate admitted it) and the `result` line says `"result":"error"` (the MCP server refused it). This pairing is the thing the trail could not express before. |
+| A downstream refusal is visible as one | ask it to read `../../etc/passwd` | both lines appear: a `"phase":"call"` line naming the path (it was attempted) and a `"phase":"result"` line with `"result":"error"` (the MCP server refused it). That pairing is what distinguishes an attempt from a read. |
 | Tool surface is the documented eight | the tool-surface check below | exactly the eight `mcp_*` tools listed in `docs/solution.md` — the gateway's `--tools` allowlist withholds three of the eleven the server exposes; no `bash`, no Git, no web fetch |
 | No network binaries | `docker compose ... exec pi sh -c 'for b in git curl wget nc ssh; do command -v $b \|\| echo "$b absent"; done'` | all five absent |
 | Gateway starts hardened | `docker compose ... up` then `docker compose ... ps` | `mcp-gateway` is healthy with `cap_drop: ALL` + read-only rootfs. If it fails to start, relax `cap_drop` to the minimum it reports needing (see the compose comment). |
@@ -443,13 +493,13 @@ docker compose -f src/infrastructure/compose.yaml exec pi cat /var/log/pi/audit-
 docker compose -f src/infrastructure/compose.yaml exec pi cat /var/log/pi/secret-sentry/security.jsonl
 ```
 
-`./run/log` wraps the same commands with `tail -f`, for watching a session live
+`genie --logs` wraps the same commands with `tail -F`, for watching a session live
 rather than dumping the whole file:
 
 ```sh
-./run/log            # Both files (default).
-./run/log audit      # Just audit-log/calls.jsonl.
-./run/log security   # Just secret-sentry/security.jsonl.
+genie --logs            # Both files (default).
+genie --logs audit      # Just audit-log/calls.jsonl.
+genie --logs security   # Just secret-sentry/security.jsonl.
 ```
 
 They used to be one file, written by one extension. `secret-sentry` now

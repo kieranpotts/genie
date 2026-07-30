@@ -1,41 +1,32 @@
 #!/usr/bin/env bash
 
 #
-# Bring up the security hardening infrastructure.
+# Open an interactive agent session, from this working tree.
 #
-# Automates steps 2-5 of the operator runbook in
-# `src/infrastructure/README.md`: start the host LiteLLM proxy, build the
-# hardened agent image, bring up the docker compose boundary (agent-net, the
-# mcp-gateway, and the pi container), then put you inside the hardened
-# container, where the Pi harness starts automatically.
+# A THIN WRAPPER around `bin/genie --tui`, which holds the actual
+# implementation. This exists so the dev loop keeps a familiar entry point that
+# needs no install, and so there is exactly ONE implementation of the boundary
+# bring-up: an installed `genie` and this script cannot drift apart, because they
+# are the same code reached by two names.
 #
-# `/quit` leaves the agent but not the container: you land at a shell inside
-# the boundary, and `start-pi` takes you back in. Exiting THAT shell is what
-# ends the session and tears everything down.
+# Usage: ./run/startup [genie-options...]
 #
-# Step 1 of the runbook (populating `src/infrastructure/.env`) is not
-# automated — it requires the operator's own cloud API keys and generated
-# secrets — but is validated here before anything is started.
+#   -h, --help    Show `genie`'s help and exit.
 #
-# Steps 6-7 (verifying the boundary, inspecting the audit trail) remain
-# manual; see the runbook.
+# Any arguments are passed through, so `./run/startup --project /path` and
+# `./run/startup --model technical-lead` work as they do on `genie`.
 #
-# Usage: ./run/startup
+# THIS NO LONGER TEARS THE STACK DOWN WHEN YOU LEAVE, which is the one behaviour
+# change worth knowing if you used the previous version of this script. The
+# boundary and the proxy are now persistent, so that a scripted caller sending
+# several prompts does not pay a full bring-up for each one. Leaving the
+# container leaves it running.
 #
-#   -h, --help    Show this help and exit.
+# Stop it explicitly:
 #
-# Exiting the container shell (or Ctrl-C, or any exit) tears the compose
-# boundary back down and stops the LiteLLM proxy this script started.
+#   ./bin/genie --down     (or `genie --down`, once installed)
 #
-# A proxy already listening on the configured host/port is STOPPED AND
-# REPLACED, not reused: it would still be serving the config and environment
-# it was started with, silently ignoring later edits to `.env` and to
-# proxy/litellm.config.yaml.
-#
-# The `project` volume is likewise RECREATED on every run, so PROJECT_PATH in
-# `.env` is always the project the stack is scoped to. That volume is a bind
-# pointer to a host directory, not storage, so recreating it loses nothing.
-# The `pi-logs` and `pi-sessions` volumes hold real data and are preserved.
+# `genie --status` reports what is up, and against which project.
 #
 
 set -euo pipefail
@@ -43,69 +34,10 @@ set -euo pipefail
 # Use this instead for debugging problems with the script.
 #set -euxo pipefail
 
-for arg in "$@"; do
-  case "${arg}" in
-    -h|--help)
-      # The header block above, minus its `#` prefixes. Runs from the title
-      # line to the end of that contiguous comment block, so neither editing
-      # the header nor changing its length can truncate `--help`.
-      awk '/^# Bring up the security/ { found = 1 }
-           found && !/^#/             { exit }
-           found                      { sub(/^# ?/, ""); print }' "$0"
-      exit 0
-      ;;
-    *)
-      echo "Unknown argument: ${arg}" >&2
-      echo "Run \`./run/startup --help\` to see available options." >&2
-      exit 1
-      ;;
-  esac
-done
-
-#
-# Global variables.
-#
-
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
-inc_path="${script_dir}/inc"
 
-# shellcheck disable=SC2034
-infra_dir="${repo_root}/src/infrastructure"
-# shellcheck disable=SC2034
-env_file="${infra_dir}/.env"
-# shellcheck disable=SC2034
-proxy_log="$(mktemp -t litellm-proxy.XXXXXX.log)"
-
-# Compose project name. MUST match the `name:` field in compose.yaml — it is
-# what namespaces this stack's volumes, and `reset_project_volume` uses it to
-# find the `project` volume without having to assume Docker's naming scheme.
-# shellcheck disable=SC2034
-compose_project="pi-secure-agent"
-
-#
-# Includes.
-#
-
-. "${inc_path}/var/ansi-codes.sh"
-. "${inc_path}/fn/statuses.sh"
-. "${inc_path}/fn/startup.sh"
-
-#
-# Main script.
-#
-
-trap cleanup EXIT INT TERM
-
-check_dependencies
-check_env
-check_ollama
-build_image
-reset_project_volume
-# ORDER IS LOAD-BEARING: the boundary must come up BEFORE the proxy starts.
-# LITELLM_HOST is agent-net's gateway address, and that address does not exist
-# on the host until compose creates the network — binding to it first fails with
-# "Cannot assign requested address". See start_proxy.
-bring_up_boundary
-start_proxy
-enter_container
+# `--tui` first, so an explicitly passed action wins the mutual-exclusion check
+# in `genie` rather than being silently overridden — `./run/startup --down` then
+# reports the conflict instead of quietly opening a session.
+exec "${repo_root}/bin/genie" --tui "$@"

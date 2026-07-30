@@ -1,0 +1,424 @@
+#!/usr/bin/env bash
+
+#
+# Genie — drive a hardened Pi agent from the command line.
+#
+# Runs the Pi coding agent inside this project's security boundary: a hardened
+# container with no shell and no local file tools, reaching project files only
+# through a gated MCP server that logs every call, and reaching models only
+# through a host-side proxy that holds the API keys.
+#
+# Usage:
+#   genie [options] --prompt TEXT|FILE|-   Send one prompt; print the response.
+#   genie [options] TEXT...                Same, with the prompt as arguments.
+#   genie [options] --tui                  Open an interactive agent session.
+#
+# Options:
+#   -p, --prompt TEXT|FILE|-  The prompt: literal text, a file to read, or `-`
+#                             for stdin. A piped stdin is used if none is given.
+#   -m, --model ROLE          Model route: computer-programmer (default),
+#                             technical-lead, technical-writer, security-analyst.
+#                             Accepts a `litellm/` prefix. Unknown roles fail.
+#   -C, --project DIR         Project to expose to the agent. Defaults to the
+#                             working directory. This is the ONLY thing the agent
+#                             can reach; `/` and `$HOME` are refused.
+#       --json                Ask Pi for JSON output rather than text.
+#       --tui                 Interactive session instead of a single prompt.
+#
+# Lifecycle:
+#       --up                  Bring the boundary up and leave it running.
+#       --down                Stop the proxy and the containers.
+#       --status              Report what is running, and against which project.
+#       --logs [WHICH]        Tail the audit trail: all (default), audit,
+#                             security.
+#       --rebuild             Rebuild the hardened image and recreate the
+#                             containers, even if they are already up.
+#   -h, --help                Show this help and exit.
+#   -v, --version             Show version information and exit.
+#
+# The stack is PERSISTENT. The first invocation builds the image, brings up the
+# containers, and starts the proxy; later ones reuse all three, so a prompt costs
+# about a second instead of about a minute. Nothing is torn down until you ask:
+# `genie --down`.
+#
+# STDOUT CARRIES THE AGENT'S RESPONSE AND NOTHING ELSE. Progress, warnings, and
+# errors go to stderr, and the exit code is Pi's, so this composes:
+#
+#   genie --prompt "Summarise the test suite." > summary.md
+#   genie --prompt ./review-request.md --model security-analyst
+#   echo "What does src/index.ts export?" | genie --json | jq .
+#
+# Configuration — cloud API keys and the proxy address — lives in
+# ${XDG_CONFIG_HOME:-~/.config}/genie/env, or in src/infrastructure/.env when
+# running from a checkout. See src/infrastructure/README.md for the runbook this
+# automates, and docs/solution.md for why the boundary is shaped as it is.
+#
+
+# Strict mode:
+#   -e            Exit on any unhandled command failure.
+#   -u            Error on references to unset variables.
+#   -o pipefail   A pipeline fails if any element fails (not just the last).
+
+set -euo pipefail
+
+# Use this instead for debugging problems with the script.
+#set -euxo pipefail
+
+#
+# Global variables.
+#
+
+# Absolute path to this script, with every symlink resolved, and the payload
+# root above it.
+#
+# THIS RESOLUTION IS WHAT MAKES BOTH INSTALL MODES WORK, and it has to happen
+# before anything is sourced, because what it finds is where the library lives.
+# `~/.local/bin/genie` is a symlink to the payload's `bin/genie`, and under
+# `run/install --link` the payload directory is itself a symlink to a working
+# tree — so the chain can be two links deep. `readlink -f` follows all of it and
+# requires the target to exist, which turns a checkout that has been moved or
+# deleted into a clear error rather than a missing-library one.
+self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+if [[ -z "${self}" || ! -f "${self}" ]]; then
+  printf 'genie: cannot resolve %s to a real file.\n' "${BASH_SOURCE[0]}" >&2
+  printf 'genie: if the checkout it pointed at was moved or deleted, re-run ./run/install.\n' >&2
+  exit 1
+fi
+
+payload_root="$(cd "$(dirname "${self}")/.." && pwd)"
+lib_path="${payload_root}/lib"
+
+# Read by the sourced helpers in lib/fn/.
+# shellcheck disable=SC2034
+infra_dir="${payload_root}/src/infrastructure"
+
+# Compose project name. MUST match the `name:` field in compose.yaml — it is
+# what namespaces this stack's volumes, and the project-volume lookup uses it to
+# find the `project` volume without having to assume Docker's naming scheme.
+# shellcheck disable=SC2034
+compose_project="pi-secure-agent"
+
+#
+# Includes.
+#
+
+# Source ANSI code variables.
+. "${lib_path}/var/ansi-codes.sh"
+
+# Source utility functions.
+. "${lib_path}/fn/statuses.sh"
+. "${lib_path}/fn/paths.sh"
+. "${lib_path}/fn/boundary.sh"
+. "${lib_path}/fn/agent.sh"
+. "${lib_path}/fn/logs.sh"
+
+#
+# Argument parsing.
+#
+
+# The single action to take. Empty means the default: send a prompt.
+action=""
+
+# Modifiers.
+prompt_arg=""
+model_arg=""
+project_arg=""
+log_arg="all"
+
+# Read by the sourced helpers in lib/fn/.
+# shellcheck disable=SC2034
+output_json=""
+
+# Read by ensure_boundary in lib/fn/boundary.sh.
+# shellcheck disable=SC2034
+force_rebuild=""
+
+# Positional arguments, collected into a prompt so `genie "do the thing"` works
+# the way `pi "do the thing"` does.
+positional=()
+
+# show_help - Print the header block above, minus its `#` prefixes.
+#
+# Runs from the title line to the end of that contiguous comment block, so
+# neither editing the header nor changing its length can truncate `--help`.
+# Reads ${self} rather than $0 because $0 may be the symlink on PATH.
+#
+show_help() {
+  awk '/^# Genie — drive/ { found = 1 }
+       found && !/^#/      { exit }
+       found               { sub(/^# ?/, ""); print }' "${self}"
+}
+
+# show_version - Report what this is, and what it will actually run.
+#
+# There are no release tags in this project — the latest commit on the default
+# branch is the only supported state — so a version number would be a fiction.
+# What IS worth reporting is the payload in use, the Pi version pinned into the
+# hardened image, and the commit when the payload is a checkout.
+#
+show_version() {
+  local pi_version commit
+
+  pi_version=$(grep -oP '^ARG PI_VERSION=\K.*' \
+                 "${infra_dir}/pi-container/Dockerfile" 2>/dev/null || true)
+  commit=$(git -C "${payload_root}" rev-parse --short HEAD 2>/dev/null || true)
+
+  printf 'genie      unversioned (no release tags; see CONTRIBUTING.md)\n'
+  printf 'payload    %s\n' "${payload_root}"
+  printf 'pi         %s (pinned in the hardened image)\n' "${pi_version:-unknown}"
+  if [[ -n "${commit}" ]]; then
+    printf 'commit     %s\n' "${commit}"
+  fi
+}
+
+# set_action - Record the action, refusing a second one.
+#
+# The actions are mutually exclusive and silently honouring the last one would
+# make `genie --down --tui` do something the caller did not ask for.
+#
+# Arguments:
+#   $1 - Action name.
+#
+set_action() {
+  if [[ -n "${action}" && "${action}" != "$1" ]]; then
+    print_error "--${action} and --$1 cannot be combined."
+    exit 1
+  fi
+  action="$1"
+}
+
+# require_value - Fail if a flag that needs a value did not get one.
+#
+# Arguments:
+#   $1 - Flag name, for the message.
+#   $2 - The value, possibly empty.
+#
+require_value() {
+  if [[ -z "${2:-}" ]]; then
+    print_error "$1 needs a value."
+    print_info "Run \`genie --help\` to see available options."
+    exit 1
+  fi
+}
+
+# Normalise `--flag=value` into `--flag value`, so both spellings work. Callers
+# driving this from another program tend to write the first; people tend to write
+# the second.
+normalised=()
+for arg in "$@"; do
+  if [[ "${arg}" == --*=* ]]; then
+    normalised+=("${arg%%=*}" "${arg#*=}")
+  else
+    normalised+=("${arg}")
+  fi
+done
+if (( ${#normalised[@]} )); then
+  set -- "${normalised[@]}"
+fi
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      show_help
+      exit 0
+      ;;
+    -v|--version)
+      show_version
+      exit 0
+      ;;
+    -p|--prompt)
+      require_value "--prompt" "${2:-}"
+      prompt_arg="$2"
+      shift 2
+      ;;
+    -m|--model)
+      require_value "--model" "${2:-}"
+      model_arg="$2"
+      shift 2
+      ;;
+    -C|--project)
+      require_value "--project" "${2:-}"
+      project_arg="$2"
+      shift 2
+      ;;
+    --json)
+      # Read by run_headless in lib/fn/agent.sh.
+      # shellcheck disable=SC2034
+      output_json="yes"
+      shift
+      ;;
+    --tui)
+      set_action "tui"
+      shift
+      ;;
+    --up)
+      set_action "up"
+      shift
+      ;;
+    --down)
+      set_action "down"
+      shift
+      ;;
+    --status)
+      set_action "status"
+      shift
+      ;;
+    --logs)
+      set_action "logs"
+      # An optional value: only consume the next argument if it names a trail,
+      # so `genie --logs` and `genie --logs audit` both work and a stray word
+      # is not silently swallowed.
+      case "${2:-}" in
+        all|audit|security)
+          log_arg="$2"
+          shift 2
+          ;;
+        *)
+          shift
+          ;;
+      esac
+      ;;
+    --rebuild)
+      # Read by ensure_boundary in lib/fn/boundary.sh.
+      # shellcheck disable=SC2034
+      force_rebuild="yes"
+      shift
+      ;;
+    -*)
+      print_error "Unknown option: $1"
+      print_info "Run \`genie --help\` to see available options."
+      exit 1
+      ;;
+    *)
+      positional+=("$1")
+      shift
+      ;;
+  esac
+done
+
+# Positional arguments are a prompt, joined with spaces. Rejected rather than
+# ignored when --prompt was also given: the two disagree about what to ask, and
+# guessing which one was meant is worse than saying so.
+#
+# Also rejected alongside any other action, which is what stops a mistyped value
+# being silently discarded — `genie --logs wrongname` would otherwise treat
+# `wrongname` as a prompt, ignore it because the action is `--logs`, and tail the
+# default trail as though nothing had been asked for.
+if (( ${#positional[@]} )); then
+  if [[ -n "${prompt_arg}" ]]; then
+    print_error "Give a prompt either with --prompt or as arguments, not both."
+    exit 1
+  fi
+  if [[ -n "${action}" ]]; then
+    print_error "Unexpected argument for --${action}: ${positional[0]}"
+    if [[ "${action}" == "logs" ]]; then
+      print_info "Valid trails are: all, audit, security."
+    fi
+    exit 1
+  fi
+  prompt_arg="${positional[*]}"
+fi
+
+#
+# Resolve the environment the chosen action runs in.
+#
+
+state_dir="$(genie_state_dir)"
+mkdir -p "${state_dir}"
+
+# The config file is located but NOT required here — `--status` is useful
+# without one, and load_config produces the better error for everything else.
+env_file="$(find_config_file "${payload_root}" || true)"
+if [[ -z "${env_file}" ]]; then
+  env_file="$(genie_config_dir)/env"
+fi
+
+# The project the agent is scoped to.
+#
+# ONLY THE ACTIONS THAT ACTUALLY SCOPE AN AGENT VALIDATE IT. `--status`,
+# `--down`, and `--logs` do not start an agent, so demanding a valid project
+# from them would be wrong in a way that bites immediately: the default is the
+# working directory, and `$HOME` is refused, so `genie --status` from a home
+# directory would refuse to tell you what is running.
+#
+# Those actions still need SOMETHING, because compose.yaml interpolates
+# `${PROJECT_PATH:?...}` on every invocation including `ps` and `down`. The right
+# value is the one the stack is already using, which the volume itself knows —
+# so it is read from there, and falls back to the working directory only when
+# there is no volume to ask.
+if [[ -n "${action}" && "${action}" != "up" && "${action}" != "tui" ]]; then
+  if [[ -n "${project_arg}" ]]; then
+    project_path="$(resolve_project "${project_arg}")"
+  else
+    project_path="$(current_project)"
+    [[ -n "${project_path}" ]] || project_path="${PWD}"
+  fi
+else
+  project_path="$(resolve_project "${project_arg}")"
+fi
+
+# The default role matches `start-pi`'s own default, so `genie` with no --model
+# behaves identically to entering the container and typing `pi`. Validated even
+# when it is the default, so a models.json that lost a role is caught here.
+# shellcheck disable=SC2034
+pi_model="$(resolve_model "${model_arg:-computer-programmer}")"
+
+#
+# Main script.
+#
+
+main() {
+  case "${action}" in
+    status)
+      # Deliberately tolerant of a missing OR incomplete config: reporting what
+      # is running is exactly what is wanted at that point, and `load_config`
+      # would refuse to answer. A fresh install has an incomplete config by
+      # construction, so this is the common case, not the edge one.
+      if ! read_config; then
+        print_warning "No config file at ${env_file}."
+      fi
+      print_status
+      ;;
+
+    down)
+      load_config
+      teardown
+      ;;
+
+    up)
+      ensure_up
+      print_status
+      ;;
+
+    logs)
+      load_config
+      tail_logs "${log_arg}"
+      ;;
+
+    tui)
+      # Before ensure_up, so a session that cannot be opened costs nothing.
+      require_terminal
+      ensure_up
+      enter_tui
+      ;;
+
+    "")
+      # The default action, and the reason this tool exists: one prompt in, one
+      # response out. Resolved BEFORE the boundary comes up, so a missing or
+      # empty prompt fails immediately rather than after a minute of bring-up.
+      #
+      # Read by run_headless in lib/fn/agent.sh.
+      # shellcheck disable=SC2034
+      prompt="$(resolve_prompt "${prompt_arg}")"
+      ensure_up
+      run_headless
+      ;;
+
+    *)
+      print_error "Unhandled action: ${action}"
+      exit 1
+      ;;
+  esac
+}
+
+main
