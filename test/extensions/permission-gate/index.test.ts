@@ -18,14 +18,22 @@ import { join } from 'node:path'
 
 type Handler = (event: unknown, ctx: unknown) => Promise<unknown>
 
+/** The four hooks this extension registers, keyed by event name. */
+interface Handlers {
+  tool_call: Handler
+  tool_result: Handler
+  before_provider_request: Handler
+  before_agent_start: Handler
+}
+
 /** Load the extension against a stub API, logging to `file`. */
-async function loadExtension (file: string): Promise<Record<string, Handler>> {
-  const handlers: Record<string, Handler> = {}
+async function loadExtension (file: string): Promise<Handlers> {
+  const handlers: Partial<Handlers> = {}
   process.env.PERMISSION_GATE_CALL_LOG = file
   const module = await import('../../../src/extensions/permission-gate/index.ts')
-  const register = module.default as (pi: { on: (e: string, h: Handler) => void }) => void
+  const register = module.default as (pi: { on: (e: keyof Handlers, h: Handler) => void }) => void
   register({ on: (event, handler) => { handlers[event] = handler } })
-  return handlers
+  return handlers as Handlers
 }
 
 /** A context with no interactive UI, which the gate treats as default-deny. */
@@ -81,11 +89,11 @@ describe('permission-gate wiring', () => {
 
       const lines = await readLines(file)
       assert.equal(lines.length, 2)
-      assert.equal(lines[0].phase, 'call')
-      assert.equal(lines[0].outcome, 'allowed')
-      assert.equal(lines[1].phase, 'result')
-      assert.equal(lines[1].result, 'error')
-      assert.equal(lines[0].id, lines[1].id, 'the two lines must be joinable')
+      assert.equal(lines[0]!.phase, 'call')
+      assert.equal(lines[0]!.outcome, 'allowed')
+      assert.equal(lines[1]!.phase, 'result')
+      assert.equal(lines[1]!.result, 'error')
+      assert.equal(lines[0]!.id, lines[1]!.id, 'the two lines must be joinable')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -110,7 +118,7 @@ describe('permission-gate wiring', () => {
       )
 
       const lines = await readLines(file)
-      assert.equal(lines[1].result, 'ok')
+      assert.equal(lines[1]!.result, 'ok')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -131,8 +139,9 @@ describe('permission-gate wiring', () => {
       )
 
       const [line] = await readLines(file)
-      for (const p of paths) assert.equal(line.detail.includes(p), true, `detail omits ${p}`)
-      assert.equal(line.detail.includes('…'), false, 'detail must not be elided')
+      assert.ok(line)
+      for (const p of paths) assert.equal(line.detail!.includes(p), true, `detail omits ${p}`)
+      assert.equal(line.detail!.includes('…'), false, 'detail must not be elided')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -158,8 +167,9 @@ describe('permission-gate wiring', () => {
       )
 
       const [line] = await readLines(file)
+      assert.ok(line)
       assert.equal(line.outcome, 'allowed')
-      assert.equal(line.detail.includes(path), true, 'the record must carry the whole path')
+      assert.equal(line.detail!.includes(path), true, 'the record must carry the whole path')
       assert.equal(shown.includes(path), false, 'the dialog should not have to render it all')
       assert.match(shown, /more characters not shown/)
     } finally {
@@ -180,9 +190,9 @@ describe('permission-gate wiring', () => {
       assert.equal(outcome.block, true)
       const lines = await readLines(file)
       assert.equal(lines.length, 1)
-      assert.equal(lines[0].phase, 'call')
-      assert.equal(lines[0].outcome, 'blocked')
-      assert.equal(lines[0].confirmation, 'not-offered')
+      assert.equal(lines[0]!.phase, 'call')
+      assert.equal(lines[0]!.outcome, 'blocked')
+      assert.equal(lines[0]!.confirmation, 'not-offered')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -253,7 +263,7 @@ describe('permission-gate tool-output redaction', () => {
       ) as { content: Array<{ text: string }> }
 
       assert.ok(patch, 'a patch must be returned, or nothing is redacted')
-      assert.equal(patch.content[0].text, 'api key: [redacted: github-token]')
+      assert.equal(patch.content[0]!.text, 'api key: [redacted: github-token]')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -265,9 +275,9 @@ describe('permission-gate tool-output redaction', () => {
       await handlers.tool_result(resultEvent(`api key: ${secret}`), noUI)
 
       const lines = await readLines(file)
-      assert.equal(lines[0].phase, 'result')
-      assert.equal(lines[0].redactions, 1)
-      assert.deepEqual(lines[0].rules, ['github-token'])
+      assert.equal(lines[0]!.phase, 'result')
+      assert.equal(lines[0]!.redactions, 1)
+      assert.deepEqual(lines[0]!.rules, ['github-token'])
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -297,8 +307,8 @@ describe('permission-gate tool-output redaction', () => {
       assert.equal(patch, undefined)
 
       const lines = await readLines(file)
-      assert.equal('redactions' in lines[0], false)
-      assert.equal('rules' in lines[0], false)
+      assert.equal('redactions' in lines[0]!, false)
+      assert.equal('rules' in lines[0]!, false)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -316,8 +326,8 @@ describe('permission-gate tool-output redaction', () => {
 
       assert.equal(patch, undefined)
       const lines = await readLines(file)
-      assert.equal(lines[0].phase, 'result')
-      assert.equal(lines[0].result, 'ok')
+      assert.equal(lines[0]!.phase, 'result')
+      assert.equal(lines[0]!.result, 'ok')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -351,10 +361,10 @@ describe('permission-gate model-request logging', () => {
 
       const lines = await readLines(file)
       assert.equal(lines.length, 1)
-      assert.equal(lines[0].kind, 'provider_request')
-      assert.equal(lines[0].model, 'computer-programmer')
-      assert.equal(lines[0].messages, 2)
-      assert.ok(Number(lines[0].approx_bytes) > 0)
+      assert.equal(lines[0]!.kind, 'provider_request')
+      assert.equal(lines[0]!.model, 'computer-programmer')
+      assert.equal(lines[0]!.messages, 2)
+      assert.ok(Number(lines[0]!.approx_bytes) > 0)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -457,7 +467,7 @@ describe('permission-gate turn markers', () => {
         ['turn_start', 'call', 'turn_start', 'call']
       )
       assert.deepEqual(lines.filter(l => l.kind !== undefined).map(l => l.turn), [1, 2])
-      assert.equal(lines[0].session, 's-01')
+      assert.equal(lines[0]!.session, 's-01')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

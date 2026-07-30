@@ -341,12 +341,12 @@ describe('CallLog.record', () => {
       ))
       const lines = (await readFile(file, 'utf8')).trimEnd().split('\n')
       assert.equal(lines.length, 3)
-      assert.equal(JSON.parse(lines[0]).phase, 'call')
-      assert.equal(JSON.parse(lines[0]).outcome, 'allowed')
-      assert.equal(JSON.parse(lines[1]).phase, 'result')
-      assert.equal(JSON.parse(lines[1]).id, 'tc_1')
-      assert.equal(JSON.parse(lines[2]).tool, 'mcp_write_file')
-      assert.equal(JSON.parse(lines[2]).outcome, 'blocked')
+      assert.equal(JSON.parse(lines[0]!).phase, 'call')
+      assert.equal(JSON.parse(lines[0]!).outcome, 'allowed')
+      assert.equal(JSON.parse(lines[1]!).phase, 'result')
+      assert.equal(JSON.parse(lines[1]!).id, 'tc_1')
+      assert.equal(JSON.parse(lines[2]!).tool, 'mcp_write_file')
+      assert.equal(JSON.parse(lines[2]!).outcome, 'blocked')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

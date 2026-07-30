@@ -41,7 +41,7 @@ export const nouns = [
 
 /** Pick a uniformly random element from a non-empty list. */
 export function randomItem<T> (list: readonly T[]): T {
-  return list[Math.floor(Math.random() * list.length)]
+  return list[Math.floor(Math.random() * list.length)]!
 }
 
 /** Compose a random status message from participle + noun. */

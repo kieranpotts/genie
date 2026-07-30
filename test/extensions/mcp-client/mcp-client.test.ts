@@ -137,7 +137,7 @@ describe('McpClient', () => {
     const client = new McpClient({
       url: 'http://gw/mcp',
       fetch: async (_url, init) => {
-        accepts.push(init.headers.accept)
+        accepts.push(init.headers.accept!)
         const req = JSON.parse(init.body) as { id?: number }
         return { ok: true, status: 200, headers: headersWith(), text: async () => `data: ${JSON.stringify({ jsonrpc: '2.0', id: req.id, result: {} })}\n\n` }
       },

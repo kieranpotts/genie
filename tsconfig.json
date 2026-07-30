@@ -17,11 +17,9 @@
     "verbatimModuleSyntax": true,
 
     // Be strict — it's literally the point of a type-checker.
-    // NOTE: `noUncheckedIndexedAccess` is intentionally OFF for now. Enabling it
-    // surfaces ~20 latent `T | undefined` index-access findings across existing
-    // code; adopt it as a separate cleanup once those are addressed.
     "strict": true,
     "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": true,
 
     // Skip checking declaration files in node_modules.
     "skipLibCheck": true,

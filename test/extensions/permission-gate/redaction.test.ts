@@ -148,8 +148,8 @@ describe('redactContent', () => {
     ])
     assert.equal(out.count, 2)
     assert.deepEqual(out.rules, ['aws-access-key-id', 'github-token'])
-    assert.equal(out.value[0].text, 'first [redacted: aws-access-key-id]')
-    assert.equal(out.value[1].text, 'second [redacted: github-token]')
+    assert.equal(out.value[0]!.text, 'first [redacted: aws-access-key-id]')
+    assert.equal(out.value[1]!.text, 'second [redacted: github-token]')
   })
 
   /* A key in a screenshot is not something a regex over a string can see. This
@@ -165,7 +165,7 @@ describe('redactContent', () => {
     const out = redactContent([
       { type: 'text', text: 'AKIAIOSFODNN7EXAMPLE', textSignature: 'sig' },
     ])
-    assert.equal(out.value[0].textSignature, 'sig')
+    assert.equal(out.value[0]!.textSignature, 'sig')
   })
 
   it('returns parts by identity when nothing matched', () => {
