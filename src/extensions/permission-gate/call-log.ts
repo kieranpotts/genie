@@ -1,5 +1,6 @@
 /**
- * Append-only log of every tool call the gate sees.
+ * Append-only log of every tool call the gate sees, plus the turn boundaries
+ * between them.
  *
  * Read-only calls, which are never prompted for, are recorded too:
  * `docs/requirements.md` asks for observability of every action against the
@@ -31,6 +32,12 @@
  * an accountability record should not be deletable from. Pruning is the
  * operator's, from the host. See "Retention" in this extension's README and in
  * src/infrastructure/README.md.
+ *
+ * A THIRD LINE KIND marks the boundary between turns, so a reviewer can group
+ * calls by the instruction that caused them rather than correlating timestamps
+ * against a session transcript on another volume. It carries no `phase` — see
+ * `TurnRecord` for why that field is deliberately absent — and no description of
+ * what the turn was about. It records that a turn began, and nothing else.
  *
  * The attempt line is also TWO-AXIS:
  *
@@ -126,43 +133,95 @@ export interface CallResultRecord extends RecordBase {
   result: CallResult
 }
 
-export type CallRecord = CallAttemptRecord | CallResultRecord
+/**
+ * A turn boundary: one agent run, started by one instruction from the operator.
+ *
+ * Written from `before_agent_start`, which fires after a prompt is submitted and
+ * before the agent loop runs. Every call line that follows belongs to this turn
+ * until the next turn line appears, which is what makes "what did the agent do
+ * in response to *that* instruction" answerable from this file alone.
+ *
+ * NOT `phase`. The three documented `jq` recipes in the runbook all select on
+ * `.phase`, and a line without that field yields `null`, which matches neither
+ * `"call"` nor `"result"` — so every existing query returns exactly what it did
+ * before this line kind existed. Re-check that if a recipe is ever written which
+ * selects lines by the ABSENCE of a field rather than by its value.
+ *
+ * NOT Pi's `turn_start` event, despite the name. That event fires once per model
+ * request inside a single agent run, and its `turnIndex` resets to 0 on every
+ * run, so it cannot serve as a grouping key. Pi's own `before_agent_start`
+ * result type calls this boundary a turn too ("replace the system prompt for
+ * this turn"), which is the naming followed here.
+ *
+ * The key set is CLOSED, and deliberately so: `before_agent_start` hands the
+ * handler the user's prompt, the images attached to it, and the fully assembled
+ * system prompt. None of that is recorded. This line says a turn began; letting
+ * it grow into a record of what the turn was ABOUT would put the conversation
+ * into the audit trail, which is the failure "paths, never content" exists to
+ * prevent.
+ */
+export interface TurnRecord {
+  ts: string
+  kind: 'turn_start'
+  /**
+   * Which turn, counted by THIS process from 1. Not persisted and not derived
+   * from the session, so a resumed session starts counting again — `ts` and file
+   * order disambiguate. It is an ordinal for referring to a turn, not an id.
+   */
+  turn: number
+  /**
+   * Pi's session id, when the harness exposes one. This is what makes the
+   * ordinal usable in a file that is appended to forever and across sessions:
+   * without it, turn 1 of today is indistinguishable from turn 1 of last week.
+   * Omitted rather than faked if unavailable.
+   */
+  session?: string
+}
+
+export type LogRecord = CallAttemptRecord | CallResultRecord | TurnRecord
 
 /** Distributes `Omit` across the union, so each member keeps its own fields. */
 type WithoutTimestamp<T> = T extends unknown ? Omit<T, 'ts'> : never
 
-/** Render a call record as a newline-terminated JSON line. Pure. */
-export function formatRecord (record: CallRecord): string {
-  const ordered = record.phase === 'call'
+/** Render a log record as a newline-terminated JSON line. Pure. */
+export function formatRecord (record: LogRecord): string {
+  const ordered = 'kind' in record
     ? {
         ts: record.ts,
-        phase: record.phase,
-        id: record.id,
-        tool: record.tool,
-        outcome: record.outcome,
-        confirmation: record.confirmation,
-        ...(record.detail !== undefined ? { detail: record.detail } : {}),
-        ...(record.reason !== undefined ? { reason: record.reason } : {}),
+        kind: record.kind,
+        turn: record.turn,
+        ...(record.session !== undefined ? { session: record.session } : {}),
       }
-    : {
-        ts: record.ts,
-        phase: record.phase,
-        id: record.id,
-        tool: record.tool,
-        result: record.result,
-      }
+    : record.phase === 'call'
+      ? {
+          ts: record.ts,
+          phase: record.phase,
+          id: record.id,
+          tool: record.tool,
+          outcome: record.outcome,
+          confirmation: record.confirmation,
+          ...(record.detail !== undefined ? { detail: record.detail } : {}),
+          ...(record.reason !== undefined ? { reason: record.reason } : {}),
+        }
+      : {
+          ts: record.ts,
+          phase: record.phase,
+          id: record.id,
+          tool: record.tool,
+          result: record.result,
+        }
   return JSON.stringify(ordered) + '\n'
 }
 
-/** Build a call record, stamping it with the current time. Pure. */
+/** Build a log record, stamping it with the current time. Pure. */
 export function makeRecord (
-  fields: WithoutTimestamp<CallRecord>,
+  fields: WithoutTimestamp<LogRecord>,
   now: Date = new Date()
-): CallRecord {
-  return { ts: now.toISOString(), ...fields } as CallRecord
+): LogRecord {
+  return { ts: now.toISOString(), ...fields } as LogRecord
 }
 
-/** Append-only sink for tool-call records. */
+/** Append-only sink for log records. */
 export class CallLog {
   private readonly filePath: string
   private dirEnsured = false
@@ -181,7 +240,7 @@ export class CallLog {
 
   /** Append one record. Never throws into the caller — a failed write must not
    * change a tool's outcome (which has already been decided). */
-  async record (record: CallRecord): Promise<void> {
+  async record (record: LogRecord): Promise<void> {
     try {
       await this.ensureDir()
       await appendFile(this.filePath, formatRecord(record), { encoding: 'utf8' })

@@ -29,15 +29,20 @@
  * trail the system has, which is what makes logging the read surface load-
  * bearing rather than a nicety.
  *
- * TWO HOOKS, and the second is why the trail is truthful. `tool_call` fires
+ * THREE HOOKS, and the second is why the trail is truthful. `tool_call` fires
  * before a call runs and records what was ATTEMPTED; on its own that asserts
  * reads which the MCP server then refuses (path traversal, outside the allowed
  * directory) actually happened. `tool_result` fires after, carries `isError`,
  * and records what RESULTED. The two lines share Pi's `toolCallId` as `id`.
+ * `before_agent_start` fires when the operator submits an instruction and
+ * records a turn boundary, so the calls between two boundaries are attributable
+ * to the instruction that caused them.
  *
- * The result handler must never log `event.content`. That field is the tool's
- * full output — the file the agent just read — and copying it into the audit
- * trail would defeat the point of having one.
+ * Two of the three handlers are handed content they must never log:
+ * `tool_result`'s `event.content` is the tool's full output — the file the agent
+ * just read — and `before_agent_start`'s `event.prompt` and `event.systemPrompt`
+ * are the conversation itself. Copying either into the audit trail would defeat
+ * the point of having one. Both handlers record named scalars only.
  *
  * Note the scope this extension does NOT have to cover: the agent has no local
  * file or shell tools at all (`--no-builtin-tools`, and no extension restores
@@ -63,6 +68,32 @@ const CONFIRM_TIMEOUT_MS = 60_000
 
 export default function (pi: ExtensionAPI): void {
   const log = new CallLog(process.env[LOG_ENV] ?? DEFAULT_LOG)
+
+  /* Turn ordinal, counted from 1 by this process. Deliberately not persisted:
+     state that survives a restart would have to live on the log volume, and
+     nothing on that volume should be writable by this process except by
+     appending. See TurnRecord for what the number does and does not identify. */
+  let turn = 0
+
+  /* Turn boundaries. Fires after the operator submits an instruction and before
+     the agent loop runs, so every call line until the next boundary belongs to
+     this turn. Without these the trail is a flat sequence and "what did the
+     agent do in response to THAT instruction" is answerable only by correlating
+     timestamps against a session transcript on a different volume with a
+     different retention policy.
+
+     Records a boundary, not content. `event.prompt`, `event.images`, and
+     `event.systemPrompt` are all in scope here and none of them is logged. */
+  pi.on('before_agent_start', async (_event, ctx) => {
+    turn += 1
+    const session = sessionId(ctx)
+    await log.record(makeRecord({
+      kind: 'turn_start',
+      turn,
+      ...(session !== undefined ? { session } : {}),
+    }))
+    return undefined
+  })
 
   pi.on('tool_call', async (event, ctx) => {
     const input = event.input as Record<string, unknown>
@@ -142,6 +173,23 @@ export default function (pi: ExtensionAPI): void {
     }))
     return undefined
   })
+}
+
+/**
+ * The current session's id, or `undefined` if the harness will not give one up.
+ *
+ * Defensive on purpose. This is the only thing any handler here logs from the
+ * context rather than from its event, and a turn marker is worth less than a
+ * working agent: an id that cannot be obtained is omitted from the record
+ * instead of throwing out of the handler.
+ */
+function sessionId (ctx: { sessionManager?: { getSessionId?: () => string } }): string | undefined {
+  try {
+    const id = ctx.sessionManager?.getSessionId?.()
+    return typeof id === 'string' && id.length > 0 ? id : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /**

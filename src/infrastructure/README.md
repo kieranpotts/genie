@@ -311,6 +311,7 @@ what keeps the change trail complete.
 | Default-deny on timeout | ignore the prompt for 60s | the write is blocked; the call log shows `"confirmation":"timeout"` |
 | Reads are recorded | ask it to read any ordinary project file | the call log gains a `"phase":"call","outcome":"allowed","confirmation":"not-required"` line naming the path |
 | Results are recorded | ask it to read any ordinary project file | a second `"phase":"result"` line follows with the same `id` and `"result":"ok"` |
+| Turns are delimited | give the agent two separate instructions, each causing a tool call | a `"kind":"turn_start"` line precedes each instruction's calls, with `turn` incrementing and the same `session`; the prompt text appears nowhere in the log |
 | A downstream refusal is visible as one | ask it to read `../../etc/passwd` | the `call` line says `"outcome":"allowed"` (the gate admitted it) and the `result` line says `"result":"error"` (the MCP server refused it). This pairing is the thing the trail could not express before. |
 | Tool surface is the documented eleven | the tool-surface check below | exactly the eleven `mcp_*` tools listed in `docs/solution.md`; no `bash`, no Git, no web fetch |
 | No network binaries | `docker compose ... exec pi sh -c 'for b in git curl wget nc ssh; do command -v $b \|\| echo "$b absent"; done'` | all five absent |
@@ -413,6 +414,22 @@ rather than by reading prose.
 Neither line ever carries tool *content*. `detail` is the path; the file's
 contents are never copied into the trail.
 
+**A third line kind marks the turn boundaries.** It carries `kind` rather than
+`phase`, so the queries below are unaffected by it:
+
+```json
+{"ts":"…","kind":"turn_start","turn":7,"session":"01936f2e-6b2a-7c31-9e4d-8f1a2b3c4d5e"}
+```
+
+Every `call` line belongs to the turn whose boundary most recently preceded it,
+which is what makes "what did the agent do in response to *that* instruction"
+answerable from this file rather than by correlating timestamps against a session
+transcript on the `pi-sessions` volume. `turn` is an ordinal counted by the
+running Pi process from 1 — it starts again at 1 after a restart, `--resume`
+included, so `session` and file order are what identify a turn; the number is for
+referring to one. The prompt that opened the turn is deliberately **not**
+recorded.
+
 The image has no `jq` — it is a hardened runtime, not an analysis box — so pipe
 the log out to the host and query it there:
 
@@ -436,6 +453,16 @@ $LOG | jq -s '
 # `--tools` allowlist, which should be established from this, not guessed.
 # NOTE the phase filter: without it every tool is counted twice.
 $LOG | jq -r 'select(.phase=="call") | .tool' | sort | uniq -c | sort -rn
+
+# Every call attributed to the turn that caused it: session, turn, outcome,
+# tool, path. Turn lines carry the boundary forward onto the calls that follow
+# them, which is the whole point of recording them.
+$LOG | jq -rs '
+  reduce .[] as $l ({turn: null, session: null, rows: []};
+    if $l.kind == "turn_start" then .turn = $l.turn | .session = $l.session
+    elif $l.phase == "call" then .rows += [[.session, .turn, $l.outcome, $l.tool, $l.detail]]
+    else . end)
+  | .rows[] | @tsv'
 ```
 
 Limits to know before relying on it:
@@ -449,8 +476,10 @@ Limits to know before relying on it:
 - **It grows without bound, and that is the stated policy, not an oversight.**
   Nothing in the stack rotates, caps, or prunes it. See *Retention* below for
   the reasoning and for the operator's part in it.
-- **No turn boundaries.** The trail is a flat sequence of calls, so grouping
-  them by the agent turn that caused them is not possible today. Also `TODO.md`.
+- **Turn boundaries, not turn contents.** A `kind:"turn_start"` line says a turn
+  began and which one; the instruction that opened it is not recorded, so reading
+  *what was asked* still means going to the session transcript. The trail says
+  what the agent did in response.
 
 > [!IMPORTANT]
 > The `pi-logs` volume must be owned by the agent's uid (1001) or the log fails
@@ -491,7 +520,9 @@ The reasoning, in the order it matters:
 
   A million tool calls is years of heavy single-operator use. Paying real
   accountability loss to avoid a few hundred megabytes over that horizon is a
-  bad trade, and it stays a bad trade until the numbers move.
+  bad trade, and it stays a bad trade until the numbers move. Turn lines do not
+  move them: about 112 bytes each, and one per instruction rather than one per
+  call.
 
 - **A cap would have to live in the wrong place.** The agent's rootfs is
   read-only, so rotation state would have to sit on the `pi-logs` volume itself,

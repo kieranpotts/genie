@@ -76,7 +76,13 @@ which fires before a tool is invoked:
     second line carrying the real outcome. See below for why one line was not
     enough.
 
+A third hook, `before_agent_start`, fires outside that sequence — once per
+instruction from the operator — and appends a **turn boundary** so the calls
+between two boundaries are attributable to the instruction that caused them. See
+*Turn boundaries* below.
+
 ```json
+{"ts":"2026-06-04T11:59:58.000Z","kind":"turn_start","turn":4,"session":"01936f2e-6b2a-7c31-9e4d-8f1a2b3c4d5e"}
 {"ts":"2026-06-04T12:00:00.000Z","phase":"call","id":"tc_01","tool":"mcp_read_file","outcome":"allowed","confirmation":"not-required","detail":"mcp_read_file: /workspace/src/a.ts"}
 {"ts":"2026-06-04T12:00:00.010Z","phase":"result","id":"tc_01","tool":"mcp_read_file","result":"ok"}
 {"ts":"2026-06-04T12:00:05.000Z","phase":"call","id":"tc_02","tool":"mcp_write_file","outcome":"allowed","confirmation":"approved","detail":"mcp_write_file: /workspace/x.ts"}
@@ -115,6 +121,54 @@ to a default; see *Retention* below.
 
 A blocked call has no `result` line if the harness never runs the tool. The
 absence is not ambiguous: the `call` line already says `blocked` and why.
+
+### Turn boundaries
+
+The `call` and `result` lines are a flat sequence, so *"what did the agent do in
+response to **that** instruction"* used to be answerable only by correlating
+timestamps against a session transcript — which lives on a different volume,
+under a different retention policy, and is the agent's own narrative rather than
+an independent record. A third line kind closes that gap:
+
+```json
+{"ts":"…","kind":"turn_start","turn":7,"session":"01936f2e-…"}
+{"ts":"…","phase":"call","id":"tc_21","tool":"mcp_read_file","outcome":"allowed","confirmation":"not-required","detail":"mcp_read_file: /workspace/src/a.ts"}
+{"ts":"…","phase":"result","id":"tc_21","tool":"mcp_read_file","result":"ok"}
+```
+
+Every call line belongs to the turn whose boundary most recently preceded it.
+The hook is `before_agent_start`, which fires after a prompt is submitted and
+before the agent loop runs.
+
+| Field | Says |
+|---|---|
+| `kind` | `turn_start`. Turn lines carry **no `phase`** — see below. |
+| `turn` | Which turn, counted from 1 **by the running process**. |
+| `session` | Pi's session id. Omitted, rather than faked, if unavailable. |
+
+**No `phase`, deliberately.** The runbook's `jq` recipes all select on `.phase`,
+and a line without that field yields `null`, which matches neither `"call"` nor
+`"result"` — so every documented query returns exactly what it did before turn
+lines existed, including the tool-frequency count that the gateway's `--tools`
+allowlist is waiting on. Re-check this if a recipe is ever written that selects
+lines by the *absence* of a field rather than by its value.
+
+**`turn` is an ordinal, not an id.** It counts agent runs in the current process:
+it is not persisted, does not restart per session, and starts again at 1 when Pi
+restarts — including on `--resume`, which keeps the same `session`. `session`
+plus file order is what makes a turn identifiable in a file that is appended to
+forever; the number is for referring to one.
+
+**It records a boundary, not content.** `before_agent_start` hands the handler
+the operator's prompt, any attached images, and the fully assembled system
+prompt. None of it is logged, and the key set is closed by a test for the same
+reason the `result` line's is: this line must not grow into a record of what the
+turn was *about*, or the audit trail becomes a copy of the conversation.
+
+**One boundary per agent run, which is not quite one per message.** A message
+queued while the agent is already streaming — a steer or a follow-up — is
+consumed by the run already in flight and does not start a new one, so it
+produces no boundary and its calls are attributed to the turn in progress.
 
 ### The attempt record's two axes
 
@@ -155,8 +209,9 @@ already say everything there is to say.
   handle; the payload is the whole conversation, so logging it naively has the
   same problem as logging content. A scoped, metadata-only version is an open
   item in `TODO.md`.
-- **Turn boundaries.** The trail is a flat sequence of calls; grouping them by
-  the agent turn that caused them would need `before_agent_start`. Open item.
+- **What a turn was about.** Turn boundaries are recorded; the instruction that
+  opened one is not. `turn` and `session` say *which* turn, so the trail can be
+  read against a session transcript, but the prompt itself stays out.
 - **Secret-shaped content reaching the model.** The filename refusal at step 1
   stops `.env` and `id_rsa` being *opened*, but a key pasted into an ordinary
   `.txt` passes through. Redacting tool output would be a `tool_result`
@@ -214,7 +269,9 @@ Two reasons, and the second is the one that constrains future changes:
 - **The volume does not justify the loss.** A call costs about **316 bytes**
   across its two lines, so a million tool calls — years of heavy single-operator
   use — is roughly 316 MB. Discarding the oldest entries of an accountability
-  record to reclaim that is a bad trade.
+  record to reclaim that is a bad trade. Turn lines do not move that number: at
+  roughly 110 bytes each and one per instruction rather than one per call, they
+  are a rounding error against the calls they group.
 - **Truncation must not live here.** A cap inside this extension would put
   delete-my-own-history logic inside the audited process. Append-only is a
   property worth keeping: `compose.yaml` relies on the log volume outliving the

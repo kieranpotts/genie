@@ -9,6 +9,7 @@ import {
   makeRecord,
   type CallAttemptRecord,
   type CallResultRecord,
+  type TurnRecord,
 } from '../../../src/extensions/permission-gate/call-log.ts'
 
 describe('formatRecord — the attempt line', () => {
@@ -76,6 +77,38 @@ describe('formatRecord — the result line', () => {
   })
 })
 
+describe('formatRecord — the turn line', () => {
+  it('renders the boundary with fixed key order', () => {
+    const line = formatRecord({ ts: 'T', kind: 'turn_start', turn: 7, session: 's-01' })
+    assert.equal(line, '{"ts":"T","kind":"turn_start","turn":7,"session":"s-01"}\n')
+  })
+
+  it('omits session when the harness gave no id', () => {
+    const line = formatRecord({ ts: 'T', kind: 'turn_start', turn: 1 })
+    assert.equal(line, '{"ts":"T","kind":"turn_start","turn":1}\n')
+  })
+
+  /* The turn line must never grow into a record of what the turn was ABOUT:
+     `before_agent_start` hands the handler the prompt and the whole system
+     prompt. This asserts the shape is closed, mirroring the result line. */
+  it('carries no field beyond ts, kind, turn and session', () => {
+    const line = formatRecord({ ts: 'T', kind: 'turn_start', turn: 3, session: 's-01' })
+    assert.deepEqual(
+      Object.keys(JSON.parse(line) as Record<string, unknown>),
+      ['ts', 'kind', 'turn', 'session']
+    )
+  })
+
+  /* The runbook's jq recipes all select on `.phase`. A turn line has no such
+     field, so `.phase` yields null and matches neither "call" nor "result" —
+     which is what keeps every documented query returning what it did before this
+     line kind existed. */
+  it('carries no phase, so the documented queries skip it', () => {
+    const parsed = JSON.parse(formatRecord({ ts: 'T', kind: 'turn_start', turn: 1 })) as Record<string, unknown>
+    assert.equal('phase' in parsed, false)
+  })
+})
+
 describe('makeRecord', () => {
   it('stamps the supplied time on an attempt', () => {
     const r = makeRecord(
@@ -97,6 +130,19 @@ describe('makeRecord', () => {
       outcome: 'allowed',
       confirmation: 'not-required',
       detail: 'mcp_list_directory: /w',
+    })
+  })
+
+  it('stamps the supplied time on a turn boundary', () => {
+    const r = makeRecord(
+      { kind: 'turn_start', turn: 2, session: 's-01' },
+      new Date('2026-06-04T00:00:02Z')
+    ) as TurnRecord
+    assert.deepEqual(r, {
+      ts: '2026-06-04T00:00:02.000Z',
+      kind: 'turn_start',
+      turn: 2,
+      session: 's-01',
     })
   })
 

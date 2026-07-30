@@ -667,6 +667,11 @@ claimed and what is enforced.
   dropped: metadata-only model-request logging, tool-output redaction, and turn
   markers.
 
+  > **Since extended.** `before_agent_start` is now handled too (see the turn
+  > markers item below), so `docs/solution.md` lists **four** hooks and no longer
+  > names that one among the unhandled. The paragraph stating what is *not*
+  > handled stays — `before_provider_request` is still the live example.
+
   > ### The first live run falsified this, and the fix was in `mcp-client`
   >
   > Everything above shipped green — typecheck, 123 tests, the extension loading
@@ -761,47 +766,95 @@ claimed and what is enforced.
   without the content appearing in output the redactor sees. It is
   defence-in-depth, not a boundary.
 
-- [ ] **Add turn markers to the call log.**
-  Deferred from the hooks work above. `before_agent_start` fires before each
-  agent turn; a handler writing one line per turn would let a reviewer group
-  calls by the turn that caused them:
+- [x] **Add turn markers to the call log.**
+  **Done.** `permission-gate` handles `before_agent_start` and appends one line
+  per agent run, so every `call` line belongs to the turn whose boundary most
+  recently preceded it:
 
   ```json
-  {"ts":"…","kind":"turn_start","turn":7}
+  {"ts":"…","kind":"turn_start","turn":7,"session":"01936f2e-6b2a-7c31-9e4d-8f1a2b3c4d5e"}
   {"ts":"…","phase":"call","id":"tc_21","tool":"mcp_read_file", …}
   {"ts":"…","phase":"result","id":"tc_21", …}
   ```
 
-  Today the trail is a flat sequence, so "what did the agent do in response to
-  *that* instruction" is answerable only by timestamp correlation against a
-  session transcript on a different volume with different retention.
+  It was small and low-risk as predicted — it records a boundary, not content —
+  but three details were decided rather than assumed, and each is the kind of
+  thing that reads as a detail and is not:
 
-  Small and low-risk — it records a boundary, not content.
+  - **`session` was added to the sketch, and it is what makes the marker work.**
+    A bare ordinal is nearly useless in a file that is appended to forever: the
+    counter is per-process and restarts at 1 on every Pi start, so "turn 1" of
+    today is indistinguishable from "turn 1" of last week — which is the
+    timestamp-correlation problem this item exists to remove, reintroduced one
+    level down. `ctx.sessionManager.getSessionId()` (a UUIDv7) is the grouping
+    key; `turn` is the ordinal for referring to one within it. The id is read
+    defensively and omitted rather than faked if the context will not give one
+    up: a marker is worth less than a working agent.
 
-  **Unblocked.** This was held back because it adds a third line kind to a log
-  whose retention was an open question, and the two had to be decided together.
-  Retention is now settled (see the closed item above) and the decision does not
-  constrain the format: the policy is append-only and unbounded, so a third line
-  kind costs nothing but its own bytes. A `turn_start` line is far cheaper than
-  the ~316 B per call already being written, since it is emitted per turn rather
-  than per call, and it does not perturb the growth table.
+  - **`before_agent_start`, not Pi's `turn_start` event.** Pi has an event
+    literally named `turn_start`, and it is the wrong one: `agent-session.js`
+    resets `turnIndex` to 0 on every `agent_start`, so it counts model requests
+    *within* one run and cannot group anything. `before_agent_start` fires once
+    per submitted prompt, which is the boundary the item's own question
+    ("in response to *that* instruction") is about. The line keeps the name
+    `turn_start` because four documents already promise "turn markers" and Pi's
+    own `BeforeAgentStartEventResult` calls this boundary a turn — the clash is
+    resolved by stating it in `call-log.ts` rather than by a private
+    vocabulary.
 
-  Two things to carry over from that decision when implementing this:
+  - **One boundary per agent run is not quite one per message.** A steer or
+    follow-up queued while the agent is already streaming is consumed by the run
+    in flight and fires no `before_agent_start`, so its calls are attributed to
+    the turn in progress. Verified in `agent-session.js` (`prompt()` returns
+    early to `_queueSteer`/`_queueFollowUp` when `isStreaming`), and documented
+    in the extension README rather than left as a surprise for whoever first
+    counts markers against instructions.
 
-  - **Append-only is an invariant now, not just a current fact.** The turn
-    handler appends and does nothing else — no buffering until the turn ends, for
-    the same reason the `call`/`result` pair is written as two lines rather than
-    one enriched one.
-  - **Keep the key set closed**, matching the `result` line's test. `turn_start`
-    should carry named scalars only, so it cannot grow into a record of what the
-    turn was *about*.
+  Both carried-over constraints held. The handler appends and does nothing else
+  — no buffering until the turn ends — and the key set is closed by a test
+  mirroring the `result` line's, asserting exactly `ts`, `kind`, `turn`,
+  `session`. That test matters more here than on the result line:
+  `before_agent_start` hands the handler `prompt`, `images`, **and** the fully
+  assembled `systemPrompt`, so this is the one hook where logging the event
+  naively would write the entire conversation into the audit trail. There is a
+  wiring test asserting neither the prompt nor the system prompt reaches the
+  file.
 
-  One compatibility point, checked rather than assumed: the runbook's `jq`
-  recipes all filter on `.phase`, and the line sketched above carries `kind`
-  instead. That is safe — a line without `.phase` yields `null`, which matches
-  none of `"call"` or `"result"`, so every documented query still returns
-  exactly what it did before. Re-check this if a recipe is ever written that
-  selects lines by *absence* of a field rather than by its value.
+  The compatibility point checked out and is now also a test: a turn line has no
+  `.phase`, so all four `jq` recipes in the runbook return exactly what they did
+  before. Measured while there: a turn line is **112 bytes**, against ~316 B per
+  call, and it is emitted per instruction rather than per call — so the retention
+  table stands unchanged, as predicted.
+
+  One rename fell out of it: the record union in `call-log.ts` is now
+  `LogRecord` rather than `CallRecord`, since one of its members is not a call.
+
+  **Driven for real, not just tested.** The last hooks change shipped green and
+  was falsified by the first live run, so this one was run against the real
+  harness before being called done: Pi 0.82.0 in `--print` mode against a local
+  Ollama model, with only this extension loaded and two prompts in one process.
+  The log came out as the item asked for:
+
+  ```json
+  {"ts":"…","kind":"turn_start","turn":1,"session":"019fb130-40c8-7dd7-b6e5-ef7bf1557f26"}
+  {"ts":"…","phase":"call","id":"call_qz82hv3s","tool":"read","outcome":"allowed","confirmation":"not-required","detail":"read: /…/sample.jsonl"}
+  {"ts":"…","phase":"result","id":"call_qz82hv3s","tool":"read","result":"error"}
+  {"ts":"…","kind":"turn_start","turn":2,"session":"019fb130-40c8-7dd7-b6e5-ef7bf1557f26"}
+  ```
+
+  Four things that only a live run could establish: the hook fires in `--print`
+  mode (`print-mode.js` calls the same `session.prompt()` the TUI does, so the
+  runbook's non-interactive verification sessions do produce markers); the
+  ordinal increments across prompts within one process; `session` populates with
+  a real UUIDv7 rather than being silently omitted; and both `jq` recipes — the
+  new turn-attribution one and the existing tool-frequency count — return the
+  right answers against that file, the second still counting one call rather
+  than two or three.
+
+  Not done, deliberately: the marker records *that* a turn began, never what it
+  was about. Reading the instruction still means going to the session
+  transcript. The trail answers what the agent did in response, which is the
+  question it is for.
 
 - [x] **Document the `docker.sock` grant in `docs/solution.md`.**
   `compose.yaml` binds the host Docker socket into `mcp-gateway`.
