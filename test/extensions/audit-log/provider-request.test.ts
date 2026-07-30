@@ -9,7 +9,7 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { describeProviderRequest } from '../../../src/extensions/secret-sentry/provider-request.ts'
+import { describeProviderRequest } from '../../../src/extensions/audit-log/provider-request.ts'
 
 /** An OpenAI-completions body, which is the shape this stack's LiteLLM route
  * sends. The message bodies are the thing that must not survive extraction. */

@@ -69,9 +69,15 @@ RUN set -eu \
  && npm cache clean --force
 
 # ---------------------------------------------------------------------------
-# Security extensions. The in-Pi half of the architecture (the `mcp-client` and
-# `secret-sentry` extensions) is installed here so the hardened controls ship
-# WITH the image rather than being added ad hoc.
+# Security extensions. The in-Pi half of the architecture (the `mcp-client`,
+# `secret-sentry`, and `audit-log` extensions) is installed here so the
+# hardened controls ship WITH the image rather than being added ad hoc.
+#
+# `secret-sentry` and `audit-log` used to be one extension. They are split so
+# that deciding (refusing a sensitive-named call, redacting secret-shaped
+# output) and recording (every call, turn boundaries, model-request shapes)
+# are not one piece of code with two jobs — each ships its own README and
+# writes its own log file under /var/log/pi.
 #
 # Note what is NOT here: nothing restores local file or shell access. Pi runs
 # with `--no-builtin-tools`, and `mcp-client` gives back only the `mcp_*` tools,
@@ -106,6 +112,7 @@ RUN set -eu \
 RUN mkdir -p /opt/pi/agent/extensions
 COPY src/extensions/mcp-client/             /opt/pi/agent/extensions/mcp-client/
 COPY src/extensions/secret-sentry/          /opt/pi/agent/extensions/secret-sentry/
+COPY src/extensions/audit-log/              /opt/pi/agent/extensions/audit-log/
 
 # ---------------------------------------------------------------------------
 # Model routing. Pi has no built-in knowledge of the host LiteLLM proxy; it
@@ -161,12 +168,12 @@ VOLUME ["/home/pi/sessions"]
 #   docker compose -f src/infrastructure/compose.yaml down
 #   docker volume rm pi-secure-agent_pi-logs
 #
-# `secret-sentry` creates its own log file and parent directory on first
-# write, but it cannot create them under a root-owned mount point, and it
-# swallows write failures by design so the audit trail would go silently
-# missing.
+# `secret-sentry` and `audit-log` each create their own log file and parent
+# directory on first write, but neither can create them under a root-owned
+# mount point, and each swallows write failures by design so its trail would
+# go silently missing.
 # ---------------------------------------------------------------------------
-RUN mkdir -p /var/log/pi/secret-sentry \
+RUN mkdir -p /var/log/pi/secret-sentry /var/log/pi/audit-log \
  && chown -R pi:pi /var/log/pi
 VOLUME ["/var/log/pi"]
 

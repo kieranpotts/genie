@@ -19,8 +19,8 @@ no host files, no cloud credentials, and no host Docker control — and every
 filesystem action it takes should be logged.
 
 The architecture has two halves. This directory is the host-and-container
-half; the in-Pi controls are the `mcp-client` and `secret-sentry` extensions
-under `src/extensions/`.
+half; the in-Pi controls are the `mcp-client`, `secret-sentry`, and
+`audit-log` extensions under `src/extensions/`.
 
 ## Components
 
@@ -61,9 +61,9 @@ diagrams.
 ## Operator runbook
 
 End-to-end procedure to bring the stack up against a real project and verify
-the security boundary. Both in-Pi extensions (`mcp-client`, `secret-sentry`)
-are baked into the hardened image, so once it is built they are present in the
-agent.
+the security boundary. All three in-Pi extensions (`mcp-client`,
+`secret-sentry`, `audit-log`) are baked into the hardened image, so once it is
+built they are present in the agent.
 
 **1. Configure the host**
 
@@ -239,7 +239,8 @@ Pi asks `Trust project folder?` whenever the working tree holds trust-requiring
 resources — `.agents/skills` in the project **or any ancestor directory**, or a
 `.pi/` config directory. Trust is not cosmetic: it lets Pi load project
 settings, install missing project packages, and **execute project extensions
-inside Pi's own process** — alongside `secret-sentry` rather than behind it.
+inside Pi's own process** — alongside `secret-sentry` and `audit-log` rather
+than behind them.
 
 The harness therefore decides this up front rather than prompting, via
 `PI_PROJECT_TRUST` (`compose.yaml`), which `start-pi` turns into Pi's
@@ -431,33 +432,46 @@ the audit trail's outcome axis.
 
 **9. Inspect the audit trail**
 
-The log lives on the `pi-logs` volume, outside the agent's read-only rootfs. It
-records **every** tool call the agent makes — reads included, which are never
-prompted for:
+There are **two** log files now, on the `pi-logs` volume, outside the agent's
+read-only rootfs — one per extension, split by responsibility:
 
 ```sh
-docker compose -f src/infrastructure/compose.yaml exec pi cat /var/log/pi/secret-sentry/calls.jsonl
+# Every call: what it named, what it did, turn boundaries, model-request shapes.
+docker compose -f src/infrastructure/compose.yaml exec pi cat /var/log/pi/audit-log/calls.jsonl
+
+# Only the two security decisions: a refused call, or a redaction.
+docker compose -f src/infrastructure/compose.yaml exec pi cat /var/log/pi/secret-sentry/security.jsonl
 ```
 
-**A call writes two lines, joined by `id`.** This is the first thing to know
-before querying it, because every naive count is otherwise doubled:
+They used to be one file, written by one extension. `secret-sentry` now
+records only what it itself decides; `audit-log` records everything else, with
+no power to decide anything. **The consequence worth knowing before you query
+either:** Pi stops dispatching a `tool_call` event to further extensions the
+instant one blocks it, so a call `secret-sentry` refuses may or may not have a
+matching line in `audit-log`'s file at all, depending on an extension load
+order Pi does not guarantee. `secret-sentry`'s file is the one to trust for
+"was this call refused, and why" regardless of that order; `audit-log`'s is
+the one to trust for "did this call run, and what did it do."
+
+**`audit-log/calls.jsonl` — a call writes two lines, joined by `id`.** This is
+the first thing to know before querying it, because every naive count is
+otherwise doubled:
 
 | `phase` | Written | Says |
 |---|---|---|
-| `call` | before the tool runs | what the **gate** decided: `outcome` (`allowed` / `blocked`) and `confirmation` (whether a human was involved, and what they said) |
-| `result` | after the tool runs | what the **tool** did: `result` (`ok` / `error`), plus `redactions` and `rules` when a secret-shaped value was replaced in the output |
+| `call` | when `audit-log` is dispatched the event | what the call named (`detail`) — no verdict, this extension does not decide admission |
+| `result` | after the tool runs | what the **tool** did: `result` (`ok` / `error`) |
 
-Both are needed. The gate admits calls but does not perform them, so a read of a
-path outside `/workspace` is `allowed` on the `call` line and `error` on the
-`result` line — the MCP server refused it, and only the second line knows.
-Keeping `outcome` and `confirmation` apart on the first line is likewise what
-lets a review separate a policy refusal from an operator's rejection by field
-rather than by reading prose.
+A call `secret-sentry` refuses never reaches `tool_result` — the tool never
+ran — so it has no `result` line here, and it may have no `call` line either
+(see above). A call that ran and then errored inside the MCP server (a path
+outside `/workspace`, say) has both lines: `call`, then `result` with
+`"result":"error"`.
 
 Neither line ever carries tool *content*. `detail` is the path; the file's
 contents are never copied into the trail. It is, however, the *whole* path, and
 every path when a call names several — `detail` is never truncated, so a line
-can be long. Only the confirmation dialog caps what it shows.
+can be long.
 
 **Two further line kinds carry `kind` rather than `phase`**, so the queries below
 are unaffected by either:
@@ -483,23 +497,35 @@ included, so `session` and file order are what identify a turn; the number is fo
 referring to one. The prompt that opened the turn is deliberately **not**
 recorded.
 
+**`secret-sentry/security.jsonl` — two record kinds, neither a `call`/`result`
+pair.** A blocked call never runs, so there is nothing to pair it with; a
+redaction is a fact about a result that already has its own line in
+`audit-log`'s file:
+
+| `kind` | Written | Says |
+|---|---|---|
+| `blocked` | before the tool would have run | `path` (the full sensitive path matched) and `reason` |
+| `redaction` | after the tool runs | `redactions` (a count) and `rules` (which fired) — only written when at least one rule fired |
+
+Both carry `id`, so this file can be joined against `audit-log`'s by that field
+when you need the complete picture of one call.
+
 The image has no `jq` — it is a hardened runtime, not an analysis box — so pipe
-the log out to the host and query it there:
+the logs out to the host and query them there:
 
 ```sh
-LOG='docker compose -f src/infrastructure/compose.yaml exec -T pi cat /var/log/pi/secret-sentry/calls.jsonl'
+LOG='docker compose -f src/infrastructure/compose.yaml exec -T pi cat /var/log/pi/audit-log/calls.jsonl'
+SECLOG='docker compose -f src/infrastructure/compose.yaml exec -T pi cat /var/log/pi/secret-sentry/security.jsonl'
 
-# Everything the gate refused, and why — by cause, not by grepping English.
-$LOG | jq -r 'select(.phase=="call" and .outcome=="blocked") | [.confirmation, .tool, .detail] | @tsv'
+# Everything secret-sentry refused, and why — by cause, not by grepping English.
+$SECLOG | jq -r 'select(.kind=="blocked") | [.tool, .path, .reason] | @tsv'
 
-# Refused outright by policy: no approval path was ever offered.
-$LOG | jq 'select(.confirmation=="not-offered")'
-
-# Admitted by the gate, then refused downstream by the MCP server. These are
-# the calls a trail of attempts alone would have wrongly reported as reads.
+# Admitted (or never given an opinion on) by audit-log, then refused downstream
+# by the MCP server. These are the calls a trail of attempts alone would have
+# wrongly reported as reads.
 $LOG | jq -s '
   (map(select(.phase=="result" and .result=="error")) | map(.id)) as $failed
-  | map(select(.phase=="call" and (.id | IN($failed[])) and .outcome=="allowed"))
+  | map(select(.phase=="call" and (.id | IN($failed[]))))
   | .[] | [.tool, .detail] | @tsv' -r
 
 # Which MCP tools are actually in use — the working set for the gateway's
@@ -507,20 +533,20 @@ $LOG | jq -s '
 # NOTE the phase filter: without it every tool is counted twice.
 $LOG | jq -r 'select(.phase=="call") | .tool' | sort | uniq -c | sort -rn
 
-# Every call attributed to the turn that caused it: session, turn, outcome,
-# tool, path. Turn lines carry the boundary forward onto the calls that follow
-# them, which is the whole point of recording them.
+# Every call attributed to the turn that caused it: session, turn, tool, path.
+# Turn lines carry the boundary forward onto the calls that follow them, which
+# is the whole point of recording them.
 $LOG | jq -rs '
   reduce .[] as $l ({turn: null, session: null, rows: []};
     if $l.kind == "turn_start" then .turn = $l.turn | .session = $l.session
-    elif $l.phase == "call" then .rows += [[.session, .turn, $l.outcome, $l.tool, $l.detail]]
+    elif $l.phase == "call" then .rows += [[.session, .turn, $l.tool, $l.detail]]
     else . end)
   | .rows[] | @tsv'
 
 # Secrets the redactor caught on their way to the model: which call, which rule.
-# The value is deliberately not recoverable from this log — go to the file named
-# on the matching `call` line if you need to know what is in it.
-$LOG | jq -r 'select(.redactions) | [.id, .tool, .redactions, (.rules | join(","))] | @tsv'
+# The value is deliberately not recoverable from this log — go to the path named
+# on the matching `call` line in audit-log's file if you need to know what is in it.
+$SECLOG | jq -r 'select(.kind=="redaction") | [.id, .tool, .redactions, (.rules | join(","))] | @tsv'
 
 # Model requests, and how the context grew: one row per call to the model.
 # Watch approx_bytes climb — that is file content accumulating in the context and
@@ -551,19 +577,24 @@ Limits to know before relying on it:
   rather than a boundary; an independent record would come from the host proxy,
   which is deliberately not built (see `TODO.md`). Nothing records the provider's
   *reply*, either: `after_provider_response` is not handled.
-- **It grows without bound, and that is the stated policy, not an oversight.**
-  Nothing in the stack rotates, caps, or prunes it. See *Retention* below for
-  the reasoning and for the operator's part in it.
+- **Both grow without bound, and that is the stated policy, not an oversight.**
+  Nothing in the stack rotates, caps, or prunes either file. See *Retention*
+  below for the reasoning and for the operator's part in it.
 - **Turn boundaries, not turn contents.** A `kind:"turn_start"` line says a turn
   began and which one; the instruction that opened it is not recorded, so reading
   *what was asked* still means going to the session transcript. The trail says
   what the agent did in response.
+- **A blocked call's presence in `audit-log`'s file is not guaranteed either
+  way.** Depending on extension load order, a refused call may show a `call`
+  line here with no matching `result` (indistinguishable, in this file alone,
+  from an allowed call the MCP server then errored on) or may not appear at
+  all. `secret-sentry`'s file is authoritative for refusals regardless.
 
 > [!IMPORTANT]
-> The `pi-logs` volume must be owned by the agent's uid (1001) or the log fails
-> **silently** — the sink swallows write errors so a logging failure cannot change
-> a tool's outcome. Ownership is seeded from the image, so a volume created
-> before that layer existed is still `root:root`. Fix it once:
+> The `pi-logs` volume must be owned by the agent's uid (1001) or **both** logs
+> fail **silently** — each sink swallows write errors so a logging failure
+> cannot change a tool's outcome. Ownership is seeded from the image, so a
+> volume created before that layer existed is still `root:root`. Fix it once:
 >
 > ```sh
 > docker compose -f src/infrastructure/compose.yaml down
@@ -572,12 +603,15 @@ Limits to know before relying on it:
 
 ### Retention
 
-**The policy: the call log grows without bound. Nothing in the stack ever
-deletes a line from it. Pruning and archival are the operator's, done from the
-host, deliberately.**
+**The policy: both log files grow without bound. Nothing in the stack ever
+deletes a line from either. Pruning and archival are the operator's, done from
+the host, deliberately.**
 
-This is a decision, not a default inherited from whichever tool was convenient.
-The reasoning, in the order it matters:
+This is a decision, not a default inherited from whichever tool was convenient,
+and it applies identically to `audit-log/calls.jsonl` and
+`secret-sentry/security.jsonl` — splitting logging into two extensions did not
+change the policy, only which file each line lands in. The reasoning, in the
+order it matters:
 
 - **Deletion is data loss from an accountability record.** `docs/requirements.md`
   asks for auditability of every filesystem action and does not put a horizon on
@@ -587,9 +621,9 @@ The reasoning, in the order it matters:
 
 - **The volume pressure it would relieve is not there.** Measured against the
   real record format — a `call` line with a deep path plus its `result` line —
-  a call costs about **316 bytes**:
+  a call costs about **316 bytes** in `audit-log`'s file:
 
-  | Tool calls | Log size |
+  | Tool calls | `calls.jsonl` size |
   |---|---|
   | 1,000 | 0.3 MB |
   | 10,000 | 3.2 MB |
@@ -601,41 +635,48 @@ The reasoning, in the order it matters:
   bad trade, and it stays a bad trade until the numbers move. The two `kind`
   lines do not move them: a turn line is ~112 bytes with one per instruction, and
   a provider-request line ~126 bytes with roughly one per model call — a few
-  percent on top of the calls they describe.
+  percent on top of the calls they describe. `secret-sentry`'s
+  `security.jsonl` is smaller still by construction — it gains a line only when
+  a call is actually refused or something is actually redacted, so a clean
+  session leaves it empty.
 
 - **A cap would have to live in the wrong place.** The agent's rootfs is
   read-only, so rotation state would have to sit on the `pi-logs` volume itself,
-  and an in-process cap in `secret-sentry` would put truncation logic inside
+  and an in-process cap in either extension would put truncation logic inside
   the audited process — the one place from which an accountability record should
-  not be deletable. Today the extension can only append; `compose.yaml` notes
+  not be deletable. Today both extensions can only append; `compose.yaml` notes
   that the volume outliving the container is what stops a session erasing its
   own history. Adding a delete path would spend that property.
 
-**What the operator does.** Check the size when it is worth knowing:
+**What the operator does.** Check the size of each when it is worth knowing:
 
 ```sh
 docker compose -f src/infrastructure/compose.yaml exec -T pi \
-  wc -c /var/log/pi/secret-sentry/calls.jsonl
+  wc -c /var/log/pi/audit-log/calls.jsonl /var/log/pi/secret-sentry/security.jsonl
 ```
 
-Archive by piping it out to the host — the same route the queries above use, so
+Archive by piping each out to the host — the same route the queries above use, so
 there is no second image to pin and nothing new to trust:
 
 ```sh
 docker compose -f src/infrastructure/compose.yaml exec -T pi \
-  cat /var/log/pi/secret-sentry/calls.jsonl \
+  cat /var/log/pi/audit-log/calls.jsonl \
   | gzip > "calls-$(date +%Y%m%d).jsonl.gz"
+
+docker compose -f src/infrastructure/compose.yaml exec -T pi \
+  cat /var/log/pi/secret-sentry/security.jsonl \
+  | gzip > "security-$(date +%Y%m%d).jsonl.gz"
 ```
 
 JSONL concatenates, so dated archives can be `cat`-ed back together in order and
-queried as one file. Truncating the live log after archiving is a choice
+queried as one file. Truncating a live log after archiving is a choice
 available to the operator and is **not** part of the supported flow — if you do
 it, the archive is the record, so put it somewhere durable first.
 
 **Revisit this if any of these changes**, because each one breaks an assumption
-above rather than merely making the file bigger:
+above rather than merely making a file bigger:
 
-- the log passes **1 GB**, or growth stops looking like the table above;
+- either log passes **1 GB**, or growth stops looking like the table above;
 - the stack stops being single-operator, or the volume stops being local — a
   shipped, multi-tenant trail is a different retention problem;
 - a compliance obligation names an actual retention period, at which point
@@ -691,7 +732,7 @@ the obvious checks all pass:
 | Check | What it shows |
 |---|---|
 | `docker logs pi-secure-agent-mcp-gateway-1` | gateway up, 11 tools listed, client initialized — but no `Calling tool …` lines |
-| `/var/log/pi/secret-sentry/calls.jsonl` | absent or stale: no tool call reached an extension |
+| `/var/log/pi/audit-log/calls.jsonl` | absent or stale: no tool call reached an extension |
 | a `curl` tool test against the proxy | **passes** — non-streaming works under both prefixes |
 | the session transcript | one assistant message, `"stopReason":"stop"`, thinking only, no `tool_call` entry |
 

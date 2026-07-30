@@ -37,43 +37,60 @@ flowchart LR
 ## Pi extensions
 
 The first layer of defense in my hardened agent harness design is a suite of
-Pi extensions that add security controls. Five hooks are handled, and this
-section describes what they do rather than what the extension API makes
-possible — the two drifted apart once before, and the second is the thing that
-gets read as a claim.
+Pi extensions that add security controls. Five hooks are handled, across
+**three** extensions, and this section describes what they do rather than what
+the extension API makes possible — the two drifted apart once before, and the
+second is the thing that gets read as a claim.
 
-- **`tool_call`** (`secret-sentry`). Fires before any tool executes, and can
-  block with `{ block: true, reason: string }`. Used for both of the
-  extension's controls: the absolute refusal of sensitive filenames, and the
-  record of what was attempted. There is no confirmation prompt — this
-  extension runs unattended, so mutating calls proceed unprompted, logged the
-  same as any other call. This is the only hook that sees *every* tool call,
-  whichever extension registered it, which is why the filename refusal lives
-  here rather than closer to the filesystem.
+`secret-sentry` and `audit-log` used to be a single extension. They are split
+by responsibility now: `secret-sentry` **decides** (refuses a call naming a
+sensitive file, redacts secret-shaped output) and logs only those decisions;
+`audit-log` **records** everything else (every call, turn boundaries,
+model-request shapes), with no power to refuse or alter anything. Both
+register a `tool_call` handler, and Pi's runner stops dispatching a `tool_call`
+event to further extensions the instant any handler blocks it — so whether
+`audit-log` ever sees a call `secret-sentry` refuses depends on an extension
+load order Pi does not guarantee. `secret-sentry`'s own log is therefore the
+authoritative record of what it refused, regardless of that order; see both
+extensions' READMEs for the full reasoning.
 
-- **`tool_result`** (`secret-sentry`). Fires after a tool executes, carrying
-  `isError`. Used for two things. First, to record what the call actually *did*,
-  joined to the attempt by Pi's `toolCallId` — without it the trail records
-  admissions and calls them outcomes: a read of a path outside `/workspace` is
-  admitted by the gate and then refused by the MCP server, and only this hook
-  sees the refusal.
+- **`tool_call`** (`secret-sentry`, `audit-log`). Fires before any tool
+  executes. `secret-sentry`'s handler can block with
+  `{ block: true, reason: string }` — the absolute refusal of sensitive
+  filenames — and logs only a refusal, to its own file. `audit-log`'s handler
+  never blocks; it records what every call it is dispatched named, to a
+  separate file, with no verdict attached (see above for why it cannot claim
+  one). There is no confirmation prompt in either — this stack runs
+  unattended, so mutating calls proceed unprompted. This remains the only kind
+  of hook that sees *every* tool call, whichever extension registered it,
+  which is why the filename refusal lives in one of its handlers rather than
+  closer to the filesystem.
 
-  Second, this is the one hook in the design that **changes what the agent
-  sees**. Secret-shaped values — PEM private key blocks, AWS access key ids,
-  GitHub/Slack/Anthropic/OpenAI key prefixes — are replaced with
+- **`tool_result`** (`secret-sentry`, `audit-log`). Fires after a tool
+  executes, carrying `isError`. `audit-log`'s handler records what the call
+  actually *did*, joined to the attempt by Pi's `toolCallId` — without it the
+  trail records admissions and calls them outcomes: a read of a path outside
+  `/workspace` is admitted by the gate and then refused by the MCP server, and
+  only this hook sees the refusal. A call `secret-sentry` blocked never
+  reaches this hook at all, so it simply has no result line.
+
+  `secret-sentry`'s handler is the one in the design that **changes what the
+  agent sees**. Secret-shaped values — PEM private key blocks, AWS access key
+  ids, GitHub/Slack/Anthropic/OpenAI key prefixes — are replaced with
   `[redacted: <rule>]` before the output reaches the model. Pi honours returned
   content as a replacement, so the redaction lands in both the model's context
   and the session transcript; a redacted secret is absent from the history that
   would be re-sent on resume. Detection anchors on literal prefixes and
   delimiters, never on entropy, because a false positive silently corrupts what
-  the model reads.
+  the model reads. When it fires, `secret-sentry` records how many spans were
+  replaced and which rules matched — never the value — in its own file, not
+  `audit-log`'s.
 
-  The handler deliberately ignores the event's `content` for *logging* purposes,
-  which carries the tool's full output. Recording it would copy every file the
-  agent reads into the audit trail. When redaction fires, the record says how
-  many spans were replaced and which rules matched — never the value.
+  Neither handler ever logs the event's `content`, which carries the tool's
+  full output. Recording it would copy every file the agent reads into the
+  audit trail.
 
-- **`before_agent_start`** (`secret-sentry`). Fires when the operator submits
+- **`before_agent_start`** (`audit-log`). Fires when the operator submits
   an instruction, before the agent loop runs. Used solely to append a turn
   boundary, so the calls that follow are attributable to the instruction that
   caused them rather than to a timestamp range. The handler records an ordinal
@@ -81,7 +98,7 @@ gets read as a claim.
   fully assembled system prompt, and logging either would put the conversation
   into the audit trail.
 
-- **`before_provider_request`** (`secret-sentry`). Fires before each model
+- **`before_provider_request`** (`audit-log`). Fires before each model
   call. Used to record the request's **shape** — the model id, the message
   count, and the serialised size — and nothing else. The event's payload is the
   entire conversation, including the contents of every file the agent has read,
@@ -182,7 +199,8 @@ on the gateway) rather than from the design's intent:
 Eight tools. All filesystem. All resolve inside the MCP server's container,
 confined to `/workspace`. The four writes run unprompted — there is nobody to
 ask in unattended operation; any of the eight is refused outright if it names a
-sensitive file; and every call, read or write, is logged (`secret-sentry`).
+sensitive file (`secret-sentry`); and every call, read or write, is logged
+(`audit-log`).
 
 **Eight of the eleven the server exposes.** The `mcp/filesystem` image also
 offers `read_multiple_files`, `directory_tree`, and `get_file_info`; the
@@ -208,9 +226,10 @@ refused by the MCP server. `TODO.md` records what is still open here, which is
 whether the *used* set is narrower still; that needs interactive session data,
 including writes, which the current sample lacks.
 
-That is the complete surface because only two extensions ship in the image —
-`mcp-client`, which registers exactly the tools above, and `secret-sentry`,
-which registers none and only observes.
+That is the complete surface because only three extensions ship in the image —
+`mcp-client`, which registers exactly the tools above; `secret-sentry`, which
+registers none and only decides (refuse, redact); and `audit-log`, which
+registers none either and only observes.
 
 **No `bash`, and no execution of any kind.** Pi ships seven built-in tools —
 `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls` — and `start-pi` launches
@@ -219,10 +238,11 @@ control, not tidying: those built-ins operate on *this* container's filesystem,
 so leaving them enabled would hand the agent an unmediated route to every file
 in the container, not just the project at `/workspace` — the MCP server's
 containment never comes into play for a call that never reaches it.
-`secret-sentry`'s hooks fire for any tool call and would still log and refuse
-by filename, but that is a cooperative control inside the agent's own process,
-not the boundary containment provides. There is no `audited-tools` extension
-restoring a guarded `bash` either; it was removed for the same reason.
+`secret-sentry`'s and `audit-log`'s hooks fire for any tool call and would
+still refuse by filename and log, respectively, but that is a cooperative
+control inside the agent's own process, not the boundary containment
+provides. There is no `audited-tools` extension restoring a guarded `bash`
+either; it was removed for the same reason.
 
 **No Git.** There is no `git` tool and no `git` binary in the image. Version
 control is the operator's job, on the host, where the audit trail of what the
@@ -509,12 +529,12 @@ to what's described above.
 |-------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Filesystem access control           | ALL agent file access mediated by the MCP server, reached by the `mcp-client` extension. The project is mounted read-only in the agent container for the human operator to browse; the agent has no local tool that can read it (`--no-builtin-tools`, and no extension restores one), and the MCP server holds the only writable handle. |
 | Project scoping                     | Exactly ONE project per stack, at `/workspace`, set by `PROJECT_PATH`. The allowlist is therefore a single directory rather than a per-project permission model — see `docs/requirements.md` for why this is a requirement and not an unfinished feature. Two projects means two stacks. |
-| Agent tool surface                  | Exactly eight `mcp_*` filesystem tools, enumerated in "The agent's tool surface, exhaustively" above — eight of the eleven the server exposes, narrowed by the gateway's `--tools` allowlist, which is enforced out of the agent's process and can only subtract. No `bash`, no Git, no web fetch, no execution of any kind — and no `git`/`curl`/`wget`/`nc`/`ssh` binaries in the image. Pi's seven built-ins are disabled by `--no-builtin-tools` in `start-pi`; only `mcp-client` (which registers whatever the gateway offers) and `secret-sentry` (which registers none) ship in the image. Re-verify with the tool-surface check in the runbook. |
+| Agent tool surface                  | Exactly eight `mcp_*` filesystem tools, enumerated in "The agent's tool surface, exhaustively" above — eight of the eleven the server exposes, narrowed by the gateway's `--tools` allowlist, which is enforced out of the agent's process and can only subtract. No `bash`, no Git, no web fetch, no execution of any kind — and no `git`/`curl`/`wget`/`nc`/`ssh` binaries in the image. Pi's seven built-ins are disabled by `--no-builtin-tools` in `start-pi`; only `mcp-client` (which registers whatever the gateway offers), `secret-sentry`, and `audit-log` (neither of which registers any tool) ship in the image. Re-verify with the tool-surface check in the runbook. |
 | Command execution control           | The agent cannot execute anything. `--no-builtin-tools` removes Pi's `bash`, and no extension provides a replacement, so there is no execution surface to police. This replaced an `audited-tools` extension that allowlisted commands from inside the agent's own process — a cooperative guard whose fence was self-enforced and lexical, and which interpreters on its allowlist (`node -e`, `python3 -c`) could read straight through. Removing the capability is the stronger control. See `TODO.md`, which also records the deferred option of an out-of-process exec MCP server should execution ever be needed. |
 | Permission prompts / approval gates | NOT IMPLEMENTED here, deliberately. This stack runs unattended, and a confirmation prompt nobody is present to answer could only ever time out and default-deny — theatre, not a control. Mutating calls (writes, edits, moves, directory creation) proceed unprompted, logged the same as any other call. pi's `permission-gate` extension provides this for eyes-on, at-keyboard sessions instead. |
 | Sensitive-file refusal              | `secret-sentry` refuses any call naming secrets or key material (`.env*`, `id_rsa`, `*.pem`, `*.key`, …) on filename patterns. Absolute — no approval path — and applied to every tool call, `mcp_*` included. |
 | Secret redaction from tool output   | `secret-sentry` replaces secret-shaped values in tool output with `[redacted: <rule>]` before the model sees them (`tool_result`), covering the filename rule's blind spot: a key pasted into an ordinary file. Six rules, each anchored on a literal delimiter or issuer prefix; **no entropy heuristic**, because a false positive silently corrupts what the model reads. The replacement reaches the session transcript too, so the value is absent from the history re-sent on resume. In-process, so defence in depth rather than a boundary — and text only, so a secret in an image is not covered. |
-| Audit log of tool calls             | Append-only JSONL log, on a dedicated volume, for **every** tool call — reads and writes alike, since nothing is ever prompted for here. Each call writes **two lines** joined by `id`: `phase:"call"` records what `secret-sentry` decided, `phase:"result"` records what the tool actually did (`tool_result`'s `isError`). Both are needed — the extension admits calls but does not perform them, so a read the MCP server later refuses is `allowed` on the first line and `error` on the second. The attempt line carries two independent fields, `outcome` (did the call run) and `confirmation` (was there ever an approval path to offer — `not-required` or `not-offered`; nothing here is ever confirmed by a human), so a sensitive-file refusal and an ordinary pass-through are distinguishable by field rather than by prose. Neither line ever carries tool *content*. Two further line kinds carry no `phase`: `kind:"turn_start"` marks each turn boundary (`before_agent_start`), so calls are attributable to the instruction that caused them, and `kind:"provider_request"` records the shape of each outbound model request (`before_provider_request`) — model id, message count, serialised size. Neither carries the prompt, the conversation, or any file content; both are written in-process, so they are evidence rather than a boundary. When redaction fires, the `result` line carries `redactions` (a count) and `rules` (which rules matched) — never the value. The volume must be owned by the agent's uid or logging fails silently. |
+| Audit log of tool calls             | TWO append-only JSONL files, on the same dedicated volume, one per extension. `audit-log`'s `calls.jsonl` covers **every** call it is dispatched — reads and writes alike, since nothing is ever prompted for here — writing **two lines** per completed call, joined by `id`: `phase:"call"` records what a call named, `phase:"result"` records what the tool actually did (`tool_result`'s `isError`). Both are needed — nothing here decides admission, so a read the MCP server later refuses is recorded on attempt and again as `error` on result. Two further line kinds carry no `phase`: `kind:"turn_start"` marks each turn boundary (`before_agent_start`), and `kind:"provider_request"` records the shape of each outbound model request (`before_provider_request`) — model id, message count, serialised size. None of the four carries the prompt, the conversation, or any file content. `secret-sentry`'s `security.jsonl` covers only the two decisions it makes: `kind:"blocked"` (the path and reason for a refused call) and `kind:"redaction"` (a count and the rule names, never the value), each also carrying `id` so the two files can be joined. A refused call may or may not appear in `audit-log`'s file at all — Pi stops dispatching a `tool_call` event to further extensions the instant one blocks it, and which extension's handler runs first is not guaranteed — so `secret-sentry`'s file is the authoritative record of what it refused, independent of that order. Both volumes must be owned by the agent's uid or logging fails silently. |
 | API key isolation from agent        | Host-side LiteLLM proxy holds API keys (eg. `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`). Agent container gets a proxy endpoint + low-value rotatable proxy token.             |
 | Extension vetting / signing         | Extensions require manual review. Third-party packages MUST be pinned to exact versions/commit hashes.                                                                  |
 | Network egress control              | ENFORCED. `agent-net` is `internal: true`, so Docker installs no default route and no masquerade rule for it: external addresses are `ENETUNREACH` and DNS does not resolve. The container's only reachable peers are the MCP gateway and the host LiteLLM proxy. Because an internal network has no route to docker0, the proxy is reached at this network's own pinned gateway address (`extra_hosts`), not via Docker's `host-gateway` alias — the subnet pin in `compose.yaml` and that `extra_hosts` entry are one setting in two places. This is what rules out the gateway's `--verify-signatures`, which needs the sigstore TUF mirror; see `TODO.md`. |

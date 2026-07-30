@@ -77,9 +77,10 @@ volumes:
       device: ${PROJECT_PATH:?set PROJECT_PATH in src/infrastructure/.env}
   # Pi session transcripts, persisted outside any project tree (sensitive).
   pi-sessions:
-  # Audit trails (secret-sentry). A separate volume from sessions so the
-  # accountability logs have their own lifecycle and can be retained/shipped
-  # independently of transcripts.
+  # Audit trails (secret-sentry's security.jsonl, audit-log's calls.jsonl —
+  # each extension writes to its own subdirectory of this one volume). A
+  # separate volume from sessions so the accountability logs have their own
+  # lifecycle and can be retained/shipped independently of transcripts.
   #
   # The agent runs as uid 1001, so this volume must be owned by it or the logs
   # fail silently. Ownership is seeded from the image's /var/log/pi, which means
@@ -87,7 +88,7 @@ volumes:
   # `docker volume rm pi-secure-agent_pi-logs` to re-seed it. See the Dockerfile.
   #
   # RETENTION: unbounded, by decision. Nothing in this stack rotates, caps, or
-  # prunes the call log — a call costs ~316 bytes, so a million of them is
+  # prunes either log — a call costs ~316 bytes, so a million of them is
   # ~316 MB, and discarding the oldest entries of an accountability record to
   # reclaim that is a bad trade. Pruning and archival are the operator's, from
   # the host; the procedure and the triggers for revisiting live under
@@ -347,12 +348,16 @@ services:
       PI_PROJECT_DIR: "/workspace"
       # No interactive approval: the secret-sentry extension runs unattended. It
       # refuses sensitive filenames outright on every call (including the mcp_*
-      # ones), redacts secret-shaped values from tool output, and logs EVERY
-      # call here — reads and writes alike, which are never prompted for but are
-      # still actions against the filesystem. Since `audited-tools` was removed
-      # this is the system's only audit trail, so what it omits is not recorded
+      # ones) and redacts secret-shaped values from tool output, logging only
+      # those two decisions to its own file.
+      SECRET_SENTRY_SECURITY_LOG: "/var/log/pi/secret-sentry/security.jsonl"
+      # The generic activity trail: EVERY call here — reads and writes alike,
+      # which are never prompted for but are still actions against the
+      # filesystem — plus turn boundaries and model-request shapes. Since
+      # `audited-tools` was removed, this and the line above are between them
+      # the system's only audit trail, so what neither records is not recorded
       # anywhere.
-      SECRET_SENTRY_CALL_LOG: "/var/log/pi/secret-sentry/calls.jsonl"
+      AUDIT_LOG_CALL_LOG: "/var/log/pi/audit-log/calls.jsonl"
       # Role `start-pi` launches on. The proxy exposes one route per role —
       # computer-programmer, technical-lead, technical-writer, security-analyst
       # — each backed by a capability-tuned Ollama model (litellm.config.yaml).
@@ -365,7 +370,7 @@ services:
       # trust-requiring resources — `.agents/skills` in cwd or any ancestor, or
       # a `.pi/` config directory. Trust lets it load project settings, install
       # project packages, and EXECUTE project extensions in Pi's own process,
-      # alongside secret-sentry rather than behind it.
+      # alongside secret-sentry and audit-log rather than behind them.
       #
       # `deny` keeps that shut and, just as importantly, makes the run
       # deterministic: the prompt would otherwise block any non-interactive

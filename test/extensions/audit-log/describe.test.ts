@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { describeCall } from '../../../src/extensions/secret-sentry/describe.ts'
+import { describeCall } from '../../../src/extensions/audit-log/describe.ts'
 
 describe('describeCall', () => {
   it('summarises a path call', () => {
@@ -28,8 +28,7 @@ describe('describeCall', () => {
   /* The audit record is never truncated. This asserted the opposite until the
      cap was found to drop most of a ten-file read's paths — the trail could not
      say what was read, which is the question it exists to answer. Inverted
-     rather than deleted, so restoring a cap here fails in the suite. See
-     TODO.md. */
+     rather than deleted, so restoring a cap here fails in the suite. */
   it('records every path in a long list, without truncating', () => {
     const paths = Array.from({ length: 40 }, (_, i) => `/workspace/deeply/nested/path/file-${i}.ts`)
     const out = describeCall('mcp_read_multiple_files', { paths })

@@ -23,22 +23,28 @@ see [`permission-gate`][pi-permission-gate] in the `pi` repository, which uses
 the same sensitive-file detection to route a call through a confirmation
 dialog rather than to block it outright.
 
-**Every tool call is logged** to an append-only file — not only the blocked
-ones. Reads and writes alike are never confirmed here, but they are still
-actions against the filesystem, and `docs/requirements.md` asks for
-observability of every one of them. The same file carries the **turn
-boundaries** between calls and the **shape** of every outbound model request,
-so the trail covers both channels the agent has — never the content of
-either.
+**Every decision this extension makes is logged** — a refusal, and a
+redaction — to its own append-only file, `security.jsonl`. This is
+deliberately **not** a general call log any more: reading and writing that
+trip neither control here are recorded by the separate [`audit-log`][pi-audit-log]
+extension instead, which owns the generic "every call, every turn boundary,
+every model request" trail. This extension used to do both jobs; it now does
+one, and records only what it, specifically, decided.
 
-The `tool_call` hook is the only place in the harness that sees **every** tool
-call, whichever extension registered it. That is why the sensitive-file rule
-lives here: it must cover the `mcp_*` tools, which are the agent's sole route
-to project files. Since the removal of `audited-tools` it is also why this is
-the system's **only** audit trail — so anything this extension does not
-record is not recorded anywhere.
+The `tool_call` hook this extension registers is not the only place in the
+harness that sees a tool call any more, either — `audit-log` also has one, and
+between them the two hooks cover the same `mcp_*` surface. But
+Pi stops dispatching a `tool_call` event to further extensions the instant any
+handler blocks it, so a call this extension refuses may never reach
+`audit-log`'s handler at all, depending on an extension load order Pi does not
+guarantee. That is why this extension's own log is the **authoritative**
+record of what it refused: it is written from inside the very handler that
+decides, so its completeness does not depend on what any other extension does
+or in what order. See *What this extension logs* below, and `audit-log`'s
+README for the complementary half of the trail.
 
 [pi-permission-gate]: https://github.com/kieranpotts/pi/blob/main/src/extensions/permission-gate/README.md
+[pi-audit-log]: https://github.com/kieranpotts/pi/blob/main/src/extensions/audit-log/README.md
 
 ## What it does
 
@@ -63,79 +69,45 @@ which fires before a tool is invoked:
     — are not checked, so searching *for* `*.key` files by name is still
     allowed; only opening one is not.
 
-2.  **Everything else proceeds — but is logged, every time.** \
+    A refusal is logged immediately, to this extension's own file (see below),
+    with the reason and the full offending path.
+
+2.  **Everything else proceeds.** \
     There is no mutating/read-only distinction here and nothing is gated by a
     prompt: mutating tools (`*_write_file`, `*_edit_file`, `*_move_file`,
     `*_create_directory`) run exactly as read-only ones do. Running unattended
-    means the agent has to be able to act without a human in the loop — the
-    control this extension offers instead is that every action is recorded and
-    every secret-shaped output is scrubbed. Containment (staying inside the
-    project) is the MCP server's job, on the far side of a boundary this
-    extension cannot see past.
+    means the agent has to be able to act without a human in the loop.
+    Containment (staying inside the project) is the MCP server's job, on the
+    far side of a boundary this extension cannot see past. This extension
+    records nothing for a call it does not refuse — that is `audit-log`'s job.
 
-3.  **Log the call — every call.** \
-    A JSON line is appended to the call log, which lives on a volume mounted
-    from `/var/log/pi/` on the host system. This includes every call that was
-    not blocked at step 1: a trail that recorded only refusals would omit every
-    `mcp_read_file`, `mcp_write_file` and `mcp_edit_file` — which is to say
-    nearly everything the agent does.
-
-4.  **Redact secrets from the output, then log what the call did.** \
+3.  **Redact secrets from the output.** \
     A second hook, `tool_result`, fires after the tool runs. It replaces any
-    secret-shaped value in the output before the model sees it (see *Redaction*
-    below), then appends a second line carrying the real outcome and what was
-    withheld. See below for why one line was not enough.
+    secret-shaped value in the output before the model sees it (see
+    *Redaction* below), and if anything was replaced, appends a `redaction`
+    record naming the count and which rules fired.
 
-Two further hooks fire outside that sequence and append their own line kinds:
+## What this extension logs
 
-- `before_agent_start`, once per instruction from the operator, appends a **turn
-  boundary**, so the calls between two boundaries are attributable to the
-  instruction that caused them. See *Turn boundaries* below.
-- `before_provider_request`, once per model call, appends the **shape** of the
-  outbound request. See *Model requests* below.
+Two record kinds, in `security.jsonl`, neither of which is a `call`/`result`
+pair the way `audit-log`'s are — a blocked call never runs, so there is
+nothing to pair it with, and a redaction is a fact about a result that already
+has its own `ok`/`error` line elsewhere:
 
 ```json
-{"ts":"2026-06-04T11:59:58.000Z","kind":"turn_start","turn":4,"session":"01936f2e-6b2a-7c31-9e4d-8f1a2b3c4d5e"}
-{"ts":"2026-06-04T11:59:59.000Z","kind":"provider_request","model":"computer-programmer","messages":34,"approx_bytes":18422}
-{"ts":"2026-06-04T12:00:00.000Z","phase":"call","id":"tc_01","tool":"mcp_read_file","outcome":"allowed","confirmation":"not-required","detail":"mcp_read_file: /workspace/src/a.ts"}
-{"ts":"2026-06-04T12:00:00.010Z","phase":"result","id":"tc_01","tool":"mcp_read_file","result":"ok"}
-{"ts":"2026-06-04T12:00:05.000Z","phase":"call","id":"tc_02","tool":"mcp_write_file","outcome":"allowed","confirmation":"not-required","detail":"mcp_write_file: /workspace/x.ts"}
-{"ts":"2026-06-04T12:00:05.020Z","phase":"result","id":"tc_02","tool":"mcp_write_file","result":"ok"}
-{"ts":"2026-06-04T12:00:10.000Z","phase":"call","id":"tc_03","tool":"mcp_read_file","outcome":"blocked","confirmation":"not-offered","detail":"mcp_read_file: /workspace/.env","reason":"mcp_read_file blocked: sensitive file refused: .env"}
-{"ts":"2026-06-04T12:00:40.000Z","phase":"result","id":"tc_05","tool":"mcp_read_file","result":"ok","redactions":2,"rules":["aws-access-key-id","github-token"]}
+{"ts":"2026-06-04T12:00:10.000Z","kind":"blocked","id":"tc_03","tool":"mcp_read_file","path":"/workspace/.env","reason":"mcp_read_file blocked: sensitive file refused: .env"}
+{"ts":"2026-06-04T12:00:40.000Z","kind":"redaction","id":"tc_05","tool":"mcp_read_file","redactions":2,"rules":["aws-access-key-id","github-token"]}
 ```
 
-### Two lines per call
-
-`phase` distinguishes them, and `id` — Pi's `toolCallId` — joins them.
-
-| `phase` | Hook | Written | Records |
+| `kind` | Written from | Fields | Records |
 |---|---|---|---|
-| `call` | `tool_call` | before the tool runs | what this extension decided |
-| `result` | `tool_result` | after the tool runs | what the **tool** did (`ok` / `error`), and what was redacted from its output |
+| `blocked` | `tool_call` | `path`, `reason` | A call refused before it ran. |
+| `redaction` | `tool_result` | `redactions`, `rules` | Secret-shaped output replaced — only written when at least one rule fired. |
 
-The second line exists because the first is not a record of what happened.
-This extension decides *admission*; it does not perform the call. A read of a
-path outside `/workspace` is admitted here and then refused by the MCP
-filesystem server, so a trail of attempts alone asserts reads that never
-occurred:
-
-```json
-{"ts":"…","phase":"call","id":"tc_09","tool":"mcp_read_file","outcome":"allowed","confirmation":"not-required","detail":"mcp_read_file: /workspace/../etc/passwd"}
-{"ts":"…","phase":"result","id":"tc_09","tool":"mcp_read_file","result":"error"}
-```
-
-**Two lines rather than one enriched line, deliberately.** Buffering the attempt
-in memory until the result arrived would give one tidy line per call, but the
-only record of the attempt would live in the process for the duration of the
-call — so a crash, a kill, or an OOM between the two would erase the evidence
-that it was ever made. Appending on observation means the trail is never less
-complete than the events that have actually happened. The cost is volume —
-roughly double — which is why retention was settled explicitly rather than left
-to a default; see *Retention* below.
-
-A blocked call has no `result` line if the harness never runs the tool. The
-absence is not ambiguous: the `call` line already says `blocked` and why.
+`id` — Pi's `toolCallId` — is on both, so this file can be joined against
+`audit-log`'s by that field when a reviewer wants the complete picture of one
+call. A blocked call's `id` may have no corresponding line in `audit-log`'s
+file at all (see the intro); that absence is not a gap in *this* file.
 
 ### Redaction
 
@@ -179,9 +151,9 @@ fire here.
 characters, which is why it demands 32 more. Because only the matched span is
 replaced, a false positive costs one value rather than the whole output.
 
-**What the log records.** The `result` line gains two fields, and only when
-something was redacted — the *presence* of the field is the signal, so
-"nothing matched" and "the redactor did not run" cannot be confused:
+**What the log records.** Only when something was redacted — the *presence* of
+the `redaction` line is the signal, so "nothing matched" and "the redactor did
+not run" cannot be confused:
 
 | Field | Says |
 |---|---|
@@ -211,171 +183,15 @@ would be re-sent on resume. Verified by reading the transcript, not assumed.
   recognisable prefix, or a passphrase in prose is not matched. A shape with no
   literal anchor cannot be added without accepting false positives.
 - **Fails open.** If the redactor throws, the original output goes to the model
-  and the result is recorded without redaction fields. That keeps a bug here from
-  breaking tool execution, but it does mean such a bug is a quiet loss of this
-  control rather than a loud one.
+  and nothing is recorded. That keeps a bug here from breaking tool execution,
+  but it does mean such a bug is a quiet loss of this control rather than a
+  loud one.
 - **No off switch.** There is no environment variable to disable it, deliberately
   — a control that can be turned off by whatever sets the environment is a weaker
   control. If a rule misfires, the log's `rules` field names the culprit and the
   fix is a code change.
 
-### Turn boundaries
-
-The `call` and `result` lines are a flat sequence, so *"what did the agent do in
-response to **that** instruction"* used to be answerable only by correlating
-timestamps against a session transcript — which lives on a different volume,
-under a different retention policy, and is the agent's own narrative rather than
-an independent record. A third line kind closes that gap:
-
-```json
-{"ts":"…","kind":"turn_start","turn":7,"session":"01936f2e-…"}
-{"ts":"…","phase":"call","id":"tc_21","tool":"mcp_read_file","outcome":"allowed","confirmation":"not-required","detail":"mcp_read_file: /workspace/src/a.ts"}
-{"ts":"…","phase":"result","id":"tc_21","tool":"mcp_read_file","result":"ok"}
-```
-
-Every call line belongs to the turn whose boundary most recently preceded it.
-The hook is `before_agent_start`, which fires after a prompt is submitted and
-before the agent loop runs.
-
-| Field | Says |
-|---|---|
-| `kind` | `turn_start`. Turn lines carry **no `phase`** — see below. |
-| `turn` | Which turn, counted from 1 **by the running process**. |
-| `session` | Pi's session id. Omitted, rather than faked, if unavailable. |
-
-**No `phase`, deliberately.** The runbook's `jq` recipes all select on `.phase`,
-and a line without that field yields `null`, which matches neither `"call"` nor
-`"result"` — so every documented query returns exactly what it did before turn
-lines existed, including the tool-frequency count that the gateway's `--tools`
-allowlist is waiting on. Re-check this if a recipe is ever written that selects
-lines by the *absence* of a field rather than by its value.
-
-**`turn` is an ordinal, not an id.** It counts agent runs in the current process:
-it is not persisted, does not restart per session, and starts again at 1 when Pi
-restarts — including on `--resume`, which keeps the same `session`. `session`
-plus file order is what makes a turn identifiable in a file that is appended to
-forever; the number is for referring to one.
-
-**It records a boundary, not content.** `before_agent_start` hands the handler
-the operator's prompt, any attached images, and the fully assembled system
-prompt. None of it is logged, and the key set is closed by a test for the same
-reason the `result` line's is: this line must not grow into a record of what the
-turn was *about*, or the audit trail becomes a copy of the conversation.
-
-**One boundary per agent run, which is not quite one per message.** A message
-queued while the agent is already streaming — a steer or a follow-up — is
-consumed by the run already in flight and does not start a new one, so it
-produces no boundary and its calls are attributed to the turn in progress.
-
-### Model requests
-
-Tool calls were only part of what the agent does. Every model call also leaves
-the process, carrying whatever the agent has read, and the trail used to say
-nothing about it at all. `before_provider_request` closes that:
-
-```json
-{"ts":"…","kind":"provider_request","model":"computer-programmer","messages":34,"approx_bytes":18422}
-```
-
-| Field | Says |
-|---|---|
-| `model` | The model id **as it appears in the outbound body** — what was asked for, not what Pi has selected in its own state. |
-| `messages` | How many messages the request carries. |
-| `approx_bytes` | Size of the serialised body. |
-
-Every field is omitted when the payload does not carry it, because a `0` would
-be a claim about the request rather than an absence of one. The payload's shape
-belongs to the provider — the OpenAI-completions body for this stack's LiteLLM
-route — so nothing is assumed about it.
-
-**`approx_bytes` is approximate in a specific way.** It measures the JSON the
-handler can see, not the bytes on the wire: headers, compression, and any
-provider-side re-encoding are outside it. It exists so that context growth is
-visible *without* recording the context. Watching it climb across a turn is the
-cheapest signal there is that the agent is accumulating file content it will
-re-send on every subsequent call.
-
-**Shape, never content — and this is the line where that rule earns its keep.**
-The event hands the handler `payload: unknown`, and that payload is the whole
-conversation: the system prompt, every message, and the contents of every file
-read this session. The easiest thing to write in this handler is
-`JSON.stringify(payload)`, and the result would be a complete copy of everything
-the agent has touched, in the one file that is supposed to be trustworthy. So
-the extraction lives in a pure, separately tested module (`provider-request.ts`)
-that takes named scalars and never spreads, and a test asserts the record's key
-set is closed.
-
-**The handler returns `undefined`, and must.** Pi treats any other return value
-from this hook as a *replacement payload* — `runner.js` does
-`if (handlerResult !== undefined) currentPayload = handlerResult` — so a logging
-handler that returned something would silently rewrite the request the agent is
-about to send. There is a test for it.
-
-**What this is not.** It is written inside the agent's own process, so it is
-evidence rather than a boundary, in exactly the sense the rest of this extension
-is. An independent record would come from the host-side LiteLLM proxy, which
-sees the same traffic and holds the credentials. That is deliberately not built;
-`TODO.md` records the reasoning, including the thing the proxy could not do — a
-proxy-side log knows nothing about turns or sessions, so it could not attribute
-a request to the instruction that caused it.
-
-### The attempt record's two axes
-
-`outcome` and `confirmation` are deliberately **separate fields**:
-
-| Field | Values | Answers |
-|---|---|---|
-| `outcome` | `allowed`, `blocked` | Did the call run? |
-| `confirmation` | `not-required`, `not-offered` | Was there ever an approval path to offer? |
-
-Nothing here is ever confirmed by a human — this extension runs unattended —
-so `confirmation` never carries the `approved` / `rejected` / `timeout` /
-`no-ui` values that pi's `permission-gate` logs against the same field name.
-It exists so the *cause* of a denial is legible as a field rather than only as
-prose in `reason`, and so a reviewer reading both trails is reading the same
-axis, only a narrower one here:
-
-- **`not-required`** — the call proceeded. There was nothing to refuse.
-  Pairs with `allowed`.
-- **`not-offered`** — a sensitive-file refusal. There is deliberately **no
-  approval path**, so a model cannot socially engineer its way past it. Pairs
-  with `blocked`.
-
-`reason` is present only on a blocked call. For an allowed one the two axes
-already say everything there is to say.
-
-### What the log does not capture
-
-- **Paths, never content.** `detail` carries the path a call named, never what
-  it returned. The `result` line is deliberately minimal for the same reason:
-  `tool_result` hands the handler the tool's entire output — the file the agent
-  just read — and copying that here would turn the audit trail into a second
-  copy of every secret the agent has touched.
-
-  **But every path it named, in full.** `detail` is never truncated, however
-  many paths a call carries. It was once capped at 120 characters, which is
-  two or three realistic `/workspace/…` entries, so a ten-file
-  `read_multiple_files` recorded the first few and an ellipsis — a trail that
-  could not answer which files were read, failing silently, because an ellipsis
-  reads like formatting rather than like missing evidence.
-- **What was sent to a model.** Model requests are recorded as *shape* — model,
-  message count, size — never as payload. The conversation itself is the session
-  transcript's job, on a different volume with a different purpose.
-- **The provider's reply.** `after_provider_response` carries the status and
-  headers of the response and is not handled, so the trail shows that a request
-  went out, not whether it succeeded. Unlike the tool-call case — where an
-  attempt-only record wrongly asserted reads that were refused — a request line
-  overclaims nothing: it says a request was sent, which is true. There is also no
-  id in either event to join a response to its request.
-- **What a turn was about.** Turn boundaries are recorded; the instruction that
-  opened one is not. `turn` and `session` say *which* turn, so the trail can be
-  read against a session transcript, but the prompt itself stays out.
-- **Secrets in shapes no rule matches.** Redaction covers the shapes listed
-  above, so a database password, a prefix-less internal token, or a passphrase in
-  prose still reaches the model. The trail records that redaction happened, never
-  that a file was free of secrets.
-
-### What this extension does not enforce
+## What this extension does not enforce
 
 Containment — keeping file access inside the project — is **not** enforced here.
 That is the MCP filesystem server's job, and it does it on the far side of the
@@ -394,6 +210,10 @@ are cooperative controls — evidence and friction, not a boundary. The
 boundaries in this design are elsewhere: the MCP server's containment, the
 read-only rootfs, the internal network, and the absence of any execution tool.
 
+Nor does this extension record the generic activity trail — every call, turn
+boundary, and model request — any more. That is `audit-log`'s job; see its
+README.
+
 ## Configuration
 
 The following environment variables can be used to adjust the behavior of this
@@ -402,13 +222,14 @@ process is running — so, in the guest environment, if the agent is containeriz
 
 | Variable | Default | Description |
 |---|---|---|
-| `SECRET_SENTRY_CALL_LOG` | `/var/log/pi/secret-sentry/calls.jsonl` | Append-only tool-call log path. |
+| `SECRET_SENTRY_SECURITY_LOG` | `/var/log/pi/secret-sentry/security.jsonl` | Append-only security-decisions log path. |
 
-If running Pi inside the hardened container, the `SECRET_SENTRY_CALL_LOG` path MUST
-be within a **writable volume** mounted from the host. Without this, the write
-operation will fail silently, because the hardened container runs with a
-read-only rootfs. The hardened container's `compose.yaml` file provides this
-via the `pi-logs` volume, mounted at `/var/log/pi`.
+If running Pi inside the hardened container, the `SECRET_SENTRY_SECURITY_LOG`
+path MUST be within a **writable volume** mounted from the host. Without this,
+the write operation will fail silently, because the hardened container runs
+with a read-only rootfs. The hardened container's `compose.yaml` file provides
+this via the `pi-logs` volume, mounted at `/var/log/pi` — the same volume
+`audit-log` uses, each extension writing to its own subdirectory.
 
 > [!IMPORTANT]
 > The volume must also be **owned by the agent's uid**, or the log silently never
@@ -431,23 +252,16 @@ and its parent directory, on first write.
 
 **The log grows without bound. This extension never deletes from it, and that is
 deliberate.** The sink can only append; there is no cap, no rotation, and no
-truncation path in this code — not on the file, and not on the lines it holds
-(see *What the log does not capture* on why `detail` is complete).
+truncation path in this code.
 
-Two reasons, and the second is the one that constrains future changes:
-
-- **The volume does not justify the loss.** A call costs about **316 bytes**
-  across its two lines, so a million tool calls — years of heavy unattended
-  use — is roughly 316 MB. Discarding the oldest entries of an accountability
-  record to reclaim that is a bad trade. The other two line kinds do not move
-  that number much: a turn line is ~112 bytes with one per instruction, and a
-  provider-request line is ~126 bytes with roughly one per model call — a few
-  percent on top of the calls they describe, not a change of order.
-- **Truncation must not live here.** A cap inside this extension would put
-  delete-my-own-history logic inside the audited process. Append-only is a
-  property worth keeping: `compose.yaml` relies on the log volume outliving the
-  container so a compromised session cannot erase its own trail, and a rotation
-  step running as the agent's uid would spend that.
+This file is far smaller than the generic trail `audit-log` keeps, because it
+only ever gains a line when this extension actually refuses a call or redacts
+something — for a session with no blocked calls and no secrets in ordinary
+output, it may stay empty. **Truncation must not live here anyway**: a cap
+inside this extension would put delete-my-own-history logic inside the
+audited process, and append-only is a property worth keeping regardless of
+this file's size — `compose.yaml` relies on the log volume outliving the
+container so a compromised session cannot erase its own trail.
 
 Pruning and archival are the **operator's**, from the host. The procedure — a
 size check, and piping the log out to a dated `.gz` — is in the runbook

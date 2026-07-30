@@ -10,7 +10,7 @@ import {
   type CallAttemptRecord,
   type CallResultRecord,
   type TurnRecord,
-} from '../../../src/extensions/secret-sentry/call-log.ts'
+} from '../../../src/extensions/audit-log/call-log.ts'
 
 describe('formatRecord — the attempt line', () => {
   it('renders a newline-terminated JSON line with fixed key order', () => {
@@ -19,43 +19,26 @@ describe('formatRecord — the attempt line', () => {
       phase: 'call',
       id: 'tc_1',
       tool: 'write',
-      outcome: 'allowed',
-      confirmation: 'not-required',
       detail: 'write: /p/x',
     })
     assert.equal(
       line,
-      '{"ts":"T","phase":"call","id":"tc_1","tool":"write",' +
-      '"outcome":"allowed","confirmation":"not-required","detail":"write: /p/x"}\n'
+      '{"ts":"T","phase":"call","id":"tc_1","tool":"write","detail":"write: /p/x"}\n'
     )
   })
 
   it('omits detail when absent', () => {
-    const line = formatRecord({
-      ts: 'T', phase: 'call', id: 'tc_1', tool: 'mcp_write_file', outcome: 'blocked', confirmation: 'not-offered',
-    })
+    const line = formatRecord({ ts: 'T', phase: 'call', id: 'tc_1', tool: 'mcp_write_file' })
     assert.equal(line.includes('detail'), false)
   })
 
-  it('omits reason on an allowed call — the two axes say all there is to say', () => {
-    const line = formatRecord({
-      ts: 'T', phase: 'call', id: 'tc_1', tool: 'mcp_read_file', outcome: 'allowed', confirmation: 'not-required',
-    })
-    assert.equal(line.includes('reason'), false)
-  })
-
-  it('carries reason on a blocked call, after detail', () => {
-    const line = formatRecord({
-      ts: 'T',
-      phase: 'call',
-      id: 'tc_1',
-      tool: 'mcp_read_file',
-      outcome: 'blocked',
-      confirmation: 'not-offered',
-      detail: 'mcp_read_file: /workspace/.env',
-      reason: 'sensitive file refused: .env',
-    })
-    assert.match(line, /"detail":"[^"]*","reason":"sensitive file refused: \.env"\}\n$/)
+  /* This extension never decides admission, so its attempt line has no
+     `outcome` or `confirmation` field — that is `secret-sentry`'s to record,
+     in its own file, from the handler that actually decides. */
+  it('carries no outcome or confirmation field', () => {
+    const line = formatRecord({ ts: 'T', phase: 'call', id: 'tc_1', tool: 'mcp_read_file', detail: 'x' })
+    assert.equal(line.includes('outcome'), false)
+    assert.equal(line.includes('confirmation'), false)
   })
 })
 
@@ -65,47 +48,17 @@ describe('formatRecord — the result line', () => {
     assert.equal(line, '{"ts":"T","phase":"result","id":"tc_1","tool":"mcp_read_file","result":"ok"}\n')
   })
 
-  /* The result line must never become a second copy of the file the agent read.
-     This asserts the shape is closed, so a future edit that spreads the
-     tool_result event into the record fails here. The set grew by two when
-     redaction was added — deliberately, and the guard grew with it rather than
-     being relaxed. */
+  /* The result line must never become a second copy of the file the agent read,
+     and it must never claim to know whether anything was redacted — that is
+     `secret-sentry`'s record, not this one. This asserts the shape is closed,
+     so a future edit that spreads the tool_result event, or reintroduces the
+     redaction fields, fails here. */
   it('carries no field beyond ts, phase, id, tool and result', () => {
     const line = formatRecord({ ts: 'T', phase: 'result', id: 'tc_1', tool: 'mcp_read_file', result: 'error' })
     assert.deepEqual(
       Object.keys(JSON.parse(line) as Record<string, unknown>),
       ['ts', 'phase', 'id', 'tool', 'result']
     )
-  })
-
-  it('adds only the two redaction fields when something was redacted', () => {
-    const line = formatRecord({
-      ts: 'T',
-      phase: 'result',
-      id: 'tc_1',
-      tool: 'mcp_read_file',
-      result: 'ok',
-      redactions: 2,
-      rules: ['aws-access-key-id', 'github-token'],
-    })
-    assert.equal(
-      line,
-      '{"ts":"T","phase":"result","id":"tc_1","tool":"mcp_read_file","result":"ok",' +
-      '"redactions":2,"rules":["aws-access-key-id","github-token"]}\n'
-    )
-    assert.deepEqual(
-      Object.keys(JSON.parse(line) as Record<string, unknown>),
-      ['ts', 'phase', 'id', 'tool', 'result', 'redactions', 'rules']
-    )
-  })
-
-  /* The presence of the field is the signal, so an unredacted result must not
-     carry a zero — "nothing matched" and "the redactor did not run" would
-     otherwise look identical. */
-  it('omits the redaction fields entirely when nothing was redacted', () => {
-    const line = formatRecord({ ts: 'T', phase: 'result', id: 'tc_1', tool: 'mcp_read_file', result: 'ok' })
-    assert.equal(line.includes('redactions'), false)
-    assert.equal(line.includes('rules'), false)
   })
 })
 
@@ -196,14 +149,7 @@ describe('formatRecord — the provider-request line', () => {
 describe('makeRecord', () => {
   it('stamps the supplied time on an attempt', () => {
     const r = makeRecord(
-      {
-        phase: 'call',
-        id: 'tc_9',
-        tool: 'mcp_list_directory',
-        outcome: 'allowed',
-        confirmation: 'not-required',
-        detail: 'mcp_list_directory: /w',
-      },
+      { phase: 'call', id: 'tc_9', tool: 'mcp_list_directory', detail: 'mcp_list_directory: /w' },
       new Date('2026-06-04T00:00:00Z')
     )
     assert.deepEqual(r, {
@@ -211,8 +157,6 @@ describe('makeRecord', () => {
       phase: 'call',
       id: 'tc_9',
       tool: 'mcp_list_directory',
-      outcome: 'allowed',
-      confirmation: 'not-required',
       detail: 'mcp_list_directory: /w',
     })
   })
@@ -245,59 +189,19 @@ describe('makeRecord', () => {
   })
 })
 
-/* The two axes exist so that a reviewer can separate a sensitive-file refusal
-   from an ordinary pass-through by field, not by parsing the prose in
-   `reason`. Nothing here is ever confirmed by a human, so `confirmation` only
-   ever takes these two values — unlike pi's `permission-gate`, which logs
-   four more against the same field name. */
-describe('the two axes distinguish the reasons a call did not run', () => {
-  const at = new Date('2026-06-04T00:00:00Z')
-
-  it('a sensitive-file refusal is blocked with no approval path', () => {
-    const r = makeRecord(
-      {
-        phase: 'call',
-        id: 'tc_1',
-        tool: 'mcp_read_file',
-        outcome: 'blocked',
-        confirmation: 'not-offered',
-        reason: 'x',
-      }, at
-    ) as CallAttemptRecord
-    assert.equal(r.outcome, 'blocked')
-    assert.equal(r.confirmation, 'not-offered')
-  })
-
-  it('a mutating call proceeds unprompted, exactly like a read', () => {
-    const r = makeRecord({
-      phase: 'call', id: 'tc_2', tool: 'mcp_write_file', outcome: 'allowed', confirmation: 'not-required',
-    }, at) as CallAttemptRecord
-    assert.equal(r.outcome, 'allowed')
-    assert.equal(r.confirmation, 'not-required')
-  })
-
-  it('a read-only pass-through is allowed without a prompt', () => {
-    const r = makeRecord({
-      phase: 'call', id: 'tc_3', tool: 'mcp_read_file', outcome: 'allowed', confirmation: 'not-required',
-    }, at) as CallAttemptRecord
-    assert.equal(r.outcome, 'allowed')
-    assert.equal(r.confirmation, 'not-required')
-  })
-})
-
-/* The gap the result line closes: the gate admits a call, the MCP server then
-   refuses it. Before the second line existed, the trail asserted a read that
-   never happened. */
+/* The gap the result line closes: a call is admitted (by whichever extension
+   decides that), the MCP server then refuses it. Before the second line
+   existed, the trail asserted a read that never happened. This extension
+   cannot say the call was "allowed" any more — only that it was attempted and
+   what its result was. */
 describe('attempt and result are joined by id', () => {
   const at = new Date('2026-06-04T00:00:00Z')
 
-  it('an allowed attempt whose result errored is legible as a refusal downstream', () => {
+  it('an attempt and its later error share an id', () => {
     const attempt = makeRecord({
       phase: 'call',
       id: 'tc_42',
       tool: 'mcp_read_file',
-      outcome: 'allowed',
-      confirmation: 'not-required',
       detail: 'mcp_read_file: /workspace/../etc/passwd',
     }, at) as CallAttemptRecord
     const result = makeRecord({
@@ -305,26 +209,17 @@ describe('attempt and result are joined by id', () => {
     }, at) as CallResultRecord
 
     assert.equal(attempt.id, result.id)
-    assert.equal(attempt.outcome, 'allowed')
-    assert.equal(result.result, 'error')
   })
 })
 
 describe('CallLog.record', () => {
   it('appends one JSON line per observation, two per completed call', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'secret-sentry-'))
+    const dir = await mkdtemp(join(tmpdir(), 'audit-log-'))
     const file = join(dir, 'calls.jsonl')
     try {
       const log = new CallLog(file)
       await log.record(makeRecord(
-        {
-          phase: 'call',
-          id: 'tc_1',
-          tool: 'mcp_read_file',
-          outcome: 'allowed',
-          confirmation: 'not-required',
-          detail: 'mcp_read_file: /p/a',
-        },
+        { phase: 'call', id: 'tc_1', tool: 'mcp_read_file', detail: 'mcp_read_file: /p/a' },
         new Date('2026-01-01T00:00:00Z')
       ))
       await log.record(makeRecord(
@@ -332,37 +227,26 @@ describe('CallLog.record', () => {
         new Date('2026-01-01T00:00:01Z')
       ))
       await log.record(makeRecord(
-        {
-          phase: 'call',
-          id: 'tc_2',
-          tool: 'mcp_write_file',
-          outcome: 'blocked',
-          confirmation: 'not-offered',
-          reason: 'sensitive file refused: .env',
-        },
+        { phase: 'call', id: 'tc_2', tool: 'mcp_write_file', detail: 'mcp_write_file: /p/b' },
         new Date('2026-01-01T00:00:02Z')
       ))
       const lines = (await readFile(file, 'utf8')).trimEnd().split('\n')
       assert.equal(lines.length, 3)
       assert.equal(JSON.parse(lines[0]!).phase, 'call')
-      assert.equal(JSON.parse(lines[0]!).outcome, 'allowed')
       assert.equal(JSON.parse(lines[1]!).phase, 'result')
       assert.equal(JSON.parse(lines[1]!).id, 'tc_1')
       assert.equal(JSON.parse(lines[2]!).tool, 'mcp_write_file')
-      assert.equal(JSON.parse(lines[2]!).outcome, 'blocked')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
   })
 
   it('creates the parent directory if it does not exist', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'secret-sentry-'))
+    const dir = await mkdtemp(join(tmpdir(), 'audit-log-'))
     const file = join(dir, 'nested', 'deeper', 'calls.jsonl')
     try {
       const log = new CallLog(file)
-      await log.record(makeRecord({
-        phase: 'call', id: 'tc_1', tool: 'mcp_write_file', outcome: 'allowed', confirmation: 'not-required',
-      }))
+      await log.record(makeRecord({ phase: 'call', id: 'tc_1', tool: 'mcp_write_file' }))
       const lines = (await readFile(file, 'utf8')).trimEnd().split('\n')
       assert.equal(lines.length, 1)
     } finally {
@@ -371,10 +255,8 @@ describe('CallLog.record', () => {
   })
 
   it('does not throw when the target path is unwritable', async () => {
-    const log = new CallLog('/nonexistent-dir/secret-sentry/calls.jsonl')
-    await log.record(makeRecord({
-      phase: 'call', id: 'tc_1', tool: 'mcp_write_file', outcome: 'blocked', confirmation: 'not-offered', reason: 'x',
-    }))
+    const log = new CallLog('/nonexistent-dir/audit-log/calls.jsonl')
+    await log.record(makeRecord({ phase: 'call', id: 'tc_1', tool: 'mcp_write_file' }))
     assert.ok(true)
   })
 })

@@ -1,24 +1,28 @@
 /**
  * Append-only log of every tool call this extension sees, plus the turn
- * boundaries between them.
+ * boundaries between them and the shape of every outbound model request.
  *
  * Every call is recorded, whether it mutates or only reads — nothing here is
  * ever confirmed by a human, so there is no smaller "prompted calls only"
  * subset to fall back to. `docs/requirements.md` asks for observability of
- * every action against the filesystem, and reads are actions. This
- * extension's hooks are the only place in the harness that sees every call,
- * so their blind spots are the whole system's blind spots.
+ * every action against the filesystem, and reads are actions.
  *
  * A call produces TWO LINES, joined by `id` (Pi's `toolCallId`):
  *
- *   phase: 'call'    what the gate decided, written before the tool runs.
+ *   phase: 'call'    the call was attempted, written before the tool runs.
  *   phase: 'result'  what the tool actually did, written after it runs.
  *
- * The second line exists because the first cannot be trusted as a record of
- * what *happened*. The gate decides admission; it does not perform the call. A
- * read of a path outside `/workspace` is `allowed` by the gate and then refused
- * by the MCP server, so a trail of attempts alone asserts reads that never
- * occurred — the exact overclaim this log is supposed to prevent.
+ * THIS EXTENSION HAS NO OPINION ON ADMISSION. It does not decide whether a call
+ * proceeds — `secret-sentry` does that, in its own process, and a call it
+ * refuses by name never reaches this extension's `tool_call` handler at all:
+ * Pi's runner stops calling extensions for an event the instant any handler
+ * returns `{ block: true }`. So the `call` line here carries no `outcome` or
+ * `confirmation` field — unlike the single combined extension this was split
+ * from, this log cannot say whether a call was ever admitted, only that it was
+ * attempted and (if it ran) what happened. `secret-sentry`'s own
+ * `security.jsonl` is the record of what it refused and why; see that
+ * extension's README for the reasoning and for why a reviewer needs both
+ * files, joined by `id`, for the complete picture.
  *
  * Two lines rather than one enriched line, deliberately. Buffering the attempt
  * until the result arrived would give one tidy line per call, but the record
@@ -47,18 +51,6 @@
  * was. The event behind the second carries the entire conversation, so that
  * restraint is the whole design of the line rather than a detail of it.
  *
- * The attempt line is also TWO-AXIS:
- *
- *   `outcome`      whether the call was let through.
- *   `confirmation` whether it was ever offered an approval path at all.
- *
- * Collapsing these into one enum would make `outcome: blocked` the whole
- * story, when the real distinction in a review is between "this call was
- * refused outright, by name, with no appeal" and "this call simply had
- * nothing to refuse". They are different events with different meanings in a
- * review, and they are counted separately. See `Confirmation` for why this
- * axis only ever carries two of the values pi's `permission-gate` uses.
- *
  * The record is produced by a pure function (`formatRecord`) so it can be
  * asserted in tests; the sink (`CallLog`) is the only side-effecting part.
  *
@@ -71,43 +63,14 @@ import { appendFile, mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { ProviderRequestShape } from './provider-request.ts'
 
-/** Whether the gate let the call proceed. Decided BEFORE the tool runs. */
-export type CallOutcome = 'allowed' | 'blocked'
-
 /**
  * What the tool actually did. Observed AFTER it ran, from `tool_result`.
  *
- * This is the axis `outcome` cannot supply. The gate decides whether a call may
- * proceed; it does not perform the call, so it cannot know the result. An
- * `mcp_read_file` for a path outside `/workspace` is `allowed` here and then
- * refused by the MCP server — the trail claimed the read happened until this
- * existed.
+ * A call this extension never sees a result for — because `secret-sentry`
+ * refused it before it ran — simply has no `result` line. The absence is not
+ * ambiguous: `secret-sentry`'s own log already says why.
  */
 export type CallResult = 'ok' | 'error'
-
-/**
- * Whether the call was ever offered a chance at approval.
- *
- * This extension never prompts a human — it is built for away-from-keyboard
- * use, where there is nobody to ask — so both values describe a call that
- * proceeded (or was refused) without one:
- *
- *   `not-required`  ordinary call, nothing to refuse — pairs with `allowed`.
- *   `not-offered`   sensitive-file refusal. There is deliberately NO approval
- *                   path, so a model cannot socially engineer its way past it.
- *                   Pairs with `blocked`.
- *
- * The field is kept, rather than folded into `outcome`, because it names the
- * same axis pi's `permission-gate` decides against — that extension's
- * `ConfirmOutcome` type carries four more values (`approved`, `rejected`,
- * `timeout`, `no-ui`) for the outcomes of a prompt this extension never
- * shows. Unlike pi's, this trail's `Confirmation` values are never surfaced
- * to a human; they exist only to distinguish two kinds of pass-through in a
- * later review.
- */
-export type Confirmation =
-  | 'not-required'
-  | 'not-offered'
 
 /** Fields common to both lines a call produces. */
 interface RecordBase {
@@ -122,18 +85,14 @@ interface RecordBase {
   tool: string
 }
 
-/** The attempt: what the gate decided, written before the tool runs. */
+/** The attempt: a call reached this extension's `tool_call` hook, written
+ * before the tool runs. */
 export interface CallAttemptRecord extends RecordBase {
   phase: 'call'
-  outcome: CallOutcome
-  confirmation: Confirmation
   /** A short description of the call (the path, or paths). Never the content:
    * logging what was read would copy secrets out of the files and into the
    * audit trail, which is the opposite of the point. */
   detail?: string
-  /** Why the call was blocked. Omitted when it was allowed — the two axes
-   * already say everything there is to say about an allowed call. */
-  reason?: string
 }
 
 /**
@@ -142,30 +101,15 @@ export interface CallAttemptRecord extends RecordBase {
  * Deliberately carries NO content. `tool_result` hands us the tool's entire
  * output — the file the agent just read — and copying that here would turn the
  * audit trail into a second copy of every secret the agent has touched. The
- * path is already on the `call` line; this line adds the verdict, and what was
- * withheld from the model.
+ * path is already on the `call` line; this line adds only the verdict.
  *
- * The redaction fields are the sharpest case of the no-content rule, because
- * they describe secrets specifically: they say how many were replaced and which
- * rules matched, and cannot say what any of them was. A record that reported the
- * finding in full would be a more convenient way to leak precisely what the
- * redactor exists to protect.
+ * NO REDACTION FIELDS. Whether anything was redacted from this result is a
+ * question only `secret-sentry` can answer — it is the extension that performs
+ * the redaction — so that fact lives in `secret-sentry`'s own log, not here.
  */
 export interface CallResultRecord extends RecordBase {
   phase: 'result'
   result: CallResult
-  /**
-   * How many secret-shaped spans were replaced in this result before the model
-   * saw it. Omitted when none were, so the field's presence is the signal.
-   */
-  redactions?: number
-  /**
-   * Which redaction rules fired, by name — `github-token`, `private-key-block`.
-   * Names from a fixed, code-defined vocabulary (`redaction.ts`), never anything
-   * derived from what was matched: this says a GitHub token was in the output,
-   * and cannot say which one. Omitted when nothing was redacted.
-   */
-  rules?: string[]
 }
 
 /**
@@ -176,11 +120,10 @@ export interface CallResultRecord extends RecordBase {
  * until the next turn line appears, which is what makes "what did the agent do
  * in response to *that* instruction" answerable from this file alone.
  *
- * NOT `phase`. The three documented `jq` recipes in the runbook all select on
- * `.phase`, and a line without that field yields `null`, which matches neither
- * `"call"` nor `"result"` — so every existing query returns exactly what it did
- * before this line kind existed. Re-check that if a recipe is ever written which
- * selects lines by the ABSENCE of a field rather than by its value.
+ * NOT `phase`. A line without that field yields `null` on a `.phase` selector,
+ * which matches neither `"call"` nor `"result"` — so every query written
+ * against those two lines keeps working unmodified once turn lines exist
+ * alongside them.
  *
  * NOT Pi's `turn_start` event, despite the name. That event fires once per model
  * request inside a single agent run, and its `turnIndex` resets to 0 on every
@@ -265,10 +208,7 @@ export function formatRecord (record: LogRecord): string {
           phase: record.phase,
           id: record.id,
           tool: record.tool,
-          outcome: record.outcome,
-          confirmation: record.confirmation,
           ...(record.detail !== undefined ? { detail: record.detail } : {}),
-          ...(record.reason !== undefined ? { reason: record.reason } : {}),
         }
       : {
           ts: record.ts,
@@ -276,8 +216,6 @@ export function formatRecord (record: LogRecord): string {
           id: record.id,
           tool: record.tool,
           result: record.result,
-          ...(record.redactions !== undefined ? { redactions: record.redactions } : {}),
-          ...(record.rules !== undefined ? { rules: record.rules } : {}),
         }
   return JSON.stringify(ordered) + '\n'
 }

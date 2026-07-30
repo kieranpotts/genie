@@ -1,8 +1,9 @@
 /**
  * Wiring tests for the extension entry point.
  *
- * `call-log.test.ts` asserts the record FORMAT; these assert that the handlers
- * are registered and emit the right records for a realistic sequence of events.
+ * `security-log.test.ts` asserts the record FORMAT; these assert that the
+ * handlers are registered and emit the right records for a realistic
+ * sequence of events.
  *
  * The `ExtensionAPI` is stubbed rather than imported: the real one belongs to a
  * running harness, and the only surface this entry point uses is `pi.on`.
@@ -16,29 +17,23 @@ import { join } from 'node:path'
 
 type Handler = (event: unknown, ctx: unknown) => Promise<unknown>
 
-/** The four hooks this extension registers, keyed by event name. */
+/** The two hooks this extension registers, keyed by event name. */
 interface Handlers {
   tool_call: Handler
   tool_result: Handler
-  before_provider_request: Handler
-  before_agent_start: Handler
 }
 
 /** Load the extension against a stub API, logging to `file`. */
 async function loadExtension (file: string): Promise<Handlers> {
   const handlers: Partial<Handlers> = {}
-  process.env.SECRET_SENTRY_CALL_LOG = file
+  process.env.SECRET_SENTRY_SECURITY_LOG = file
   const module = await import('../../../src/extensions/secret-sentry/index.ts')
   const register = module.default as (pi: { on: (e: keyof Handlers, h: Handler) => void }) => void
   register({ on: (event, handler) => { handlers[event] = handler } })
   return handlers as Handlers
 }
 
-/** A stub context. This extension never shows a UI, so only `sessionManager`
- * (read by `before_agent_start`) is ever consulted. */
-const ctx = {
-  sessionManager: { getSessionId: () => 's-01' },
-}
+const ctx = {}
 
 async function readLines (file: string): Promise<Array<Record<string, string>>> {
   const body = await readFile(file, 'utf8')
@@ -51,164 +46,65 @@ describe('secret-sentry wiring', () => {
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'secret-sentry-wire-'))
-    file = join(dir, 'calls.jsonl')
+    file = join(dir, 'security.jsonl')
   })
 
-  it('registers all four hooks', async () => {
+  it('registers exactly the two hooks that decide and redact', async () => {
     const handlers = await loadExtension(file)
-    assert.deepEqual(
-      Object.keys(handlers).sort(),
-      ['before_agent_start', 'before_provider_request', 'tool_call', 'tool_result']
-    )
+    assert.deepEqual(Object.keys(handlers).sort(), ['tool_call', 'tool_result'])
     await rm(dir, { recursive: true, force: true })
   })
 
-  /* The gap the tool_result hook exists to close: this extension admits a
-     read, the MCP server refuses it. Before this, the trail asserted a read
-     that never happened. */
-  it('records an admitted call whose result errored as allowed-then-error', async () => {
+  /* An allowed call is not this extension's to record any more — that is
+     `audit-log`'s job. This extension writes nothing at all for it. */
+  it('writes nothing for a call it does not refuse', async () => {
     const handlers = await loadExtension(file)
     try {
-      await handlers.tool_call(
-        { toolCallId: 'tc_1', toolName: 'mcp_read_file', input: { path: '/workspace/../etc/passwd' } },
+      const outcome = await handlers.tool_call(
+        { toolCallId: 'tc_1', toolName: 'mcp_read_file', input: { path: '/workspace/a.ts' } },
         ctx
       )
-      await handlers.tool_result(
-        {
-          toolCallId: 'tc_1',
-          toolName: 'mcp_read_file',
-          input: { path: '/workspace/../etc/passwd' },
-          content: [{ type: 'text', text: 'irrelevant' }],
-          isError: true,
-        },
-        ctx
-      )
+      assert.equal(outcome, undefined)
 
-      const lines = await readLines(file)
-      assert.equal(lines.length, 2)
-      assert.equal(lines[0]!.phase, 'call')
-      assert.equal(lines[0]!.outcome, 'allowed')
-      assert.equal(lines[1]!.phase, 'result')
-      assert.equal(lines[1]!.result, 'error')
-      assert.equal(lines[0]!.id, lines[1]!.id, 'the two lines must be joinable')
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-
-  it('records a successful call as allowed-then-ok', async () => {
-    const handlers = await loadExtension(file)
-    try {
-      await handlers.tool_call(
-        { toolCallId: 'tc_2', toolName: 'mcp_list_directory', input: { path: '/workspace' } },
-        ctx
-      )
-      await handlers.tool_result(
-        {
-          toolCallId: 'tc_2',
-          toolName: 'mcp_list_directory',
-          input: {},
-          content: [{ type: 'text', text: 'a.ts' }],
-          isError: false,
-        },
-        ctx
-      )
-
-      const lines = await readLines(file)
-      assert.equal(lines[1]!.result, 'ok')
+      const body = await readFile(file, 'utf8').catch(() => '')
+      assert.equal(body, '', 'no file should even be created')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
   })
 
   /* There is no confirmation gate here: a mutating call proceeds exactly like
-     a read, unprompted, and is logged the same way. Unattended operation means
-     there is nobody to ask. */
-  it('lets a mutating call proceed unprompted, logged as allowed and not-required', async () => {
+     a read, unprompted, and this extension writes nothing about either.
+     Unattended operation means there is nobody to ask. */
+  it('lets a mutating call proceed unprompted and unrecorded', async () => {
     const handlers = await loadExtension(file)
     try {
       const outcome = await handlers.tool_call(
         { toolCallId: 'tc_w', toolName: 'mcp_write_file', input: { path: '/workspace/x.ts', content: 'y' } },
         ctx
       )
-
       assert.equal(outcome, undefined, 'a call that proceeds returns no block patch')
-      const [line] = await readLines(file)
-      assert.ok(line)
-      assert.equal(line.outcome, 'allowed')
-      assert.equal(line.confirmation, 'not-required')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
   })
 
-  /* The audit trail must be able to say WHICH files were read. A cap on the
-     joined path list used to lose all but the first two or three, and an
-     ellipsis in a log reads like formatting rather than like missing evidence.
-     The tool is not currently in the `--tools` allowlist, so this guards the
-     precondition on re-enabling it. See TODO.md. */
-  it('logs every path of a multi-file read, however many there are', async () => {
-    const handlers = await loadExtension(file)
-    try {
-      const paths = Array.from({ length: 50 }, (_, i) => `/workspace/src/deeply/nested/module-${i}/index.ts`)
-      await handlers.tool_call(
-        { toolCallId: 'tc_m', toolName: 'mcp_read_multiple_files', input: { paths } },
-        ctx
-      )
-
-      const [line] = await readLines(file)
-      assert.ok(line)
-      for (const p of paths) assert.equal(line.detail!.includes(p), true, `detail omits ${p}`)
-      assert.equal(line.detail!.includes('…'), false, 'detail must not be elided')
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-
-  /* A sensitive-file refusal never reaches the tool, so it has no result line.
-     The absence is unambiguous: the call line already says blocked, and why. */
-  it('writes no result line for a call this extension refused', async () => {
+  it('blocks and logs a sensitive-file refusal, with the full path and a reason', async () => {
     const handlers = await loadExtension(file)
     try {
       const outcome = await handlers.tool_call(
         { toolCallId: 'tc_3', toolName: 'mcp_read_file', input: { path: '/workspace/.env' } },
         ctx
-      ) as { block?: boolean }
+      ) as { block?: boolean, reason?: string }
 
       assert.equal(outcome.block, true)
+      assert.ok(outcome.reason?.includes('.env'))
+
       const lines = await readLines(file)
       assert.equal(lines.length, 1)
-      assert.equal(lines[0]!.phase, 'call')
-      assert.equal(lines[0]!.outcome, 'blocked')
-      assert.equal(lines[0]!.confirmation, 'not-offered')
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-
-  /* The result event carries the tool's ENTIRE output. Copying it into the
-     trail would make the audit log a second copy of every secret the agent has
-     read, which is the opposite of the point. */
-  it('never copies tool output into the log', async () => {
-    const handlers = await loadExtension(file)
-    try {
-      await handlers.tool_call(
-        { toolCallId: 'tc_4', toolName: 'mcp_read_file', input: { path: '/workspace/a.ts' } },
-        ctx
-      )
-      await handlers.tool_result(
-        {
-          toolCallId: 'tc_4',
-          toolName: 'mcp_read_file',
-          input: { path: '/workspace/a.ts' },
-          content: [{ type: 'text', text: 'SUPER-SECRET-FILE-BODY' }],
-          isError: false,
-        },
-        ctx
-      )
-
-      const body = await readFile(file, 'utf8')
-      assert.equal(body.includes('SUPER-SECRET-FILE-BODY'), false)
+      assert.equal(lines[0]!.kind, 'blocked')
+      assert.equal(lines[0]!.path, '/workspace/.env')
+      assert.equal(typeof lines[0]!.reason, 'string')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -235,7 +131,7 @@ describe('secret-sentry tool-output redaction', () => {
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'secret-sentry-redact-'))
-    file = join(dir, 'calls.jsonl')
+    file = join(dir, 'security.jsonl')
   })
 
   /* Pi replaces the tool result with what this handler returns, and that
@@ -263,7 +159,7 @@ describe('secret-sentry tool-output redaction', () => {
       await handlers.tool_result(resultEvent(`api key: ${secret}`), ctx)
 
       const lines = await readLines(file)
-      assert.equal(lines[0]!.phase, 'result')
+      assert.equal(lines[0]!.kind, 'redaction')
       assert.equal(lines[0]!.redactions, 1)
       assert.deepEqual(lines[0]!.rules, ['github-token'])
     } finally {
@@ -287,24 +183,24 @@ describe('secret-sentry tool-output redaction', () => {
   })
 
   /* Returning content unconditionally would rewrite every tool result in the
-     session — into the transcript as well — for no reason. */
-  it('returns no patch, and logs no redaction fields, for clean output', async () => {
+     session — into the transcript as well — for no reason. And with nothing
+     redacted, this extension has nothing of its own to record either. */
+  it('returns no patch, and writes nothing, for clean output', async () => {
     const handlers = await loadExtension(file)
     try {
       const patch = await handlers.tool_result(resultEvent('nothing secret here'), ctx)
       assert.equal(patch, undefined)
 
-      const lines = await readLines(file)
-      assert.equal('redactions' in lines[0]!, false)
-      assert.equal('rules' in lines[0]!, false)
+      const body = await readFile(file, 'utf8').catch(() => '')
+      assert.equal(body, '')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
   })
 
   /* Fails open, deliberately: a redactor that throws must not break tool
-     execution. The result is still recorded, without redaction fields. */
-  it('still records the result when the content is not shaped as expected', async () => {
+     execution, and nothing is recorded for it either. */
+  it('writes nothing when the content is not shaped as expected', async () => {
     const handlers = await loadExtension(file)
     try {
       const patch = await handlers.tool_result(
@@ -313,191 +209,8 @@ describe('secret-sentry tool-output redaction', () => {
       )
 
       assert.equal(patch, undefined)
-      const lines = await readLines(file)
-      assert.equal(lines[0]!.phase, 'result')
-      assert.equal(lines[0]!.result, 'ok')
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-})
-
-/* Model requests were the last channel the trail said nothing about. The hazard
-   is the opposite of the usual one: the event hands over the entire conversation,
-   so these tests are mostly about what does NOT reach the file. */
-describe('secret-sentry model-request logging', () => {
-  let dir: string
-  let file: string
-
-  const payload = {
-    model: 'computer-programmer',
-    messages: [
-      { role: 'system', content: 'SYSTEM-PROMPT-BODY' },
-      { role: 'user', content: 'CONVERSATION-CONTENT' },
-    ],
-  }
-
-  beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'secret-sentry-provider-'))
-    file = join(dir, 'calls.jsonl')
-  })
-
-  it('records the shape of the request', async () => {
-    const handlers = await loadExtension(file)
-    try {
-      await handlers.before_provider_request({ type: 'before_provider_request', payload }, ctx)
-
-      const lines = await readLines(file)
-      assert.equal(lines.length, 1)
-      assert.equal(lines[0]!.kind, 'provider_request')
-      assert.equal(lines[0]!.model, 'computer-programmer')
-      assert.equal(lines[0]!.messages, 2)
-      assert.ok(Number(lines[0]!.approx_bytes) > 0)
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-
-  it('never copies the conversation into the log', async () => {
-    const handlers = await loadExtension(file)
-    try {
-      await handlers.before_provider_request({ type: 'before_provider_request', payload }, ctx)
-
-      const body = await readFile(file, 'utf8')
-      assert.equal(body.includes('SYSTEM-PROMPT-BODY'), false)
-      assert.equal(body.includes('CONVERSATION-CONTENT'), false)
-      assert.deepEqual(
-        Object.keys(JSON.parse(body.trimEnd()) as Record<string, unknown>),
-        ['ts', 'kind', 'model', 'messages', 'approx_bytes']
-      )
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-
-  /* The footgun in this hook's contract: `runner.js` treats any non-undefined
-     return as a REPLACEMENT payload, so a stray return value from a logging
-     handler would rewrite the request the agent is about to send. */
-  it('returns undefined, so it cannot replace the outbound payload', async () => {
-    const handlers = await loadExtension(file)
-    try {
-      const returned = await handlers.before_provider_request(
-        { type: 'before_provider_request', payload },
-        ctx
-      )
-      assert.equal(returned, undefined)
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-
-  /* Several model requests fall inside one turn — the agent loops until it stops
-     calling tools — so the turn line is what groups them. */
-  it('sits under the turn boundary that groups it', async () => {
-    const handlers = await loadExtension(file)
-    try {
-      await handlers.before_agent_start({ type: 'before_agent_start', prompt: 'p', systemPrompt: 's' }, ctx)
-      await handlers.before_provider_request({ type: 'before_provider_request', payload }, ctx)
-      await handlers.tool_call(
-        { toolCallId: 'tc_1', toolName: 'mcp_read_file', input: { path: '/workspace/a.ts' } },
-        ctx
-      )
-      await handlers.before_provider_request({ type: 'before_provider_request', payload }, ctx)
-
-      const lines = await readLines(file)
-      assert.deepEqual(
-        lines.map(l => l.kind ?? l.phase),
-        ['turn_start', 'provider_request', 'call', 'provider_request']
-      )
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-})
-
-/* Turn markers exist so a reviewer can attribute calls to the instruction that
-   caused them without correlating timestamps against a session transcript held
-   on another volume under another retention policy. */
-describe('secret-sentry turn markers', () => {
-  let dir: string
-  let file: string
-
-  /** A `before_agent_start` event, with the fields that must never be logged. */
-  const agentStart = {
-    type: 'before_agent_start',
-    prompt: 'PROMPT-TEXT-THE-OPERATOR-TYPED',
-    systemPrompt: 'SYSTEM-PROMPT-BODY',
-    systemPromptOptions: {},
-  }
-
-  beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'secret-sentry-turn-'))
-    file = join(dir, 'calls.jsonl')
-  })
-
-  it('writes a boundary before the calls it groups, and numbers turns from 1', async () => {
-    const handlers = await loadExtension(file)
-    try {
-      await handlers.before_agent_start(agentStart, ctx)
-      await handlers.tool_call(
-        { toolCallId: 'tc_1', toolName: 'mcp_read_file', input: { path: '/workspace/a.ts' } },
-        ctx
-      )
-      await handlers.before_agent_start(agentStart, ctx)
-      await handlers.tool_call(
-        { toolCallId: 'tc_2', toolName: 'mcp_read_file', input: { path: '/workspace/b.ts' } },
-        ctx
-      )
-
-      const lines = await readLines(file)
-      assert.deepEqual(
-        lines.map(l => l.kind ?? l.phase),
-        ['turn_start', 'call', 'turn_start', 'call']
-      )
-      assert.deepEqual(lines.filter(l => l.kind !== undefined).map(l => l.turn), [1, 2])
-      assert.equal(lines[0]!.session, 's-01')
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-
-  /* `before_agent_start` carries the prompt and the fully assembled system
-     prompt. Recording either would put the conversation into the audit trail —
-     the failure "paths, never content" exists to prevent. */
-  it('never copies the prompt or the system prompt into the log', async () => {
-    const handlers = await loadExtension(file)
-    try {
-      await handlers.before_agent_start(agentStart, ctx)
-
-      const body = await readFile(file, 'utf8')
-      assert.equal(body.includes('PROMPT-TEXT-THE-OPERATOR-TYPED'), false)
-      assert.equal(body.includes('SYSTEM-PROMPT-BODY'), false)
-      assert.deepEqual(
-        Object.keys(JSON.parse(body.trimEnd()) as Record<string, unknown>),
-        ['ts', 'kind', 'turn', 'session']
-      )
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-
-  /* The session id is the only field either handler takes from the context
-     rather than the event. A marker is worth less than a working agent, so a
-     context that will not give one up costs the field, not the turn. */
-  it('records the boundary without a session when the harness exposes none', async () => {
-    const handlers = await loadExtension(file)
-    try {
-      await handlers.before_agent_start(agentStart, {})
-      await handlers.before_agent_start(agentStart, {
-        sessionManager: { getSessionId: () => { throw new Error('no session') } },
-      })
-
-      const lines = await readLines(file)
-      assert.equal(lines.length, 2)
-      for (const line of lines) {
-        assert.equal(line.kind, 'turn_start')
-        assert.equal('session' in line, false)
-      }
+      const body = await readFile(file, 'utf8').catch(() => '')
+      assert.equal(body, '')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
