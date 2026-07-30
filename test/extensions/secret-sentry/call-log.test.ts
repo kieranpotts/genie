@@ -10,7 +10,7 @@ import {
   type CallAttemptRecord,
   type CallResultRecord,
   type TurnRecord,
-} from '../../../src/extensions/permission-gate/call-log.ts'
+} from '../../../src/extensions/secret-sentry/call-log.ts'
 
 describe('formatRecord — the attempt line', () => {
   it('renders a newline-terminated JSON line with fixed key order', () => {
@@ -20,19 +20,19 @@ describe('formatRecord — the attempt line', () => {
       id: 'tc_1',
       tool: 'write',
       outcome: 'allowed',
-      confirmation: 'approved',
+      confirmation: 'not-required',
       detail: 'write: /p/x',
     })
     assert.equal(
       line,
       '{"ts":"T","phase":"call","id":"tc_1","tool":"write",' +
-      '"outcome":"allowed","confirmation":"approved","detail":"write: /p/x"}\n'
+      '"outcome":"allowed","confirmation":"not-required","detail":"write: /p/x"}\n'
     )
   })
 
   it('omits detail when absent', () => {
     const line = formatRecord({
-      ts: 'T', phase: 'call', id: 'tc_1', tool: 'mcp_write_file', outcome: 'blocked', confirmation: 'timeout',
+      ts: 'T', phase: 'call', id: 'tc_1', tool: 'mcp_write_file', outcome: 'blocked', confirmation: 'not-offered',
     })
     assert.equal(line.includes('detail'), false)
   })
@@ -245,9 +245,11 @@ describe('makeRecord', () => {
   })
 })
 
-/* The two axes exist so that a reviewer can separate a policy refusal from an
-   operator's rejection by field, not by parsing the prose in `reason`. These
-   assert that separation holds for the pairings the gate actually emits. */
+/* The two axes exist so that a reviewer can separate a sensitive-file refusal
+   from an ordinary pass-through by field, not by parsing the prose in
+   `reason`. Nothing here is ever confirmed by a human, so `confirmation` only
+   ever takes these two values — unlike pi's `permission-gate`, which logs
+   four more against the same field name. */
 describe('the two axes distinguish the reasons a call did not run', () => {
   const at = new Date('2026-06-04T00:00:00Z')
 
@@ -266,11 +268,12 @@ describe('the two axes distinguish the reasons a call did not run', () => {
     assert.equal(r.confirmation, 'not-offered')
   })
 
-  it('an operator rejection is blocked after being offered', () => {
+  it('a mutating call proceeds unprompted, exactly like a read', () => {
     const r = makeRecord({
-      phase: 'call', id: 'tc_2', tool: 'mcp_write_file', outcome: 'blocked', confirmation: 'rejected', reason: 'x',
+      phase: 'call', id: 'tc_2', tool: 'mcp_write_file', outcome: 'allowed', confirmation: 'not-required',
     }, at) as CallAttemptRecord
-    assert.equal(r.confirmation, 'rejected')
+    assert.equal(r.outcome, 'allowed')
+    assert.equal(r.confirmation, 'not-required')
   })
 
   it('a read-only pass-through is allowed without a prompt', () => {
@@ -309,7 +312,7 @@ describe('attempt and result are joined by id', () => {
 
 describe('CallLog.record', () => {
   it('appends one JSON line per observation, two per completed call', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'permgate-'))
+    const dir = await mkdtemp(join(tmpdir(), 'secret-sentry-'))
     const file = join(dir, 'calls.jsonl')
     try {
       const log = new CallLog(file)
@@ -334,8 +337,8 @@ describe('CallLog.record', () => {
           id: 'tc_2',
           tool: 'mcp_write_file',
           outcome: 'blocked',
-          confirmation: 'rejected',
-          reason: 'user rejected',
+          confirmation: 'not-offered',
+          reason: 'sensitive file refused: .env',
         },
         new Date('2026-01-01T00:00:02Z')
       ))
@@ -353,12 +356,12 @@ describe('CallLog.record', () => {
   })
 
   it('creates the parent directory if it does not exist', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'permgate-'))
+    const dir = await mkdtemp(join(tmpdir(), 'secret-sentry-'))
     const file = join(dir, 'nested', 'deeper', 'calls.jsonl')
     try {
       const log = new CallLog(file)
       await log.record(makeRecord({
-        phase: 'call', id: 'tc_1', tool: 'mcp_write_file', outcome: 'allowed', confirmation: 'approved',
+        phase: 'call', id: 'tc_1', tool: 'mcp_write_file', outcome: 'allowed', confirmation: 'not-required',
       }))
       const lines = (await readFile(file, 'utf8')).trimEnd().split('\n')
       assert.equal(lines.length, 1)
@@ -368,9 +371,9 @@ describe('CallLog.record', () => {
   })
 
   it('does not throw when the target path is unwritable', async () => {
-    const log = new CallLog('/nonexistent-dir/permission-gate/calls.jsonl')
+    const log = new CallLog('/nonexistent-dir/secret-sentry/calls.jsonl')
     await log.record(makeRecord({
-      phase: 'call', id: 'tc_1', tool: 'mcp_write_file', outcome: 'blocked', confirmation: 'timeout', reason: 'x',
+      phase: 'call', id: 'tc_1', tool: 'mcp_write_file', outcome: 'blocked', confirmation: 'not-offered', reason: 'x',
     }))
     assert.ok(true)
   })

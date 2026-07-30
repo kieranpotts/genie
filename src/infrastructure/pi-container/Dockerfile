@@ -70,7 +70,7 @@ RUN set -eu \
 
 # ---------------------------------------------------------------------------
 # Security extensions. The in-Pi half of the architecture (the `mcp-client` and
-# `permission-gate` extensions) is installed here so the hardened controls ship
+# `secret-sentry` extensions) is installed here so the hardened controls ship
 # WITH the image rather than being added ad hoc.
 #
 # Note what is NOT here: nothing restores local file or shell access. Pi runs
@@ -105,7 +105,7 @@ RUN set -eu \
 #
 RUN mkdir -p /opt/pi/agent/extensions
 COPY src/extensions/mcp-client/             /opt/pi/agent/extensions/mcp-client/
-COPY src/extensions/permission-gate/        /opt/pi/agent/extensions/permission-gate/
+COPY src/extensions/secret-sentry/          /opt/pi/agent/extensions/secret-sentry/
 
 # ---------------------------------------------------------------------------
 # Model routing. Pi has no built-in knowledge of the host LiteLLM proxy; it
@@ -161,12 +161,12 @@ VOLUME ["/home/pi/sessions"]
 #   docker compose -f src/infrastructure/compose.yaml down
 #   docker volume rm pi-secure-agent_pi-logs
 #
-# `permission-gate` creates its own log file and parent directory on first
+# `secret-sentry` creates its own log file and parent directory on first
 # write, but it cannot create them under a root-owned mount point, and it
 # swallows write failures by design so the audit trail would go silently
 # missing.
 # ---------------------------------------------------------------------------
-RUN mkdir -p /var/log/pi/permission-gate \
+RUN mkdir -p /var/log/pi/secret-sentry \
  && chown -R pi:pi /var/log/pi
 VOLUME ["/var/log/pi"]
 

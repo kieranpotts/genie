@@ -81,7 +81,7 @@ describe('isErrorResult', () => {
      threw: `agent-loop.js` returns `{ result, isError: false }` on a normal
      return and sets `true` only in its catch. A returned flag is discarded
      there. While `mcp-client` returned one, every failed MCP call produced a
-     `tool_result` claiming success, and `permission-gate` logged
+     `tool_result` claiming success, and `secret-sentry` logged
      `"result":"ok"` for reads the filesystem server had actually refused —
      silently, in the audit trail, which is the one place it must not happen.
 

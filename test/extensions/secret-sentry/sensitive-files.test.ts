@@ -4,7 +4,7 @@ import {
   findSensitiveArgument,
   isSensitiveFile,
   pathArguments,
-} from '../../../src/extensions/permission-gate/sensitive-files.ts'
+} from '../../../src/extensions/secret-sentry/sensitive-files.ts'
 
 describe('isSensitiveFile', () => {
   for (const name of ['.env', '.env.local', '.env.production', 'id_rsa', 'id_ed25519.pub', 'server.pem', 'private.key', 'cert.p12', 'cert.pfx', '.netrc', '.npmrc', '.pgpass', '.git-credentials', 'credentials']) {

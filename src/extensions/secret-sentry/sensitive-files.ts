@@ -2,11 +2,14 @@
  * Sensitive-filename refusal.
  *
  * Secrets and key material are refused by NAME, wherever they live, and the
- * refusal is absolute — it is not a prompt the user can approve, because the
- * whole point is that a misbehaving model must not be able to talk a distracted
- * operator into leaking a private key.
+ * refusal is absolute — there is no approval path at all, because this
+ * extension runs unattended: nobody is there to answer a prompt, so a
+ * misbehaving model must not be able to reach a private key just because no
+ * human happened to be watching. (pi's `permission-gate` uses this same
+ * detection differently — to route a call through interactive confirmation
+ * rather than to block it outright — because a human IS there to ask.)
  *
- * This lives here because the permission gate's `tool_call` hook is the one
+ * This lives here because this extension's `tool_call` hook is the one
  * place that sees EVERY tool call, including the `mcp_*` tools that are the sole
  * route to project files. The MCP filesystem server enforces its
  * allowed-directory boundary but has no notion of sensitive filenames, so

@@ -13,7 +13,7 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { redactContent, redactText } from '../../../src/extensions/permission-gate/redaction.ts'
+import { redactContent, redactText } from '../../../src/extensions/secret-sentry/redaction.ts'
 
 describe('redactText — the rules fire on real secret shapes', () => {
   it('replaces an AWS access key id, keeping the surrounding text', () => {

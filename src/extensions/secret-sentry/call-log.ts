@@ -1,12 +1,13 @@
 /**
- * Append-only log of every tool call the gate sees, plus the turn boundaries
- * between them.
+ * Append-only log of every tool call this extension sees, plus the turn
+ * boundaries between them.
  *
- * Read-only calls, which are never prompted for, are recorded too:
- * `docs/requirements.md` asks for observability of every action against the
- * filesystem, and reads are actions. The gate's hooks are the only place in the
- * harness that sees every call, so their blind spots are the whole system's
- * blind spots.
+ * Every call is recorded, whether it mutates or only reads — nothing here is
+ * ever confirmed by a human, so there is no smaller "prompted calls only"
+ * subset to fall back to. `docs/requirements.md` asks for observability of
+ * every action against the filesystem, and reads are actions. This
+ * extension's hooks are the only place in the harness that sees every call,
+ * so their blind spots are the whole system's blind spots.
  *
  * A call produces TWO LINES, joined by `id` (Pi's `toolCallId`):
  *
@@ -48,13 +49,15 @@
  *
  * The attempt line is also TWO-AXIS:
  *
- *   `outcome`      whether the gate let the call proceed.
- *   `confirmation` whether a human was involved, and what they said.
+ *   `outcome`      whether the call was let through.
+ *   `confirmation` whether it was ever offered an approval path at all.
  *
- * Collapsing these into one enum would leave the *cause* of a denial readable
- * only as prose in `reason`, so "refused by policy" and "the operator said no"
- * could not be told apart without parsing English. They are different events
- * with different meanings in a review, and they are counted separately.
+ * Collapsing these into one enum would make `outcome: blocked` the whole
+ * story, when the real distinction in a review is between "this call was
+ * refused outright, by name, with no appeal" and "this call simply had
+ * nothing to refuse". They are different events with different meanings in a
+ * review, and they are counted separately. See `Confirmation` for why this
+ * axis only ever carries two of the values pi's `permission-gate` uses.
  *
  * The record is produced by a pure function (`formatRecord`) so it can be
  * asserted in tests; the sink (`CallLog`) is the only side-effecting part.
@@ -83,23 +86,28 @@ export type CallOutcome = 'allowed' | 'blocked'
 export type CallResult = 'ok' | 'error'
 
 /**
- * Whether a human was asked, and what came back.
+ * Whether the call was ever offered a chance at approval.
  *
- * `not-required` and `not-offered` both mean no prompt was shown, and the
- * distinction between them is the point:
+ * This extension never prompts a human — it is built for away-from-keyboard
+ * use, where there is nobody to ask — so both values describe a call that
+ * proceeded (or was refused) without one:
  *
- *   `not-required`  read-only call, nothing to approve — pairs with `allowed`.
+ *   `not-required`  ordinary call, nothing to refuse — pairs with `allowed`.
  *   `not-offered`   sensitive-file refusal. There is deliberately NO approval
  *                   path, so a model cannot socially engineer its way past it.
  *                   Pairs with `blocked`.
+ *
+ * The field is kept, rather than folded into `outcome`, because it names the
+ * same axis pi's `permission-gate` decides against — that extension's
+ * `ConfirmOutcome` type carries four more values (`approved`, `rejected`,
+ * `timeout`, `no-ui`) for the outcomes of a prompt this extension never
+ * shows. Unlike pi's, this trail's `Confirmation` values are never surfaced
+ * to a human; they exist only to distinguish two kinds of pass-through in a
+ * later review.
  */
 export type Confirmation =
   | 'not-required'
   | 'not-offered'
-  | 'approved'
-  | 'rejected'
-  | 'timeout'
-  | 'no-ui'
 
 /** Fields common to both lines a call produces. */
 interface RecordBase {

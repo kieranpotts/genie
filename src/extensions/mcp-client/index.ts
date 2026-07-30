@@ -94,7 +94,7 @@ function registerMcpTool (
          on a normal return and only sets `true` in its catch. A returned
          `isError` is ignored there, so returning one produced a `tool_result`
          event claiming success for every failed MCP call, and
-         `permission-gate` recorded `"result":"ok"` for reads the server had
+         `secret-sentry` recorded `"result":"ok"` for reads the server had
          refused. That is the precise failure the two-line audit trail exists to
          prevent, so it must be signalled the way the harness actually reads.
 

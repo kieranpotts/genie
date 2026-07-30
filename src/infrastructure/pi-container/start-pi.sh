@@ -21,9 +21,13 @@
 #                      read-only at /workspace for the operator. Without
 #                      this flag the agent can read every project file locally,
 #                      bypassing the MCP server that is supposed to be its only
-#                      route to them, with none of that server's mediation or
-#                      logging. permission-gate would not catch it either: it
-#                      gates writes and execution, and lets reads pass silently.
+#                      route to them, with none of that server's mediation.
+#                      secret-sentry's hooks fire for any tool call, built-in
+#                      included, so its sensitive-file refusal and logging
+#                      would still apply — but the MCP server's containment
+#                      would not: a built-in call never reaches the gateway, so
+#                      the agent could read or write anywhere in THIS
+#                      container's filesystem, not just /workspace.
 #
 #                      Do not remove this on the grounds that "there is no
 #                      audited-tools extension to shadow built-ins any more".
@@ -42,7 +46,7 @@
 #                      Trust is not cosmetic: it lets Pi load project settings,
 #                      install missing project packages, and EXECUTE project
 #                      extensions inside Pi's own process, where they could
-#                      shadow or interfere with permission-gate. Default-deny
+#                      shadow or interfere with secret-sentry. Default-deny
 #                      is therefore the harness's posture, and it matches what
 #                      Pi does headlessly anyway (no UI ⇒ not trusted).
 #

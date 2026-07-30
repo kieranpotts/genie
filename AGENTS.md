@@ -21,9 +21,10 @@ boundary:
 
 - `mcp-client`: MCP client giving Pi mediated filesystem access through the
   Docker MCP Toolkit gateway.
-- `permission-gate`: Interactive, default-deny confirmation gate on mutating
-  tool calls, sensitive-filename refusal, secret redaction, and the audit
-  trail.
+- `secret-sentry`: Unattended security controls for away-from-keyboard use —
+  absolute sensitive-filename refusal, secret redaction, and the system's only
+  audit trail. No interactive confirmation; see pi's `permission-gate` for
+  that.
 
 See each extension's own README under `src/extensions/<name>/` for details.
 

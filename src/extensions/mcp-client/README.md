@@ -36,7 +36,7 @@ catch (error) { return { result: …, isError: true } }   // execute threw
 ```
 
 A returned `isError` is discarded at that point. This extension used to return
-one, and the consequence was not cosmetic: `permission-gate` records the
+one, and the consequence was not cosmetic: `secret-sentry` records the
 `tool_result` event's `isError` as the `result` field of its audit trail, so
 **every failed MCP call was logged as `"result":"ok"`** — including reads the
 filesystem server had refused for being outside `/workspace`. The audit trail

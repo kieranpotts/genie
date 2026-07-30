@@ -1,35 +1,44 @@
-# `permission-gate`
+# `secret-sentry`
 
-Out-of-the-box, Pi has no permission popups. Every tool call requested by a
-model is honored by the harness.
+Out-of-the-box, Pi has no security controls at all. Every tool call requested
+by a model is honored by the harness, and every value a tool returns reaches
+the model unchanged.
 
-This extension changes that. With this extension installed, Pi:
+This extension changes that, for **unattended, away-from-keyboard** sessions
+where nobody is watching each tool call as it happens. With this extension
+installed, Pi:
 
 - **refuses outright** any tool call naming a sensitive file — secrets and key
-  material — with no approval path at all;
-- requires explicit, interactive user confirmation before any mutating tool call
-  runs — writes, edits, moves, and directory creation; and
+  material — with no approval path at all; and
 - **redacts secret-shaped values from tool output** before the model sees them,
   which is the same concern approached from the other side: the first control
   matches a file's *name*, so it cannot see a key pasted into an ordinary
   `notes.txt`.
 
-Confirmation defaults to deny, so a timeout or a missing interactive UI blocks
-the operation.
+There is deliberately **no interactive confirmation** here. A prompt that
+nobody is present to answer could only ever time out and default-deny, which
+would make every mutating call fail rather than gate it — theatre, not a
+control. If you want an interactive, at-keyboard confirmation gate instead,
+see [`permission-gate`][pi-permission-gate] in the `pi` repository, which uses
+the same sensitive-file detection to route a call through a confirmation
+dialog rather than to block it outright.
 
-**Every tool call is logged** to an append-only file — not only the ones that
-prompted. Reads are never confirmed, but they are still actions against the
-filesystem, and `docs/requirements.md` asks for observability of every one of
-them. The same file carries the **turn boundaries** between calls and the
-**shape** of every outbound model request, so the trail covers both channels the
-agent has — never the content of either.
+**Every tool call is logged** to an append-only file — not only the blocked
+ones. Reads and writes alike are never confirmed here, but they are still
+actions against the filesystem, and `docs/requirements.md` asks for
+observability of every one of them. The same file carries the **turn
+boundaries** between calls and the **shape** of every outbound model request,
+so the trail covers both channels the agent has — never the content of
+either.
 
 The `tool_call` hook is the only place in the harness that sees **every** tool
 call, whichever extension registered it. That is why the sensitive-file rule
-lives here: it must cover the `mcp_*` tools, which are the agent's sole route to
-project files. Since the removal of `audited-tools` it is also why this is the
-system's **only** audit trail — so anything this extension does not record is
-not recorded anywhere.
+lives here: it must cover the `mcp_*` tools, which are the agent's sole route
+to project files. Since the removal of `audited-tools` it is also why this is
+the system's **only** audit trail — so anything this extension does not
+record is not recorded anywhere.
+
+[pi-permission-gate]: https://github.com/kieranpotts/pi/blob/main/src/extensions/permission-gate/README.md
 
 ## What it does
 
@@ -44,9 +53,9 @@ which fires before a tool is invoked:
     call immediately.
 
     This check runs on **every** call, including read-only ones: reading a private
-    key is precisely the exfiltration it exists to stop. It is deliberately **not**
-    a prompt — there is no approval path, so a misbehaving model cannot talk a
-    distracted operator past it.
+    key is precisely the exfiltration it exists to stop. There is no approval
+    path, so a misbehaving model cannot talk its way past it — there is nobody
+    there to talk to.
 
     Arguments are read from the path-bearing keys (`path`, `paths`, `source`,
     `destination`, …), which covers the MCP filesystem server's argument shapes.
@@ -54,34 +63,24 @@ which fires before a tool is invoked:
     — are not checked, so searching *for* `*.key` files by name is still
     allowed; only opening one is not.
 
-2.  **Classify the tool: read-only versus mutating** \
-    Read-only tools (`mcp_read_file`, `mcp_list_directory`, `mcp_search_files`,
-    …) pass through without a prompt — but not without a record; see step 5.
-    Mutating tools (`*_write_file`, `*_edit_file`, `*_move_file`,
-    `*_create_directory`, and the unprefixed `write` / `edit`) are gated.
+2.  **Everything else proceeds — but is logged, every time.** \
+    There is no mutating/read-only distinction here and nothing is gated by a
+    prompt: mutating tools (`*_write_file`, `*_edit_file`, `*_move_file`,
+    `*_create_directory`) run exactly as read-only ones do. Running unattended
+    means the agent has to be able to act without a human in the loop — the
+    control this extension offers instead is that every action is recorded and
+    every secret-shaped output is scrubbed. Containment (staying inside the
+    project) is the MCP server's job, on the far side of a boundary this
+    extension cannot see past.
 
-3.  **Confirm.** \
-    The user is shown the tool name and a summary of the operation (the path, or
-    a source and destination) and asked to approve. The dialog is the only place
-    anything is shortened, and only past 800 characters — at which point it says
-    how much it withheld rather than trailing an ellipsis. Nothing gated today
-    comes close to that; the record is never shortened at all. See
-    *What the log does not capture*.
-
-4.  **Deny by default.** \
-    The confirmation dialog has a timeout of 60s, after which time the call is
-    denied. A non-interactive UI will also block the call. Only an explicit
-    approval by the user will allow the call.
-
-5.  **Log the call — every call.** \
+3.  **Log the call — every call.** \
     A JSON line is appended to the call log, which lives on a volume mounted
-    from `/var/log/pi/` on the host system. This includes the read-only calls
-    that passed straight through at step 2: a trail that recorded only
-    confirmations would omit every `mcp_read_file`, `mcp_list_directory` and
-    `mcp_search_files` — which is to say every read of project content, the
-    whole reason the agent has filesystem access at all.
+    from `/var/log/pi/` on the host system. This includes every call that was
+    not blocked at step 1: a trail that recorded only refusals would omit every
+    `mcp_read_file`, `mcp_write_file` and `mcp_edit_file` — which is to say
+    nearly everything the agent does.
 
-6.  **Redact secrets from the output, then log what the call did.** \
+4.  **Redact secrets from the output, then log what the call did.** \
     A second hook, `tool_result`, fires after the tool runs. It replaces any
     secret-shaped value in the output before the model sees it (see *Redaction*
     below), then appends a second line carrying the real outcome and what was
@@ -100,10 +99,9 @@ Two further hooks fire outside that sequence and append their own line kinds:
 {"ts":"2026-06-04T11:59:59.000Z","kind":"provider_request","model":"computer-programmer","messages":34,"approx_bytes":18422}
 {"ts":"2026-06-04T12:00:00.000Z","phase":"call","id":"tc_01","tool":"mcp_read_file","outcome":"allowed","confirmation":"not-required","detail":"mcp_read_file: /workspace/src/a.ts"}
 {"ts":"2026-06-04T12:00:00.010Z","phase":"result","id":"tc_01","tool":"mcp_read_file","result":"ok"}
-{"ts":"2026-06-04T12:00:05.000Z","phase":"call","id":"tc_02","tool":"mcp_write_file","outcome":"allowed","confirmation":"approved","detail":"mcp_write_file: /workspace/x.ts"}
+{"ts":"2026-06-04T12:00:05.000Z","phase":"call","id":"tc_02","tool":"mcp_write_file","outcome":"allowed","confirmation":"not-required","detail":"mcp_write_file: /workspace/x.ts"}
 {"ts":"2026-06-04T12:00:05.020Z","phase":"result","id":"tc_02","tool":"mcp_write_file","result":"ok"}
 {"ts":"2026-06-04T12:00:10.000Z","phase":"call","id":"tc_03","tool":"mcp_read_file","outcome":"blocked","confirmation":"not-offered","detail":"mcp_read_file: /workspace/.env","reason":"mcp_read_file blocked: sensitive file refused: .env"}
-{"ts":"2026-06-04T12:00:30.000Z","phase":"call","id":"tc_04","tool":"mcp_write_file","outcome":"blocked","confirmation":"timeout","detail":"mcp_write_file: /workspace/y.ts","reason":"mcp_write_file blocked: confirmation timed out (default deny)"}
 {"ts":"2026-06-04T12:00:40.000Z","phase":"result","id":"tc_05","tool":"mcp_read_file","result":"ok","redactions":2,"rules":["aws-access-key-id","github-token"]}
 ```
 
@@ -113,13 +111,14 @@ Two further hooks fire outside that sequence and append their own line kinds:
 
 | `phase` | Hook | Written | Records |
 |---|---|---|---|
-| `call` | `tool_call` | before the tool runs | what the **gate** decided |
+| `call` | `tool_call` | before the tool runs | what this extension decided |
 | `result` | `tool_result` | after the tool runs | what the **tool** did (`ok` / `error`), and what was redacted from its output |
 
-The second line exists because the first is not a record of what happened. The
-gate decides *admission*; it does not perform the call. A read of a path outside
-`/workspace` is admitted here and then refused by the MCP filesystem server, so
-a trail of attempts alone asserts reads that never occurred:
+The second line exists because the first is not a record of what happened.
+This extension decides *admission*; it does not perform the call. A read of a
+path outside `/workspace` is admitted here and then refused by the MCP
+filesystem server, so a trail of attempts alone asserts reads that never
+occurred:
 
 ```json
 {"ts":"…","phase":"call","id":"tc_09","tool":"mcp_read_file","outcome":"allowed","confirmation":"not-required","detail":"mcp_read_file: /workspace/../etc/passwd"}
@@ -170,7 +169,7 @@ distinctive **literal** — a PEM delimiter, or an issuer's key prefix:
 **There is deliberately no entropy heuristic**, and that is the central design
 decision rather than an omission. High-entropy strings are also hashes, UUIDs,
 minified code, base64 test fixtures, and lockfile integrity digests. Redaction is
-*silent* — it changes what the model reads without telling the operator at the
+*silent* — it changes what the model reads without telling anyone at the
 time — so a false positive is not a cosmetic problem: it is corrupted input
 producing a confusing failure somewhere else entirely. The test suite pins that
 down with the specific shapes that would fire on a randomness test and must not
@@ -322,27 +321,25 @@ a request to the instruction that caused it.
 
 ### The attempt record's two axes
 
-`outcome` and `confirmation` are deliberately **separate fields**, because they
-answer different questions and a reviewer needs both:
+`outcome` and `confirmation` are deliberately **separate fields**:
 
 | Field | Values | Answers |
 |---|---|---|
 | `outcome` | `allowed`, `blocked` | Did the call run? |
-| `confirmation` | `not-required`, `not-offered`, `approved`, `rejected`, `timeout`, `no-ui` | Was a human involved, and what did they say? |
+| `confirmation` | `not-required`, `not-offered` | Was there ever an approval path to offer? |
 
-The two `no prompt was shown` values are not interchangeable, and the difference
-is the point:
+Nothing here is ever confirmed by a human — this extension runs unattended —
+so `confirmation` never carries the `approved` / `rejected` / `timeout` /
+`no-ui` values that pi's `permission-gate` logs against the same field name.
+It exists so the *cause* of a denial is legible as a field rather than only as
+prose in `reason`, and so a reviewer reading both trails is reading the same
+axis, only a narrower one here:
 
-- **`not-required`** — a read-only call. There was nothing to approve. Pairs
-  with `allowed`.
+- **`not-required`** — the call proceeded. There was nothing to refuse.
+  Pairs with `allowed`.
 - **`not-offered`** — a sensitive-file refusal. There is deliberately **no
   approval path**, so a model cannot socially engineer its way past it. Pairs
   with `blocked`.
-
-Collapsing these onto a single `status` field would leave the *cause* of a
-denial legible only as prose in `reason`, so "refused outright by policy" and
-"the operator said no" could not be told apart without parsing English. They are
-different events in a review, and they are counted separately.
 
 `reason` is present only on a blocked call. For an allowed one the two axes
 already say everything there is to say.
@@ -360,11 +357,7 @@ already say everything there is to say.
   two or three realistic `/workspace/…` entries, so a ten-file
   `read_multiple_files` recorded the first few and an ellipsis — a trail that
   could not answer which files were read, failing silently, because an ellipsis
-  reads like formatting rather than like missing evidence. The cap belonged to
-  the confirmation dialog and had been borrowed for the record. The two are now
-  separate functions (`describeCall`, `describeForPrompt`), because a dialog
-  must fit a screen and a record must be complete, and one string could only
-  ever satisfy the weaker requirement.
+  reads like formatting rather than like missing evidence.
 - **What was sent to a model.** Model requests are recorded as *shape* — model,
   message count, size — never as payload. The conversation itself is the session
   transcript's job, on a different volume with a different purpose.
@@ -391,10 +384,15 @@ extension only answers the questions the MCP server has no opinion on: *is this 
 name we never touch?*, and *does this output contain something that looks like a
 credential?*
 
-Both of those run inside the agent's own process, so they are cooperative
-controls — evidence and friction, not a boundary. The boundaries in this design
-are elsewhere: the MCP server's containment, the read-only rootfs, the internal
-network, and the absence of any execution tool.
+Neither an interactive confirmation gate nor an execution sandbox. The agent
+acts freely on everything that is not a named secret file, because running
+unattended means there is no human to gate mutating calls against — see pi's
+`permission-gate` for the eyes-on alternative.
+
+Both controls this extension does run inside the agent's own process, so they
+are cooperative controls — evidence and friction, not a boundary. The
+boundaries in this design are elsewhere: the MCP server's containment, the
+read-only rootfs, the internal network, and the absence of any execution tool.
 
 ## Configuration
 
@@ -404,9 +402,9 @@ process is running — so, in the guest environment, if the agent is containeriz
 
 | Variable | Default | Description |
 |---|---|---|
-| `PERMISSION_GATE_CALL_LOG` | `/var/log/pi/permission-gate/calls.jsonl` | Append-only tool-call log path. |
+| `SECRET_SENTRY_CALL_LOG` | `/var/log/pi/secret-sentry/calls.jsonl` | Append-only tool-call log path. |
 
-If running Pi inside the hardened container, the `PERMISSION_GATE_CALL_LOG` path MUST
+If running Pi inside the hardened container, the `SECRET_SENTRY_CALL_LOG` path MUST
 be within a **writable volume** mounted from the host. Without this, the write
 operation will fail silently, because the hardened container runs with a
 read-only rootfs. The hardened container's `compose.yaml` file provides this
@@ -414,7 +412,7 @@ via the `pi-logs` volume, mounted at `/var/log/pi`.
 
 > [!IMPORTANT]
 > The volume must also be **owned by the agent's uid**, or the log silently never
-> appears. The image creates `/var/log/pi/permission-gate` as the `pi` user so
+> appears. The image creates `/var/log/pi/secret-sentry` as the `pi` user so
 > that Docker seeds a new named volume with that ownership — but a volume created
 > before that layer existed keeps its original `root:root` ownership, and the
 > agent cannot write to it. Because the sink swallows write failures by design (a
@@ -439,7 +437,7 @@ truncation path in this code — not on the file, and not on the lines it holds
 Two reasons, and the second is the one that constrains future changes:
 
 - **The volume does not justify the loss.** A call costs about **316 bytes**
-  across its two lines, so a million tool calls — years of heavy single-operator
+  across its two lines, so a million tool calls — years of heavy unattended
   use — is roughly 316 MB. Discarding the oldest entries of an accountability
   record to reclaim that is a bad trade. The other two line kinds do not move
   that number much: a turn line is ~112 bytes with one per instruction, and a

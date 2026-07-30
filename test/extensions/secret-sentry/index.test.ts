@@ -3,8 +3,6 @@
  *
  * `call-log.test.ts` asserts the record FORMAT; these assert that the handlers
  * are registered and emit the right records for a realistic sequence of events.
- * That glue was previously uncovered, and it now has to coordinate two hooks
- * rather than one.
  *
  * The `ExtensionAPI` is stubbed rather than imported: the real one belongs to a
  * running harness, and the only surface this entry point uses is `pi.on`.
@@ -29,17 +27,16 @@ interface Handlers {
 /** Load the extension against a stub API, logging to `file`. */
 async function loadExtension (file: string): Promise<Handlers> {
   const handlers: Partial<Handlers> = {}
-  process.env.PERMISSION_GATE_CALL_LOG = file
-  const module = await import('../../../src/extensions/permission-gate/index.ts')
+  process.env.SECRET_SENTRY_CALL_LOG = file
+  const module = await import('../../../src/extensions/secret-sentry/index.ts')
   const register = module.default as (pi: { on: (e: keyof Handlers, h: Handler) => void }) => void
   register({ on: (event, handler) => { handlers[event] = handler } })
   return handlers as Handlers
 }
 
-/** A context with no interactive UI, which the gate treats as default-deny. */
-const noUI = {
-  hasUI: false,
-  ui: { confirm: async () => false },
+/** A stub context. This extension never shows a UI, so only `sessionManager`
+ * (read by `before_agent_start`) is ever consulted. */
+const ctx = {
   sessionManager: { getSessionId: () => 's-01' },
 }
 
@@ -48,12 +45,12 @@ async function readLines (file: string): Promise<Array<Record<string, string>>> 
   return body.trimEnd().split('\n').map(line => JSON.parse(line) as Record<string, string>)
 }
 
-describe('permission-gate wiring', () => {
+describe('secret-sentry wiring', () => {
   let dir: string
   let file: string
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'permgate-wire-'))
+    dir = await mkdtemp(join(tmpdir(), 'secret-sentry-wire-'))
     file = join(dir, 'calls.jsonl')
   })
 
@@ -66,15 +63,15 @@ describe('permission-gate wiring', () => {
     await rm(dir, { recursive: true, force: true })
   })
 
-  /* The gap the tool_result hook exists to close: the gate admits a read, the
-     MCP server refuses it. Before this, the trail asserted a read that never
-     happened. */
+  /* The gap the tool_result hook exists to close: this extension admits a
+     read, the MCP server refuses it. Before this, the trail asserted a read
+     that never happened. */
   it('records an admitted call whose result errored as allowed-then-error', async () => {
     const handlers = await loadExtension(file)
     try {
       await handlers.tool_call(
         { toolCallId: 'tc_1', toolName: 'mcp_read_file', input: { path: '/workspace/../etc/passwd' } },
-        noUI
+        ctx
       )
       await handlers.tool_result(
         {
@@ -84,7 +81,7 @@ describe('permission-gate wiring', () => {
           content: [{ type: 'text', text: 'irrelevant' }],
           isError: true,
         },
-        noUI
+        ctx
       )
 
       const lines = await readLines(file)
@@ -104,7 +101,7 @@ describe('permission-gate wiring', () => {
     try {
       await handlers.tool_call(
         { toolCallId: 'tc_2', toolName: 'mcp_list_directory', input: { path: '/workspace' } },
-        noUI
+        ctx
       )
       await handlers.tool_result(
         {
@@ -114,11 +111,32 @@ describe('permission-gate wiring', () => {
           content: [{ type: 'text', text: 'a.ts' }],
           isError: false,
         },
-        noUI
+        ctx
       )
 
       const lines = await readLines(file)
       assert.equal(lines[1]!.result, 'ok')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  /* There is no confirmation gate here: a mutating call proceeds exactly like
+     a read, unprompted, and is logged the same way. Unattended operation means
+     there is nobody to ask. */
+  it('lets a mutating call proceed unprompted, logged as allowed and not-required', async () => {
+    const handlers = await loadExtension(file)
+    try {
+      const outcome = await handlers.tool_call(
+        { toolCallId: 'tc_w', toolName: 'mcp_write_file', input: { path: '/workspace/x.ts', content: 'y' } },
+        ctx
+      )
+
+      assert.equal(outcome, undefined, 'a call that proceeds returns no block patch')
+      const [line] = await readLines(file)
+      assert.ok(line)
+      assert.equal(line.outcome, 'allowed')
+      assert.equal(line.confirmation, 'not-required')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -135,7 +153,7 @@ describe('permission-gate wiring', () => {
       const paths = Array.from({ length: 50 }, (_, i) => `/workspace/src/deeply/nested/module-${i}/index.ts`)
       await handlers.tool_call(
         { toolCallId: 'tc_m', toolName: 'mcp_read_multiple_files', input: { paths } },
-        noUI
+        ctx
       )
 
       const [line] = await readLines(file)
@@ -147,44 +165,14 @@ describe('permission-gate wiring', () => {
     }
   })
 
-  /* The two consumers, asserted together: the dialog is capped so it fits a
-     screen, the record is not so it stays complete. One string served both
-     until this was split. */
-  it('caps the confirmation prompt while logging the call in full', async () => {
-    const handlers = await loadExtension(file)
-    try {
-      const path = '/workspace/' + 'a/'.repeat(2000) + 'x.ts'
-      let shown = ''
-      await handlers.tool_call(
-        { toolCallId: 'tc_p', toolName: 'mcp_write_file', input: { path } },
-        {
-          hasUI: true,
-          ui: {
-            confirm: async (_title: string, message: string) => { shown = message; return true },
-          },
-          sessionManager: { getSessionId: () => 's-01' },
-        }
-      )
-
-      const [line] = await readLines(file)
-      assert.ok(line)
-      assert.equal(line.outcome, 'allowed')
-      assert.equal(line.detail!.includes(path), true, 'the record must carry the whole path')
-      assert.equal(shown.includes(path), false, 'the dialog should not have to render it all')
-      assert.match(shown, /more characters not shown/)
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-
   /* A sensitive-file refusal never reaches the tool, so it has no result line.
      The absence is unambiguous: the call line already says blocked, and why. */
-  it('writes no result line for a call the gate refused', async () => {
+  it('writes no result line for a call this extension refused', async () => {
     const handlers = await loadExtension(file)
     try {
       const outcome = await handlers.tool_call(
         { toolCallId: 'tc_3', toolName: 'mcp_read_file', input: { path: '/workspace/.env' } },
-        noUI
+        ctx
       ) as { block?: boolean }
 
       assert.equal(outcome.block, true)
@@ -206,7 +194,7 @@ describe('permission-gate wiring', () => {
     try {
       await handlers.tool_call(
         { toolCallId: 'tc_4', toolName: 'mcp_read_file', input: { path: '/workspace/a.ts' } },
-        noUI
+        ctx
       )
       await handlers.tool_result(
         {
@@ -216,7 +204,7 @@ describe('permission-gate wiring', () => {
           content: [{ type: 'text', text: 'SUPER-SECRET-FILE-BODY' }],
           isError: false,
         },
-        noUI
+        ctx
       )
 
       const body = await readFile(file, 'utf8')
@@ -230,7 +218,7 @@ describe('permission-gate wiring', () => {
 /* Redaction is the one thing this extension does that CHANGES what the agent
    sees, so the wiring has two jobs: hand Pi a replacement it will honour, and
    record that it happened without recording what it was. */
-describe('permission-gate tool-output redaction', () => {
+describe('secret-sentry tool-output redaction', () => {
   let dir: string
   let file: string
 
@@ -246,7 +234,7 @@ describe('permission-gate tool-output redaction', () => {
   })
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'permgate-redact-'))
+    dir = await mkdtemp(join(tmpdir(), 'secret-sentry-redact-'))
     file = join(dir, 'calls.jsonl')
   })
 
@@ -259,7 +247,7 @@ describe('permission-gate tool-output redaction', () => {
     try {
       const patch = await handlers.tool_result(
         resultEvent(`api key: ${secret}`),
-        noUI
+        ctx
       ) as { content: Array<{ text: string }> }
 
       assert.ok(patch, 'a patch must be returned, or nothing is redacted')
@@ -272,7 +260,7 @@ describe('permission-gate tool-output redaction', () => {
   it('records that redaction happened, and which rule fired', async () => {
     const handlers = await loadExtension(file)
     try {
-      await handlers.tool_result(resultEvent(`api key: ${secret}`), noUI)
+      await handlers.tool_result(resultEvent(`api key: ${secret}`), ctx)
 
       const lines = await readLines(file)
       assert.equal(lines[0]!.phase, 'result')
@@ -288,7 +276,7 @@ describe('permission-gate tool-output redaction', () => {
   it('never writes the secret to the log', async () => {
     const handlers = await loadExtension(file)
     try {
-      await handlers.tool_result(resultEvent(`api key: ${secret}`), noUI)
+      await handlers.tool_result(resultEvent(`api key: ${secret}`), ctx)
 
       const body = await readFile(file, 'utf8')
       assert.equal(body.includes(secret), false)
@@ -303,7 +291,7 @@ describe('permission-gate tool-output redaction', () => {
   it('returns no patch, and logs no redaction fields, for clean output', async () => {
     const handlers = await loadExtension(file)
     try {
-      const patch = await handlers.tool_result(resultEvent('nothing secret here'), noUI)
+      const patch = await handlers.tool_result(resultEvent('nothing secret here'), ctx)
       assert.equal(patch, undefined)
 
       const lines = await readLines(file)
@@ -321,7 +309,7 @@ describe('permission-gate tool-output redaction', () => {
     try {
       const patch = await handlers.tool_result(
         { toolCallId: 'tc_9', toolName: 'mcp_read_file', input: {}, content: undefined, isError: false },
-        noUI
+        ctx
       )
 
       assert.equal(patch, undefined)
@@ -337,7 +325,7 @@ describe('permission-gate tool-output redaction', () => {
 /* Model requests were the last channel the trail said nothing about. The hazard
    is the opposite of the usual one: the event hands over the entire conversation,
    so these tests are mostly about what does NOT reach the file. */
-describe('permission-gate model-request logging', () => {
+describe('secret-sentry model-request logging', () => {
   let dir: string
   let file: string
 
@@ -350,14 +338,14 @@ describe('permission-gate model-request logging', () => {
   }
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'permgate-provider-'))
+    dir = await mkdtemp(join(tmpdir(), 'secret-sentry-provider-'))
     file = join(dir, 'calls.jsonl')
   })
 
   it('records the shape of the request', async () => {
     const handlers = await loadExtension(file)
     try {
-      await handlers.before_provider_request({ type: 'before_provider_request', payload }, noUI)
+      await handlers.before_provider_request({ type: 'before_provider_request', payload }, ctx)
 
       const lines = await readLines(file)
       assert.equal(lines.length, 1)
@@ -373,7 +361,7 @@ describe('permission-gate model-request logging', () => {
   it('never copies the conversation into the log', async () => {
     const handlers = await loadExtension(file)
     try {
-      await handlers.before_provider_request({ type: 'before_provider_request', payload }, noUI)
+      await handlers.before_provider_request({ type: 'before_provider_request', payload }, ctx)
 
       const body = await readFile(file, 'utf8')
       assert.equal(body.includes('SYSTEM-PROMPT-BODY'), false)
@@ -395,7 +383,7 @@ describe('permission-gate model-request logging', () => {
     try {
       const returned = await handlers.before_provider_request(
         { type: 'before_provider_request', payload },
-        noUI
+        ctx
       )
       assert.equal(returned, undefined)
     } finally {
@@ -408,13 +396,13 @@ describe('permission-gate model-request logging', () => {
   it('sits under the turn boundary that groups it', async () => {
     const handlers = await loadExtension(file)
     try {
-      await handlers.before_agent_start({ type: 'before_agent_start', prompt: 'p', systemPrompt: 's' }, noUI)
-      await handlers.before_provider_request({ type: 'before_provider_request', payload }, noUI)
+      await handlers.before_agent_start({ type: 'before_agent_start', prompt: 'p', systemPrompt: 's' }, ctx)
+      await handlers.before_provider_request({ type: 'before_provider_request', payload }, ctx)
       await handlers.tool_call(
         { toolCallId: 'tc_1', toolName: 'mcp_read_file', input: { path: '/workspace/a.ts' } },
-        noUI
+        ctx
       )
-      await handlers.before_provider_request({ type: 'before_provider_request', payload }, noUI)
+      await handlers.before_provider_request({ type: 'before_provider_request', payload }, ctx)
 
       const lines = await readLines(file)
       assert.deepEqual(
@@ -430,7 +418,7 @@ describe('permission-gate model-request logging', () => {
 /* Turn markers exist so a reviewer can attribute calls to the instruction that
    caused them without correlating timestamps against a session transcript held
    on another volume under another retention policy. */
-describe('permission-gate turn markers', () => {
+describe('secret-sentry turn markers', () => {
   let dir: string
   let file: string
 
@@ -443,22 +431,22 @@ describe('permission-gate turn markers', () => {
   }
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'permgate-turn-'))
+    dir = await mkdtemp(join(tmpdir(), 'secret-sentry-turn-'))
     file = join(dir, 'calls.jsonl')
   })
 
   it('writes a boundary before the calls it groups, and numbers turns from 1', async () => {
     const handlers = await loadExtension(file)
     try {
-      await handlers.before_agent_start(agentStart, noUI)
+      await handlers.before_agent_start(agentStart, ctx)
       await handlers.tool_call(
         { toolCallId: 'tc_1', toolName: 'mcp_read_file', input: { path: '/workspace/a.ts' } },
-        noUI
+        ctx
       )
-      await handlers.before_agent_start(agentStart, noUI)
+      await handlers.before_agent_start(agentStart, ctx)
       await handlers.tool_call(
         { toolCallId: 'tc_2', toolName: 'mcp_read_file', input: { path: '/workspace/b.ts' } },
-        noUI
+        ctx
       )
 
       const lines = await readLines(file)
@@ -479,7 +467,7 @@ describe('permission-gate turn markers', () => {
   it('never copies the prompt or the system prompt into the log', async () => {
     const handlers = await loadExtension(file)
     try {
-      await handlers.before_agent_start(agentStart, noUI)
+      await handlers.before_agent_start(agentStart, ctx)
 
       const body = await readFile(file, 'utf8')
       assert.equal(body.includes('PROMPT-TEXT-THE-OPERATOR-TYPED'), false)
@@ -499,10 +487,8 @@ describe('permission-gate turn markers', () => {
   it('records the boundary without a session when the harness exposes none', async () => {
     const handlers = await loadExtension(file)
     try {
-      await handlers.before_agent_start(agentStart, { hasUI: false, ui: { confirm: async () => false } })
+      await handlers.before_agent_start(agentStart, {})
       await handlers.before_agent_start(agentStart, {
-        hasUI: false,
-        ui: { confirm: async () => false },
         sessionManager: { getSessionId: () => { throw new Error('no session') } },
       })
 

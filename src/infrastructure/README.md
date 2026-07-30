@@ -19,7 +19,7 @@ no host files, no cloud credentials, and no host Docker control — and every
 filesystem action it takes should be logged.
 
 The architecture has two halves. This directory is the host-and-container
-half; the in-Pi controls are the `mcp-client` and `permission-gate` extensions
+half; the in-Pi controls are the `mcp-client` and `secret-sentry` extensions
 under `src/extensions/`.
 
 ## Components
@@ -61,7 +61,7 @@ diagrams.
 ## Operator runbook
 
 End-to-end procedure to bring the stack up against a real project and verify
-the security boundary. Both in-Pi extensions (`mcp-client`, `permission-gate`)
+the security boundary. Both in-Pi extensions (`mcp-client`, `secret-sentry`)
 are baked into the hardened image, so once it is built they are present in the
 agent.
 
@@ -239,7 +239,7 @@ Pi asks `Trust project folder?` whenever the working tree holds trust-requiring
 resources — `.agents/skills` in the project **or any ancestor directory**, or a
 `.pi/` config directory. Trust is not cosmetic: it lets Pi load project
 settings, install missing project packages, and **execute project extensions
-inside Pi's own process** — alongside `permission-gate` rather than behind it.
+inside Pi's own process** — alongside `secret-sentry` rather than behind it.
 
 The harness therefore decides this up front rather than prompting, via
 `PI_PROJECT_TRUST` (`compose.yaml`), which `start-pi` turns into Pi's
@@ -436,7 +436,7 @@ records **every** tool call the agent makes — reads included, which are never
 prompted for:
 
 ```sh
-docker compose -f src/infrastructure/compose.yaml exec pi cat /var/log/pi/permission-gate/calls.jsonl
+docker compose -f src/infrastructure/compose.yaml exec pi cat /var/log/pi/secret-sentry/calls.jsonl
 ```
 
 **A call writes two lines, joined by `id`.** This is the first thing to know
@@ -487,7 +487,7 @@ The image has no `jq` — it is a hardened runtime, not an analysis box — so p
 the log out to the host and query it there:
 
 ```sh
-LOG='docker compose -f src/infrastructure/compose.yaml exec -T pi cat /var/log/pi/permission-gate/calls.jsonl'
+LOG='docker compose -f src/infrastructure/compose.yaml exec -T pi cat /var/log/pi/secret-sentry/calls.jsonl'
 
 # Everything the gate refused, and why — by cause, not by grepping English.
 $LOG | jq -r 'select(.phase=="call" and .outcome=="blocked") | [.confirmation, .tool, .detail] | @tsv'
@@ -605,7 +605,7 @@ The reasoning, in the order it matters:
 
 - **A cap would have to live in the wrong place.** The agent's rootfs is
   read-only, so rotation state would have to sit on the `pi-logs` volume itself,
-  and an in-process cap in `permission-gate` would put truncation logic inside
+  and an in-process cap in `secret-sentry` would put truncation logic inside
   the audited process — the one place from which an accountability record should
   not be deletable. Today the extension can only append; `compose.yaml` notes
   that the volume outliving the container is what stops a session erasing its
@@ -615,7 +615,7 @@ The reasoning, in the order it matters:
 
 ```sh
 docker compose -f src/infrastructure/compose.yaml exec -T pi \
-  wc -c /var/log/pi/permission-gate/calls.jsonl
+  wc -c /var/log/pi/secret-sentry/calls.jsonl
 ```
 
 Archive by piping it out to the host — the same route the queries above use, so
@@ -623,7 +623,7 @@ there is no second image to pin and nothing new to trust:
 
 ```sh
 docker compose -f src/infrastructure/compose.yaml exec -T pi \
-  cat /var/log/pi/permission-gate/calls.jsonl \
+  cat /var/log/pi/secret-sentry/calls.jsonl \
   | gzip > "calls-$(date +%Y%m%d).jsonl.gz"
 ```
 
@@ -691,7 +691,7 @@ the obvious checks all pass:
 | Check | What it shows |
 |---|---|
 | `docker logs pi-secure-agent-mcp-gateway-1` | gateway up, 11 tools listed, client initialized — but no `Calling tool …` lines |
-| `/var/log/pi/permission-gate/calls.jsonl` | absent or stale: no tool call reached an extension |
+| `/var/log/pi/secret-sentry/calls.jsonl` | absent or stale: no tool call reached an extension |
 | a `curl` tool test against the proxy | **passes** — non-streaming works under both prefixes |
 | the session transcript | one assistant message, `"stopReason":"stop"`, thinking only, no `tool_call` entry |
 

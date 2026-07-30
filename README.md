@@ -77,7 +77,7 @@ build time — you do not need it installed locally to use Genie.
 
 Genie has two halves:
 
-* Two Pi extensions — `mcp-client` and `permission-gate` — that run inside the
+* Two Pi extensions — `mcp-client` and `secret-sentry` — that run inside the
   hardened container and form the in-Pi half of the security boundary.
 
 * Supporting infrastructure: a hardened container, a gated MCP server, and a
@@ -92,7 +92,7 @@ flowchart LR
     subgraph Pi["<b>Pi</b>"]
       Core["Pi core"]
       MC["mcp-client"]
-      PG["permission-gate"]
+      PG["secret-sentry"]
     end
   end
 
@@ -114,11 +114,12 @@ flowchart LR
 
 ### The Pi extensions
 
-- [**`permission-gate`**](./src/extensions/permission-gate/README.md): \
-  Interactive, default-deny confirmation gate on mutating tool calls, an absolute
+- [**`secret-sentry`**](./src/extensions/secret-sentry/README.md): \
+  Unattended security controls for away-from-keyboard sessions — an absolute
   refusal of sensitive filenames on every call, and redaction of secret-shaped
-  values from tool output before the model sees them. Writes the system's audit
-  trail.
+  values from tool output before the model sees them. No interactive
+  confirmation: writes proceed unprompted, and this is the system's audit
+  trail instead.
 
 - [**`mcp-client`**](./src/extensions/mcp-client/README.md): \
   MCP client giving Pi mediated filesystem access through the Docker MCP Toolkit
@@ -131,7 +132,7 @@ If you want to develop or test them against a local, unhardened Pi install,
 copy them over manually. There is no build step.
 
 ```sh
-cp -R src/extensions/permission-gate ~/.pi/agent/extensions/permission-gate
+cp -R src/extensions/secret-sentry ~/.pi/agent/extensions/secret-sentry
 ```
 
 New and updated extensions will be loaded next time you run `pi`. If you're

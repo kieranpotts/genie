@@ -77,7 +77,7 @@ volumes:
       device: ${PROJECT_PATH:?set PROJECT_PATH in src/infrastructure/.env}
   # Pi session transcripts, persisted outside any project tree (sensitive).
   pi-sessions:
-  # Audit trails (permission-gate). A separate volume from sessions so the
+  # Audit trails (secret-sentry). A separate volume from sessions so the
   # accountability logs have their own lifecycle and can be retained/shipped
   # independently of transcripts.
   #
@@ -128,7 +128,7 @@ services:
       - "--servers=filesystem"
       - "--block-network"
       # Tool-surface allowlist, enforced AT THE BOUNDARY and out of process —
-      # unlike permission-gate, which is cooperative and runs inside the agent.
+      # unlike secret-sentry, which is cooperative and runs inside the agent.
       # `--servers=filesystem` alone enables all ELEVEN tools that image exposes;
       # this narrows that to eight.
       #
@@ -345,13 +345,14 @@ services:
       # so entering the container puts you in the project rather than an empty
       # home. Nothing about the agent's own access is derived from this.
       PI_PROJECT_DIR: "/workspace"
-      # Interactive approval: the permission-gate extension requires confirmation
-      # for mutating tool calls, refuses sensitive filenames outright on every
-      # call (including the mcp_* ones), and logs EVERY call here — reads
-      # included, which are never prompted for but are still actions against the
-      # filesystem. Since `audited-tools` was removed this is the system's only
-      # audit trail, so what it omits is not recorded anywhere.
-      PERMISSION_GATE_CALL_LOG: "/var/log/pi/permission-gate/calls.jsonl"
+      # No interactive approval: the secret-sentry extension runs unattended. It
+      # refuses sensitive filenames outright on every call (including the mcp_*
+      # ones), redacts secret-shaped values from tool output, and logs EVERY
+      # call here — reads and writes alike, which are never prompted for but are
+      # still actions against the filesystem. Since `audited-tools` was removed
+      # this is the system's only audit trail, so what it omits is not recorded
+      # anywhere.
+      SECRET_SENTRY_CALL_LOG: "/var/log/pi/secret-sentry/calls.jsonl"
       # Role `start-pi` launches on. The proxy exposes one route per role —
       # computer-programmer, technical-lead, technical-writer, security-analyst
       # — each backed by a capability-tuned Ollama model (litellm.config.yaml).
@@ -364,7 +365,7 @@ services:
       # trust-requiring resources — `.agents/skills` in cwd or any ancestor, or
       # a `.pi/` config directory. Trust lets it load project settings, install
       # project packages, and EXECUTE project extensions in Pi's own process,
-      # alongside permission-gate rather than behind it.
+      # alongside secret-sentry rather than behind it.
       #
       # `deny` keeps that shut and, just as importantly, makes the run
       # deterministic: the prompt would otherwise block any non-interactive
