@@ -591,11 +591,13 @@ claimed and what is enforced.
   Three files now carry the same address — `compose.yaml`'s pinned `gateway:`,
   its `extra_hosts` entry, and `.env`'s `LITELLM_HOST`. All three say so.
 
-  **Still needs a manual edit:** `src/infrastructure/.env.example` and any
-  existing `.env` must change `LITELLM_HOST=172.17.0.1` → `172.31.60.1`. Both
-  sit in a permission-denied directory, so they could not be edited here. An
-  older `.env` left at the docker0 address now fails at proxy startup, which is
-  at least loud rather than silent.
+  **Manual edit: DONE.** `src/infrastructure/.env.example` and `.env` needed
+  `LITELLM_HOST=172.17.0.1` → `172.31.60.1`, and both sit in a
+  permission-denied directory, so the change was made by the operator rather
+  than here — and is recorded on that report, not on a check performed in this
+  repository. Re-verify with the runbook's egress check if the model route ever
+  fails at bring-up. An older `.env` left at the docker0 address fails at proxy
+  startup, which is at least loud rather than silent.
 
   **What this does not cover.** The gateway is on the same network and therefore
   also has no egress — which is what rules out `--verify-signatures`, recorded
