@@ -70,7 +70,7 @@
 
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { basename } from 'node:path'
-import { decide, describeCall, requiresConfirmation, type ConfirmOutcome } from './policy.ts'
+import { decide, describeCall, describeForPrompt, requiresConfirmation, type ConfirmOutcome } from './policy.ts'
 import { findSensitiveArgument } from './sensitive-files.ts'
 import { describeProviderRequest } from './provider-request.ts'
 import { redactContent, type RedactionOutcome } from './redaction.ts'
@@ -174,7 +174,11 @@ export default function (pi: ExtensionAPI): void {
       return undefined
     }
 
-    const outcome = await askUser(ctx, event.toolName, detail)
+    /* The DIALOG gets a capped copy; the LOG gets `detail` in full, below. The
+       two consumers want opposite things — a dialog must fit a screen, an audit
+       record must be complete — and serving both from one string is what used to
+       drop most of a multi-file read's path list. See `describeForPrompt`. */
+    const outcome = await askUser(ctx, event.toolName, describeForPrompt(detail))
     const decision = decide(event.toolName, outcome)
 
     await log.record(makeRecord({

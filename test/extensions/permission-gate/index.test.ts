@@ -116,6 +116,57 @@ describe('permission-gate wiring', () => {
     }
   })
 
+  /* The audit trail must be able to say WHICH files were read. A cap on the
+     joined path list used to lose all but the first two or three, and an
+     ellipsis in a log reads like formatting rather than like missing evidence.
+     The tool is not currently in the `--tools` allowlist, so this guards the
+     precondition on re-enabling it. See TODO.md. */
+  it('logs every path of a multi-file read, however many there are', async () => {
+    const handlers = await loadExtension(file)
+    try {
+      const paths = Array.from({ length: 50 }, (_, i) => `/workspace/src/deeply/nested/module-${i}/index.ts`)
+      await handlers.tool_call(
+        { toolCallId: 'tc_m', toolName: 'mcp_read_multiple_files', input: { paths } },
+        noUI
+      )
+
+      const [line] = await readLines(file)
+      for (const p of paths) assert.equal(line.detail.includes(p), true, `detail omits ${p}`)
+      assert.equal(line.detail.includes('…'), false, 'detail must not be elided')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  /* The two consumers, asserted together: the dialog is capped so it fits a
+     screen, the record is not so it stays complete. One string served both
+     until this was split. */
+  it('caps the confirmation prompt while logging the call in full', async () => {
+    const handlers = await loadExtension(file)
+    try {
+      const path = '/workspace/' + 'a/'.repeat(2000) + 'x.ts'
+      let shown = ''
+      await handlers.tool_call(
+        { toolCallId: 'tc_p', toolName: 'mcp_write_file', input: { path } },
+        {
+          hasUI: true,
+          ui: {
+            confirm: async (_title: string, message: string) => { shown = message; return true },
+          },
+          sessionManager: { getSessionId: () => 's-01' },
+        }
+      )
+
+      const [line] = await readLines(file)
+      assert.equal(line.outcome, 'allowed')
+      assert.equal(line.detail.includes(path), true, 'the record must carry the whole path')
+      assert.equal(shown.includes(path), false, 'the dialog should not have to render it all')
+      assert.match(shown, /more characters not shown/)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   /* A sensitive-file refusal never reaches the tool, so it has no result line.
      The absence is unambiguous: the call line already says blocked, and why. */
   it('writes no result line for a call the gate refused', async () => {

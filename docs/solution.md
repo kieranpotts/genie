@@ -191,8 +191,8 @@ from what the catalog's servers expose — nothing can be added through it.
 
 Each omission is justified by a **kept tool doing the same job**, rather than by
 how often the call log has seen it used: `read_file` replaces
-`read_multiple_files` and records one complete audit line per file rather than a
-truncated list; `list_directory` plus `search_files` replaces `directory_tree`,
+`read_multiple_files`, one call and one audit line per file;
+`list_directory` plus `search_files` replaces `directory_tree`,
 which is the only tool here with unbounded output and could pull a whole tree
 into the model's context in one call; and `get_file_info` returns metadata
 nothing in a coding task needs. `list_allowed_directories` is **kept**, because

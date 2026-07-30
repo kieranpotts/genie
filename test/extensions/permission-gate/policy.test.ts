@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { decide, describeCall, requiresConfirmation } from '../../../src/extensions/permission-gate/policy.ts'
+import { decide, describeCall, describeForPrompt, requiresConfirmation } from '../../../src/extensions/permission-gate/policy.ts'
 
 describe('requiresConfirmation', () => {
   for (const t of ['write', 'edit']) {
@@ -50,11 +50,22 @@ describe('describeCall', () => {
     )
   })
 
-  it('truncates a very long path list', () => {
-    const paths = Array.from({ length: 40 }, (_, i) => `/workspace/file-${i}.ts`)
+  /* The audit record is never truncated. This asserted the opposite until the
+     cap was found to drop most of a ten-file read's paths — the trail could not
+     say what was read, which is the question it exists to answer. Inverted
+     rather than deleted, so restoring a cap here fails in the suite. See
+     TODO.md and `describeForPrompt`. */
+  it('records every path in a long list, without truncating', () => {
+    const paths = Array.from({ length: 40 }, (_, i) => `/workspace/deeply/nested/path/file-${i}.ts`)
     const out = describeCall('mcp_read_multiple_files', { paths })
-    assert.equal(out.length <= 'mcp_read_multiple_files: '.length + 120, true)
-    assert.match(out, /…$/)
+    for (const p of paths) assert.equal(out.includes(p), true, `missing ${p}`)
+    assert.equal(out.includes('…'), false)
+  })
+
+  it('does not cap the description at any length', () => {
+    const paths = Array.from({ length: 500 }, (_, i) => `/workspace/file-${i}.ts`)
+    const out = describeCall('mcp_read_multiple_files', { paths })
+    assert.equal(out.endsWith('/workspace/file-499.ts'), true)
   })
 
   it('uses the path when a command is also present', () => {
@@ -63,6 +74,57 @@ describe('describeCall', () => {
 
   it('falls back to the tool name with no recognised argument', () => {
     assert.equal(describeCall('write', {}), 'write')
+  })
+})
+
+describe('describeForPrompt — the display cap, and only here', () => {
+  it('passes a normal description through untouched', () => {
+    const detail = 'mcp_write_file: /workspace/src/extensions/permission-gate/policy.ts'
+    assert.equal(describeForPrompt(detail), detail)
+  })
+
+  /* Everything the gate actually prompts for takes a single path or a
+     source/destination pair, so the cap should never fire in practice. If this
+     starts failing, a tool with a large argument has been gated and the cap is
+     doing real work — which is what it is there for. */
+  it('leaves every currently gated shape uncapped', () => {
+    for (const detail of [
+      describeCall('mcp_write_file', { path: '/workspace/' + 'a/'.repeat(60) + 'x.ts' }),
+      describeCall('mcp_move_file', { source: '/workspace/' + 'a/'.repeat(60) + 'x.ts', destination: '/workspace/' + 'b/'.repeat(60) + 'y.ts' }),
+      describeCall('mcp_create_directory', { path: '/workspace/' + 'a/'.repeat(60) }),
+    ]) {
+      assert.equal(describeForPrompt(detail), detail)
+    }
+  })
+
+  it('caps an oversized description', () => {
+    const detail = 'mcp_write_file: ' + 'x'.repeat(5000)
+    const out = describeForPrompt(detail)
+    assert.equal(out.length < detail.length, true)
+    assert.equal(out.startsWith('mcp_write_file: xxx'), true)
+  })
+
+  /* An ellipsis reads like formatting. A prompt that hides half of what it is
+     confirming has to admit it, and say where the rest is — the prompt is the
+     control, so an operator must know when they are seeing a summary. */
+  it('says how much it withheld, and where the rest is', () => {
+    const detail = 'mcp_write_file: ' + 'x'.repeat(5000)
+    const out = describeForPrompt(detail)
+    assert.match(out, /\[\d+ more characters not shown — the audit log records this call in full\]$/)
+
+    /* The count must be the real one. A marker that says "some" would be no
+       better than the ellipsis it replaced. */
+    const reported = Number(/\[(\d+) more/.exec(out)?.[1])
+    const shown = out.slice(0, out.indexOf('\n\n['))
+    assert.equal(shown.length + reported, detail.length)
+  })
+
+  /* The point of the split: whatever the dialog shows, the record is complete. */
+  it('never shortens what describeCall produced for the log', () => {
+    const paths = Array.from({ length: 200 }, (_, i) => `/workspace/file-${i}.ts`)
+    const detail = describeCall('mcp_read_multiple_files', { paths })
+    assert.equal(describeForPrompt(detail).length < detail.length, true)
+    for (const p of paths) assert.equal(detail.includes(p), true)
   })
 })
 

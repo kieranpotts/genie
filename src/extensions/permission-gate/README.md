@@ -61,8 +61,12 @@ which fires before a tool is invoked:
     `*_create_directory`, and the unprefixed `write` / `edit`) are gated.
 
 3.  **Confirm.** \
-    The user is shown the tool name and a summary of the operation (the path,
-    or a truncated list of paths) and asked to approve.
+    The user is shown the tool name and a summary of the operation (the path, or
+    a source and destination) and asked to approve. The dialog is the only place
+    anything is shortened, and only past 800 characters — at which point it says
+    how much it withheld rather than trailing an ellipsis. Nothing gated today
+    comes close to that; the record is never shortened at all. See
+    *What the log does not capture*.
 
 4.  **Deny by default.** \
     The confirmation dialog has a timeout of 60s, after which time the call is
@@ -350,6 +354,17 @@ already say everything there is to say.
   `tool_result` hands the handler the tool's entire output — the file the agent
   just read — and copying that here would turn the audit trail into a second
   copy of every secret the agent has touched.
+
+  **But every path it named, in full.** `detail` is never truncated, however
+  many paths a call carries. It was once capped at 120 characters, which is
+  two or three realistic `/workspace/…` entries, so a ten-file
+  `read_multiple_files` recorded the first few and an ellipsis — a trail that
+  could not answer which files were read, failing silently, because an ellipsis
+  reads like formatting rather than like missing evidence. The cap belonged to
+  the confirmation dialog and had been borrowed for the record. The two are now
+  separate functions (`describeCall`, `describeForPrompt`), because a dialog
+  must fit a screen and a record must be complete, and one string could only
+  ever satisfy the weaker requirement.
 - **What was sent to a model.** Model requests are recorded as *shape* — model,
   message count, size — never as payload. The conversation itself is the session
   transcript's job, on a different volume with a different purpose.
@@ -418,7 +433,8 @@ and its parent directory, on first write.
 
 **The log grows without bound. This extension never deletes from it, and that is
 deliberate.** The sink can only append; there is no cap, no rotation, and no
-truncation path in this code.
+truncation path in this code — not on the file, and not on the lines it holds
+(see *What the log does not capture* on why `detail` is complete).
 
 Two reasons, and the second is the one that constrains future changes:
 

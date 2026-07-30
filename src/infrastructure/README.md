@@ -456,7 +456,9 @@ lets a review separate a policy refusal from an operator's rejection by field
 rather than by reading prose.
 
 Neither line ever carries tool *content*. `detail` is the path; the file's
-contents are never copied into the trail.
+contents are never copied into the trail. It is, however, the *whole* path, and
+every path when a call names several — `detail` is never truncated, so a line
+can be long. Only the confirmation dialog caps what it shows.
 
 **Two further line kinds carry `kind` rather than `phase`**, so the queries below
 are unaffected by either:

@@ -438,10 +438,63 @@ claimed and what is enforced.
     sharing a network with the agent, or if the Toolkit gains a way to pin which
     network spawned servers attach to. Neither is true today.
 
-- [ ] **`describeCall` truncates a multi-file read's path list, so the audit
+- [x] **`describeCall` truncates a multi-file read's path list, so the audit
   trail loses which files were read.**
   Found while justifying the `--tools` first cut above, not from a failure —
   which is why it is recorded rather than quietly fixed alongside it.
+
+  **Done, and fixed at the design error rather than at the cap.** `describeCall`
+  no longer truncates at all; a second pure function, `describeForPrompt`, caps
+  the string at 800 characters for the confirmation dialog and nothing else. The
+  item's own diagnosis was the right one — two consumers with opposed
+  requirements were being served by one string, so it could only ever satisfy
+  the weaker of them.
+
+  Three details decided while doing it:
+
+  - **The prompt says what it withheld.** Where the old cap trailed an ellipsis,
+    the dialog now appends `[N more characters not shown — the audit log records
+    this call in full]`. The complaint that opened this item — an ellipsis reads
+    like formatting, not like missing evidence — applies to the operator staring
+    at a confirmation just as much as to a reviewer reading the log, and the
+    prompt is a *control*. A test asserts `N` is the true remainder, because a
+    marker saying "some" would be no better than the ellipsis it replaced.
+  - **800, not 120.** The prompted tools are `write_file`, `edit_file`,
+    `move_file`, `create_directory`, and every one of them describes as a single
+    `path` or a `source -> destination` pair. Nothing gated today comes near the
+    cap — there is a test asserting exactly that — so it is a bound on whatever
+    is gated next (the deferred exec server, most obviously) rather than a limit
+    anything currently hits.
+  - **Log lines are now unbounded in length.** Accepted deliberately and stated
+    on `describeCall` itself: the log is append-only and unbounded by policy
+    already, so completeness beats line length. The retention table is
+    unaffected in the normal case, since the tool that can produce a long
+    `detail` is not in the `--tools` allowlist.
+
+  Tests: the old *truncates a very long path list* assertion was **inverted**
+  rather than deleted, so restoring a cap on the record fails in the suite; two
+  wiring tests in `index.test.ts` assert the end-to-end property, one that a
+  50-path read logs every path, and one that a gated call with a huge path is
+  capped in the dialog and complete in the record. `run/check` green — 197 tests.
+
+  **NOT driven live, and the reason is structural rather than an omission.**
+  Both halves are unreachable from a non-interactive run: `read_multiple_files`
+  is not in the `--tools` allowlist, so nothing can produce a `paths` argument
+  at all, and the dialog needs a TUI — `--print` mode denies every mutating call
+  as `no-ui` before a prompt is ever built. So this is verified by test and by
+  reading the call sites, which is weaker than the standard the hooks and
+  redaction items were held to, and is stated here rather than glossed. The
+  `isError` bug recorded above is what that standard exists for. **If
+  `read_multiple_files` is ever enabled, read a real multi-file call out of
+  `calls.jsonl` before trusting this.**
+
+  **The precondition on `read_multiple_files` is discharged.** The `--tools`
+  note in `compose.yaml` said re-enabling that tool meant fixing this truncation
+  first; it now records that the fix landed, so the tool stands or falls on
+  substitutability alone. The same stale justification was removed from
+  `docs/solution.md`, which cited "one complete audit line per file rather than a
+  truncated list" as a reason to prefer `read_file` — true when written, and no
+  longer a distinction between the two.
 
   `policy.ts`:
 
