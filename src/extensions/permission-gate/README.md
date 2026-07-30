@@ -16,7 +16,9 @@ the operation.
 **Every tool call is logged** to an append-only file — not only the ones that
 prompted. Reads are never confirmed, but they are still actions against the
 filesystem, and `docs/requirements.md` asks for observability of every one of
-them.
+them. The same file carries the **turn boundaries** between calls and the
+**shape** of every outbound model request, so the trail covers both channels the
+agent has — never the content of either.
 
 The `tool_call` hook is the only place in the harness that sees **every** tool
 call, whichever extension registered it. That is why the sensitive-file rule
@@ -76,13 +78,17 @@ which fires before a tool is invoked:
     second line carrying the real outcome. See below for why one line was not
     enough.
 
-A third hook, `before_agent_start`, fires outside that sequence — once per
-instruction from the operator — and appends a **turn boundary** so the calls
-between two boundaries are attributable to the instruction that caused them. See
-*Turn boundaries* below.
+Two further hooks fire outside that sequence and append their own line kinds:
+
+- `before_agent_start`, once per instruction from the operator, appends a **turn
+  boundary**, so the calls between two boundaries are attributable to the
+  instruction that caused them. See *Turn boundaries* below.
+- `before_provider_request`, once per model call, appends the **shape** of the
+  outbound request. See *Model requests* below.
 
 ```json
 {"ts":"2026-06-04T11:59:58.000Z","kind":"turn_start","turn":4,"session":"01936f2e-6b2a-7c31-9e4d-8f1a2b3c4d5e"}
+{"ts":"2026-06-04T11:59:59.000Z","kind":"provider_request","model":"computer-programmer","messages":34,"approx_bytes":18422}
 {"ts":"2026-06-04T12:00:00.000Z","phase":"call","id":"tc_01","tool":"mcp_read_file","outcome":"allowed","confirmation":"not-required","detail":"mcp_read_file: /workspace/src/a.ts"}
 {"ts":"2026-06-04T12:00:00.010Z","phase":"result","id":"tc_01","tool":"mcp_read_file","result":"ok"}
 {"ts":"2026-06-04T12:00:05.000Z","phase":"call","id":"tc_02","tool":"mcp_write_file","outcome":"allowed","confirmation":"approved","detail":"mcp_write_file: /workspace/x.ts"}
@@ -170,6 +176,58 @@ queued while the agent is already streaming — a steer or a follow-up — is
 consumed by the run already in flight and does not start a new one, so it
 produces no boundary and its calls are attributed to the turn in progress.
 
+### Model requests
+
+Tool calls were only part of what the agent does. Every model call also leaves
+the process, carrying whatever the agent has read, and the trail used to say
+nothing about it at all. `before_provider_request` closes that:
+
+```json
+{"ts":"…","kind":"provider_request","model":"computer-programmer","messages":34,"approx_bytes":18422}
+```
+
+| Field | Says |
+|---|---|
+| `model` | The model id **as it appears in the outbound body** — what was asked for, not what Pi has selected in its own state. |
+| `messages` | How many messages the request carries. |
+| `approx_bytes` | Size of the serialised body. |
+
+Every field is omitted when the payload does not carry it, because a `0` would
+be a claim about the request rather than an absence of one. The payload's shape
+belongs to the provider — the OpenAI-completions body for this stack's LiteLLM
+route — so nothing is assumed about it.
+
+**`approx_bytes` is approximate in a specific way.** It measures the JSON the
+handler can see, not the bytes on the wire: headers, compression, and any
+provider-side re-encoding are outside it. It exists so that context growth is
+visible *without* recording the context. Watching it climb across a turn is the
+cheapest signal there is that the agent is accumulating file content it will
+re-send on every subsequent call.
+
+**Shape, never content — and this is the line where that rule earns its keep.**
+The event hands the handler `payload: unknown`, and that payload is the whole
+conversation: the system prompt, every message, and the contents of every file
+read this session. The easiest thing to write in this handler is
+`JSON.stringify(payload)`, and the result would be a complete copy of everything
+the agent has touched, in the one file that is supposed to be trustworthy. So
+the extraction lives in a pure, separately tested module (`provider-request.ts`)
+that takes named scalars and never spreads, and a test asserts the record's key
+set is closed.
+
+**The handler returns `undefined`, and must.** Pi treats any other return value
+from this hook as a *replacement payload* — `runner.js` does
+`if (handlerResult !== undefined) currentPayload = handlerResult` — so a logging
+handler that returned something would silently rewrite the request the agent is
+about to send. There is a test for it.
+
+**What this is not.** It is written inside the agent's own process, so it is
+evidence rather than a boundary, in exactly the sense the rest of this extension
+is. An independent record would come from the host-side LiteLLM proxy, which
+sees the same traffic and holds the credentials. That is deliberately not built;
+`TODO.md` records the reasoning, including the thing the proxy could not do — a
+proxy-side log knows nothing about turns or sessions, so it could not attribute
+a request to the instruction that caused it.
+
 ### The attempt record's two axes
 
 `outcome` and `confirmation` are deliberately **separate fields**, because they
@@ -204,11 +262,15 @@ already say everything there is to say.
   `tool_result` hands the handler the tool's entire output — the file the agent
   just read — and copying that here would turn the audit trail into a second
   copy of every secret the agent has touched.
-- **Model requests.** Nothing here records what was sent to the model. That
-  would be the `before_provider_request` hook, which this extension does not
-  handle; the payload is the whole conversation, so logging it naively has the
-  same problem as logging content. A scoped, metadata-only version is an open
-  item in `TODO.md`.
+- **What was sent to a model.** Model requests are recorded as *shape* — model,
+  message count, size — never as payload. The conversation itself is the session
+  transcript's job, on a different volume with a different purpose.
+- **The provider's reply.** `after_provider_response` carries the status and
+  headers of the response and is not handled, so the trail shows that a request
+  went out, not whether it succeeded. Unlike the tool-call case — where an
+  attempt-only record wrongly asserted reads that were refused — a request line
+  overclaims nothing: it says a request was sent, which is true. There is also no
+  id in either event to join a response to its request.
 - **What a turn was about.** Turn boundaries are recorded; the instruction that
   opened one is not. `turn` and `session` say *which* turn, so the trail can be
   read against a session transcript, but the prompt itself stays out.
@@ -269,9 +331,10 @@ Two reasons, and the second is the one that constrains future changes:
 - **The volume does not justify the loss.** A call costs about **316 bytes**
   across its two lines, so a million tool calls — years of heavy single-operator
   use — is roughly 316 MB. Discarding the oldest entries of an accountability
-  record to reclaim that is a bad trade. Turn lines do not move that number: at
-  roughly 110 bytes each and one per instruction rather than one per call, they
-  are a rounding error against the calls they group.
+  record to reclaim that is a bad trade. The other two line kinds do not move
+  that number much: a turn line is ~112 bytes with one per instruction, and a
+  provider-request line is ~126 bytes with roughly one per model call — a few
+  percent on top of the calls they describe, not a change of order.
 - **Truncation must not live here.** A cap inside this extension would put
   delete-my-own-history logic inside the audited process. Append-only is a
   property worth keeping: `compose.yaml` relies on the log volume outliving the

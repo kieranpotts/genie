@@ -29,20 +29,26 @@
  * trail the system has, which is what makes logging the read surface load-
  * bearing rather than a nicety.
  *
- * THREE HOOKS, and the second is why the trail is truthful. `tool_call` fires
- * before a call runs and records what was ATTEMPTED; on its own that asserts
- * reads which the MCP server then refuses (path traversal, outside the allowed
- * directory) actually happened. `tool_result` fires after, carries `isError`,
- * and records what RESULTED. The two lines share Pi's `toolCallId` as `id`.
- * `before_agent_start` fires when the operator submits an instruction and
- * records a turn boundary, so the calls between two boundaries are attributable
- * to the instruction that caused them.
+ * FOUR HOOKS, and the second is why the trail is truthful:
  *
- * Two of the three handlers are handed content they must never log:
- * `tool_result`'s `event.content` is the tool's full output — the file the agent
- * just read — and `before_agent_start`'s `event.prompt` and `event.systemPrompt`
- * are the conversation itself. Copying either into the audit trail would defeat
- * the point of having one. Both handlers record named scalars only.
+ *   `tool_call`               before a call runs: what was ATTEMPTED. On its own
+ *                             this asserts reads the MCP server then refuses
+ *                             (traversal, outside the allowed directory).
+ *   `tool_result`             after it runs, carrying `isError`: what RESULTED.
+ *                             Joined to the attempt by Pi's `toolCallId`.
+ *   `before_agent_start`      the operator submitted an instruction: a turn
+ *                             boundary, so the calls between two boundaries are
+ *                             attributable to the instruction that caused them.
+ *   `before_provider_request` a model request is going out: its SHAPE.
+ *
+ * THREE OF THE FOUR ARE HANDED CONTENT THEY MUST NEVER LOG. `tool_result`'s
+ * `event.content` is the tool's full output — the file the agent just read.
+ * `before_agent_start`'s `event.prompt` and `event.systemPrompt` are the
+ * instruction and the system prompt. `before_provider_request`'s `event.payload`
+ * is the entire conversation, which makes it the worst of the three: the easiest
+ * thing to write there is `JSON.stringify(payload)`, and the result would be a
+ * copy of every file the agent has read, in a file whose purpose is to be
+ * trusted. Every handler here records named scalars and never spreads an event.
  *
  * Note the scope this extension does NOT have to cover: the agent has no local
  * file or shell tools at all (`--no-builtin-tools`, and no extension restores
@@ -57,6 +63,7 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { basename } from 'node:path'
 import { decide, describeCall, requiresConfirmation, type ConfirmOutcome } from './policy.ts'
 import { findSensitiveArgument } from './sensitive-files.ts'
+import { describeProviderRequest } from './provider-request.ts'
 import { CallLog, makeRecord } from './call-log.ts'
 
 /** Where calls are logged. Outside the writable tree (see compose). */
@@ -91,6 +98,29 @@ export default function (pi: ExtensionAPI): void {
       kind: 'turn_start',
       turn,
       ...(session !== undefined ? { session } : {}),
+    }))
+    return undefined
+  })
+
+  /* Outbound model requests, as SHAPE only. This is the last unaudited channel
+     the agent has: `docs/requirements.md` asks for observability of what the
+     agent does, and until now the trail said nothing about what it sent to a
+     model.
+
+     The event's `payload` is the ENTIRE conversation — system prompt, every
+     message, and the contents of every file read this session. It is never
+     logged; `describeProviderRequest` takes named scalars off it and nothing
+     more. See `provider-request.ts`.
+
+     RETURN UNDEFINED. `runner.js` treats any non-undefined return from this
+     handler as a REPLACEMENT payload (`if (handlerResult !== undefined)
+     currentPayload = handlerResult`), so a stray return value here would rewrite
+     the request the agent is about to send. A logging handler must not be able
+     to do that; there is a test asserting this returns undefined. */
+  pi.on('before_provider_request', async (event) => {
+    await log.record(makeRecord({
+      kind: 'provider_request',
+      ...describeProviderRequest(event.payload),
     }))
     return undefined
   })

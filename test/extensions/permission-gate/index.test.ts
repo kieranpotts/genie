@@ -49,9 +49,12 @@ describe('permission-gate wiring', () => {
     file = join(dir, 'calls.jsonl')
   })
 
-  it('registers the tool_call, tool_result and before_agent_start hooks', async () => {
+  it('registers all four hooks', async () => {
     const handlers = await loadExtension(file)
-    assert.deepEqual(Object.keys(handlers).sort(), ['before_agent_start', 'tool_call', 'tool_result'])
+    assert.deepEqual(
+      Object.keys(handlers).sort(),
+      ['before_agent_start', 'before_provider_request', 'tool_call', 'tool_result']
+    )
     await rm(dir, { recursive: true, force: true })
   })
 
@@ -157,6 +160,99 @@ describe('permission-gate wiring', () => {
 
       const body = await readFile(file, 'utf8')
       assert.equal(body.includes('SUPER-SECRET-FILE-BODY'), false)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+/* Model requests were the last channel the trail said nothing about. The hazard
+   is the opposite of the usual one: the event hands over the entire conversation,
+   so these tests are mostly about what does NOT reach the file. */
+describe('permission-gate model-request logging', () => {
+  let dir: string
+  let file: string
+
+  const payload = {
+    model: 'computer-programmer',
+    messages: [
+      { role: 'system', content: 'SYSTEM-PROMPT-BODY' },
+      { role: 'user', content: 'CONVERSATION-CONTENT' },
+    ],
+  }
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'permgate-provider-'))
+    file = join(dir, 'calls.jsonl')
+  })
+
+  it('records the shape of the request', async () => {
+    const handlers = await loadExtension(file)
+    try {
+      await handlers.before_provider_request({ type: 'before_provider_request', payload }, noUI)
+
+      const lines = await readLines(file)
+      assert.equal(lines.length, 1)
+      assert.equal(lines[0].kind, 'provider_request')
+      assert.equal(lines[0].model, 'computer-programmer')
+      assert.equal(lines[0].messages, 2)
+      assert.ok(Number(lines[0].approx_bytes) > 0)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('never copies the conversation into the log', async () => {
+    const handlers = await loadExtension(file)
+    try {
+      await handlers.before_provider_request({ type: 'before_provider_request', payload }, noUI)
+
+      const body = await readFile(file, 'utf8')
+      assert.equal(body.includes('SYSTEM-PROMPT-BODY'), false)
+      assert.equal(body.includes('CONVERSATION-CONTENT'), false)
+      assert.deepEqual(
+        Object.keys(JSON.parse(body.trimEnd()) as Record<string, unknown>),
+        ['ts', 'kind', 'model', 'messages', 'approx_bytes']
+      )
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  /* The footgun in this hook's contract: `runner.js` treats any non-undefined
+     return as a REPLACEMENT payload, so a stray return value from a logging
+     handler would rewrite the request the agent is about to send. */
+  it('returns undefined, so it cannot replace the outbound payload', async () => {
+    const handlers = await loadExtension(file)
+    try {
+      const returned = await handlers.before_provider_request(
+        { type: 'before_provider_request', payload },
+        noUI
+      )
+      assert.equal(returned, undefined)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  /* Several model requests fall inside one turn — the agent loops until it stops
+     calling tools — so the turn line is what groups them. */
+  it('sits under the turn boundary that groups it', async () => {
+    const handlers = await loadExtension(file)
+    try {
+      await handlers.before_agent_start({ type: 'before_agent_start', prompt: 'p', systemPrompt: 's' }, noUI)
+      await handlers.before_provider_request({ type: 'before_provider_request', payload }, noUI)
+      await handlers.tool_call(
+        { toolCallId: 'tc_1', toolName: 'mcp_read_file', input: { path: '/workspace/a.ts' } },
+        noUI
+      )
+      await handlers.before_provider_request({ type: 'before_provider_request', payload }, noUI)
+
+      const lines = await readLines(file)
+      assert.deepEqual(
+        lines.map(l => l.kind ?? l.phase),
+        ['turn_start', 'provider_request', 'call', 'provider_request']
+      )
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

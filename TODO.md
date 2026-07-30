@@ -663,14 +663,21 @@ claimed and what is enforced.
   are not logged here and that the host proxy is where that would live. A
   scoped, metadata-only version is a separate item below.
 
+  > **Since implemented.** That separate item is now closed, so both wordings
+  > have changed again: `README.md` and `docs/solution.md` say that model
+  > requests are recorded as *shape* — model, message count, size — and that the
+  > payload never is. The hazard described here was real and is why the
+  > extraction lives in its own pure module with a closed-key-set test.
+
   Three follow-ups fell out of this and are recorded below rather than silently
   dropped: metadata-only model-request logging, tool-output redaction, and turn
   markers.
 
-  > **Since extended.** `before_agent_start` is now handled too (see the turn
-  > markers item below), so `docs/solution.md` lists **four** hooks and no longer
-  > names that one among the unhandled. The paragraph stating what is *not*
-  > handled stays — `before_provider_request` is still the live example.
+  > **Since extended, twice.** `before_agent_start` and
+  > `before_provider_request` are both handled now (see the two items below), so
+  > `docs/solution.md` lists **five** hooks across the two extensions. The
+  > paragraph stating what is *not* handled stays, with `after_provider_response`
+  > and `context` as the live examples.
 
   > ### The first live run falsified this, and the fix was in `mcp-client`
   >
@@ -707,7 +714,109 @@ claimed and what is enforced.
   >   `tool-mapping.test.ts` and in `mcp-client/README.md`, but what actually
   >   found it was running the thing.
 
-- [ ] **Log model requests as metadata only, or leave them to the proxy.**
+- [x] **Log model requests as metadata only, or leave them to the proxy.**
+  **Decided: metadata-only, here, in `permission-gate`. The proxy option is
+  declined rather than deferred**, and the reasons are below — they are about the
+  proxy's actual state today, not about the principle, which stands.
+
+  `before_provider_request` is handled. One line per model call, shape only:
+
+  ```json
+  {"ts":"…","kind":"provider_request","model":"computer-programmer","messages":34,"approx_bytes":18422}
+  ```
+
+  **Why not the proxy, measured rather than assumed.** The instinct recorded
+  below — that the host proxy is the stronger place because it is outside the
+  agent's process — is correct in principle and was checked against what is
+  actually deployed. Three findings, and together they close the option:
+
+  1. **The proxy has no durable log at all.** `run/startup` starts it with its
+     stdout going to `$(mktemp -t litellm-proxy.XXXXXX.log)` — a temp file that
+     is abandoned when the run ends. What exists today is operational output, not
+     a record, so "the proxy does it" could not be closed by documenting and
+     verifying an existing behaviour. It would mean building one.
+  2. **Building one means a Python callback and a trail outside this stack.**
+     LiteLLM 1.93.0 offers `--log_config` (a Python logging dictConfig) and
+     `json_logs`, both of which shape *operational* logs; a per-request metadata
+     record needs a custom callback module, and per-request persistence
+     otherwise wants the database this deployment does not run. That is Python in
+     a TypeScript repository, pinned against a callback API that moves between
+     versions, writing to a host path outside the `pi-logs` volume — so outside
+     the retention policy just settled and outside every check in the runbook.
+  3. **The proxy cannot attribute a request to a turn or a session.** It sees
+     HTTP bodies. Turn boundaries and session ids exist only inside Pi, so a
+     proxy-side record could not answer "what did the agent send in response to
+     *that* instruction" — which is the question the turn markers were added to
+     make answerable. The in-process record lands in the same file, already
+     grouped by those boundaries. This is the argument the original item could
+     not have made, because turn markers did not exist when it was written.
+
+  So the trade is: **independence, or attribution and one trail.** Attribution
+  wins here, and unlike the `--verify-signatures` decision the loss is smaller
+  than it looks — this log has never been independent of the agent's process.
+  `permission-gate` writes all of it, which is stated plainly in three places
+  rather than being quietly true. The proxy remains the right home for an
+  independent record if one is ever needed; the revisit trigger is a compliance
+  requirement for a trail the agent's process cannot influence, at which point
+  the answer is a proxy-side record *in addition to* this one, not instead of it.
+
+  **The hazard the item named turned out to be the real work.** Extraction lives
+  in a new pure module, `provider-request.ts`, which reads named scalars and
+  never spreads; `model` is taken from the outbound body rather than from Pi's
+  own state, so the line says what was *sent*; and each field is omitted when
+  absent, because a `0` would be a claim about the request. Three tests guard
+  it: the key set is closed, no message content survives extraction, and a
+  payload it cannot read yields an empty shape rather than an error.
+
+  **One contract detail that would have been a silent, serious bug.**
+  `runner.js` does `if (handlerResult !== undefined) currentPayload =
+  handlerResult` — so any non-undefined return from this hook **replaces the
+  payload sent to the provider**. A logging handler that returned, say, `true`
+  would rewrite every model request in the session. The handler returns
+  `undefined` explicitly, there is a test asserting it, and the reason is
+  recorded in `index.ts` and the extension README, because nothing in the type
+  signature (`BeforeProviderRequestEventResult = unknown`) would stop the next
+  edit.
+
+  **Deliberately not done: the response side.** `after_provider_response` carries
+  status and headers, and was considered for the same call/result honesty
+  argument that justified `tool_result`. It does not apply: a request line claims
+  only that a request was sent, which is true — unlike a bare `tool_call` line,
+  which asserted reads the MCP server went on to refuse. There is also no id in
+  either event to join a reply to its request. Left unhandled, and stated as a
+  limit in the runbook rather than left to be inferred.
+
+  **Driven for real.** Two instructions against a local model with one file read
+  produced this, trimmed to the `kind` lines:
+
+  ```json
+  {"kind":"turn_start","turn":1,"session":"019fb13a-…"}
+  {"kind":"provider_request","model":"qwen2.5:14b","messages":2,"approx_bytes":4507}
+  {"kind":"provider_request","model":"qwen2.5:14b","messages":4,"approx_bytes":5798}
+  {"kind":"provider_request","model":"qwen2.5:14b","messages":6,"approx_bytes":7370}
+  {"kind":"provider_request","model":"qwen2.5:14b","messages":8,"approx_bytes":8839}
+  {"kind":"provider_request","model":"qwen2.5:14b","messages":10,"approx_bytes":10319}
+  {"kind":"turn_start","turn":2,"session":"019fb13a-…"}
+  {"kind":"provider_request","model":"qwen2.5:14b","messages":12,"approx_bytes":11127}
+  ```
+
+  Three things that run established. The payload really is the OpenAI-completions
+  body on this route, so `model` and `messages` populate. **`approx_bytes`
+  climbing is the useful signal** — 4.5 KB to 11 KB across one turn is file
+  content accumulating in the context and being re-sent on every subsequent call,
+  which is visible here without the context being recorded. And the shape of the
+  trail is legible in a way it was not before: five model requests inside turn 1
+  against four tool calls, all four reading the *same* file — a small model
+  looping, which the trail now shows rather than implies. Two new `jq` recipes in
+  the runbook were checked against that file, along with both existing ones, which
+  are unaffected because these lines carry no `.phase`.
+
+  A provider-request line is **126 bytes**, roughly one per model call, so the
+  retention table is unchanged for the same reason turn lines left it unchanged.
+
+  <details>
+  <summary>Original reasoning, which the decision above follows</summary>
+
   Raised by the item above, which reworded the claim rather than implementing
   the hook. The gap is real: nothing in this repository records what was sent to
   a model.
@@ -737,6 +846,8 @@ claimed and what is enforced.
   reason the MCP gateway is a stronger boundary than an in-process guard. If the
   answer is "the proxy does it", then this item closes by documenting and
   verifying that, not by writing an extension.
+
+  </details>
 
 - [ ] **Redact secret-shaped content from tool output.**
   Deferred from the hooks work above; `tool_result` is the hook for it and is

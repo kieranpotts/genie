@@ -69,7 +69,7 @@ list_available_extensions() {
         desc="Connects Pi to an MCP filesystem server (via the Docker MCP gateway) for mediated file access"
         ;;
       permission-gate)
-        desc="Refuses sensitive filenames outright, requires interactive confirmation for mutating tool calls, default-deny on timeout, logging every call and the turn boundaries between them"
+        desc="Refuses sensitive filenames outright, requires interactive confirmation for mutating tool calls, default-deny on timeout, logging every call, the turn boundaries between them, and the shape of every model request"
         ;;
       *)
         desc=""

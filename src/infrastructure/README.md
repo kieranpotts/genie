@@ -312,6 +312,7 @@ what keeps the change trail complete.
 | Reads are recorded | ask it to read any ordinary project file | the call log gains a `"phase":"call","outcome":"allowed","confirmation":"not-required"` line naming the path |
 | Results are recorded | ask it to read any ordinary project file | a second `"phase":"result"` line follows with the same `id` and `"result":"ok"` |
 | Turns are delimited | give the agent two separate instructions, each causing a tool call | a `"kind":"turn_start"` line precedes each instruction's calls, with `turn` incrementing and the same `session`; the prompt text appears nowhere in the log |
+| Model requests are recorded, as shape only | ask the agent anything that makes it read a file | `"kind":"provider_request"` lines appear with `model`, `messages`, and `approx_bytes` climbing across the turn; no message text, no file content, and no system prompt anywhere in the log |
 | A downstream refusal is visible as one | ask it to read `../../etc/passwd` | the `call` line says `"outcome":"allowed"` (the gate admitted it) and the `result` line says `"result":"error"` (the MCP server refused it). This pairing is the thing the trail could not express before. |
 | Tool surface is the documented eleven | the tool-surface check below | exactly the eleven `mcp_*` tools listed in `docs/solution.md`; no `bash`, no Git, no web fetch |
 | No network binaries | `docker compose ... exec pi sh -c 'for b in git curl wget nc ssh; do command -v $b \|\| echo "$b absent"; done'` | all five absent |
@@ -414,12 +415,20 @@ rather than by reading prose.
 Neither line ever carries tool *content*. `detail` is the path; the file's
 contents are never copied into the trail.
 
-**A third line kind marks the turn boundaries.** It carries `kind` rather than
-`phase`, so the queries below are unaffected by it:
+**Two further line kinds carry `kind` rather than `phase`**, so the queries below
+are unaffected by either:
 
 ```json
 {"ts":"…","kind":"turn_start","turn":7,"session":"01936f2e-6b2a-7c31-9e4d-8f1a2b3c4d5e"}
+{"ts":"…","kind":"provider_request","model":"computer-programmer","messages":34,"approx_bytes":18422}
 ```
+
+A `provider_request` line records one outbound model call as **shape only** —
+which model, how many messages, how many bytes of serialised body. Never the
+payload, which is the entire conversation including every file the agent has
+read. Expect several per turn: the agent loops until it stops calling tools, and
+`approx_bytes` climbing across those lines is the cheapest available signal that
+context is accumulating.
 
 Every `call` line belongs to the turn whose boundary most recently preceded it,
 which is what makes "what did the agent do in response to *that* instruction"
@@ -463,6 +472,20 @@ $LOG | jq -rs '
     elif $l.phase == "call" then .rows += [[.session, .turn, $l.outcome, $l.tool, $l.detail]]
     else . end)
   | .rows[] | @tsv'
+
+# Model requests, and how the context grew: one row per call to the model.
+# Watch approx_bytes climb — that is file content accumulating in the context and
+# being re-sent on every subsequent request.
+$LOG | jq -r 'select(.kind=="provider_request") | [.model, .messages, .approx_bytes] | @tsv'
+
+# Model requests per turn, which is how much the agent had to think.
+$LOG | jq -rs '
+  reduce .[] as $l ({turn: null, counts: {}};
+    if $l.kind == "turn_start" then .turn = $l.turn
+    elif $l.kind == "provider_request"
+      then .counts[.turn | tostring] += 1
+    else . end)
+  | .counts | to_entries[] | [.key, .value] | @tsv'
 ```
 
 Limits to know before relying on it:
@@ -470,9 +493,12 @@ Limits to know before relying on it:
 - **Paths, never content.** `detail` carries the path a call named and nothing
   it returned. Logging what was read would copy the secrets out of the files and
   into the audit trail.
-- **It covers tool calls, not model requests.** Nothing here records what was
-  sent to the model. The host-side proxy is the component positioned to do that,
-  and this repository neither implements nor verifies it; see `TODO.md`.
+- **Model requests are recorded as shape, not content.** A `provider_request`
+  line says which model was called, with how many messages, at what size — never
+  what was sent. It is also written in the agent's own process, so it is evidence
+  rather than a boundary; an independent record would come from the host proxy,
+  which is deliberately not built (see `TODO.md`). Nothing records the provider's
+  *reply*, either: `after_provider_response` is not handled.
 - **It grows without bound, and that is the stated policy, not an oversight.**
   Nothing in the stack rotates, caps, or prunes it. See *Retention* below for
   the reasoning and for the operator's part in it.
@@ -520,9 +546,10 @@ The reasoning, in the order it matters:
 
   A million tool calls is years of heavy single-operator use. Paying real
   accountability loss to avoid a few hundred megabytes over that horizon is a
-  bad trade, and it stays a bad trade until the numbers move. Turn lines do not
-  move them: about 112 bytes each, and one per instruction rather than one per
-  call.
+  bad trade, and it stays a bad trade until the numbers move. The two `kind`
+  lines do not move them: a turn line is ~112 bytes with one per instruction, and
+  a provider-request line ~126 bytes with roughly one per model call — a few
+  percent on top of the calls they describe.
 
 - **A cap would have to live in the wrong place.** The agent's rootfs is
   read-only, so rotation state would have to sit on the `pi-logs` volume itself,

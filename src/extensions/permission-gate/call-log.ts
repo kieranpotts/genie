@@ -33,11 +33,18 @@
  * operator's, from the host. See "Retention" in this extension's README and in
  * src/infrastructure/README.md.
  *
- * A THIRD LINE KIND marks the boundary between turns, so a reviewer can group
- * calls by the instruction that caused them rather than correlating timestamps
- * against a session transcript on another volume. It carries no `phase` — see
- * `TurnRecord` for why that field is deliberately absent — and no description of
- * what the turn was about. It records that a turn began, and nothing else.
+ * TWO FURTHER LINE KINDS sit alongside those, neither carrying a `phase` — see
+ * `TurnRecord` for why that field is deliberately absent from both:
+ *
+ *   kind: 'turn_start'        a turn began. Groups the calls that follow it, so
+ *                             a reviewer need not correlate timestamps against a
+ *                             session transcript on another volume.
+ *   kind: 'provider_request'  a model request went out, reduced to its shape.
+ *
+ * Neither describes what it marks. A turn line does not say what was asked, and
+ * a provider-request line does not say what was sent — only how much of it there
+ * was. The event behind the second carries the entire conversation, so that
+ * restraint is the whole design of the line rather than a detail of it.
  *
  * The attempt line is also TWO-AXIS:
  *
@@ -59,6 +66,7 @@
 
 import { appendFile, mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import type { ProviderRequestShape } from './provider-request.ts'
 
 /** Whether the gate let the call proceed. Decided BEFORE the tool runs. */
 export type CallOutcome = 'allowed' | 'blocked'
@@ -178,7 +186,31 @@ export interface TurnRecord {
   session?: string
 }
 
-export type LogRecord = CallAttemptRecord | CallResultRecord | TurnRecord
+/**
+ * One outbound model request, reduced to its shape.
+ *
+ * Written from `before_provider_request`, which fires once per model call — so
+ * several of these can fall inside a single turn, and the turn line before them
+ * is what groups them.
+ *
+ * SHAPE, NEVER CONTENT, and this is the line where that rule is load-bearing:
+ * the event's payload is the whole conversation, including every file the agent
+ * has read. `provider-request.ts` extracts named scalars from it and this record
+ * carries only those. Every field is optional because the payload's shape
+ * belongs to the provider; an absent field means the request did not carry it.
+ *
+ * Like `TurnRecord`, it carries no `phase` — see there for why.
+ */
+export interface ProviderRequestRecord extends ProviderRequestShape {
+  ts: string
+  kind: 'provider_request'
+}
+
+export type LogRecord =
+  | CallAttemptRecord
+  | CallResultRecord
+  | TurnRecord
+  | ProviderRequestRecord
 
 /** Distributes `Omit` across the union, so each member keeps its own fields. */
 type WithoutTimestamp<T> = T extends unknown ? Omit<T, 'ts'> : never
@@ -186,12 +218,20 @@ type WithoutTimestamp<T> = T extends unknown ? Omit<T, 'ts'> : never
 /** Render a log record as a newline-terminated JSON line. Pure. */
 export function formatRecord (record: LogRecord): string {
   const ordered = 'kind' in record
-    ? {
-        ts: record.ts,
-        kind: record.kind,
-        turn: record.turn,
-        ...(record.session !== undefined ? { session: record.session } : {}),
-      }
+    ? record.kind === 'turn_start'
+      ? {
+          ts: record.ts,
+          kind: record.kind,
+          turn: record.turn,
+          ...(record.session !== undefined ? { session: record.session } : {}),
+        }
+      : {
+          ts: record.ts,
+          kind: record.kind,
+          ...(record.model !== undefined ? { model: record.model } : {}),
+          ...(record.messages !== undefined ? { messages: record.messages } : {}),
+          ...(record.approx_bytes !== undefined ? { approx_bytes: record.approx_bytes } : {}),
+        }
     : record.phase === 'call'
       ? {
           ts: record.ts,

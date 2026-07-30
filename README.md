@@ -207,10 +207,10 @@ it spawns the MCP server — confined to a component the agent cannot reach. See
 
 Plus every tool call an agent makes is logged — both what it attempted and what
 the call actually did. Since the agent's only tools are filesystem tools, that
-is every filesystem action it takes.
-
-Model requests are **not** logged here. The host-side proxy is the component
-positioned to do that, and this repository neither implements nor verifies it.
+is every filesystem action it takes. The same log marks each turn boundary, so
+calls are attributable to the instruction that caused them, and records the
+**shape** of every model request: which model, how many messages, how many
+bytes. Never the content of any of it — that is the rule the log is built on.
 
 These components are installed and managed separately from the Pi extension.
 See the [**infrastructure runbook**](./src/infrastructure/README.md) for

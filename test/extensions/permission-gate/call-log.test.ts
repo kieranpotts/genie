@@ -109,6 +109,58 @@ describe('formatRecord — the turn line', () => {
   })
 })
 
+describe('formatRecord — the provider-request line', () => {
+  it('renders the shape with fixed key order', () => {
+    const line = formatRecord({
+      ts: 'T',
+      kind: 'provider_request',
+      model: 'computer-programmer',
+      messages: 34,
+      approx_bytes: 18422,
+    })
+    assert.equal(
+      line,
+      '{"ts":"T","kind":"provider_request","model":"computer-programmer",' +
+      '"messages":34,"approx_bytes":18422}\n'
+    )
+  })
+
+  /* The line this rule matters most on: the event behind it carries the whole
+     conversation. Asserting the key set is closed is what stops a future edit
+     spreading the payload into the record. */
+  it('carries no field beyond ts, kind, model, messages and approx_bytes', () => {
+    const line = formatRecord({
+      ts: 'T', kind: 'provider_request', model: 'm', messages: 1, approx_bytes: 2,
+    })
+    assert.deepEqual(
+      Object.keys(JSON.parse(line) as Record<string, unknown>),
+      ['ts', 'kind', 'model', 'messages', 'approx_bytes']
+    )
+  })
+
+  it('omits the fields the payload did not carry', () => {
+    const line = formatRecord({ ts: 'T', kind: 'provider_request', approx_bytes: 9 })
+    assert.equal(line, '{"ts":"T","kind":"provider_request","approx_bytes":9}\n')
+  })
+
+  it('carries no phase, so the documented queries skip it', () => {
+    const parsed = JSON.parse(
+      formatRecord({ ts: 'T', kind: 'provider_request', model: 'm' })
+    ) as Record<string, unknown>
+    assert.equal('phase' in parsed, false)
+  })
+
+  /* Two `kind` values now share the field, and they must stay distinguishable:
+     a query selecting turns must not match model requests. */
+  it('is distinguishable from a turn line by kind alone', () => {
+    const turn = JSON.parse(formatRecord({ ts: 'T', kind: 'turn_start', turn: 1 })) as Record<string, unknown>
+    const request = JSON.parse(formatRecord({ ts: 'T', kind: 'provider_request' })) as Record<string, unknown>
+    assert.equal(turn.kind, 'turn_start')
+    assert.equal(request.kind, 'provider_request')
+    assert.equal('turn' in request, false)
+  })
+})
+
 describe('makeRecord', () => {
   it('stamps the supplied time on an attempt', () => {
     const r = makeRecord(
