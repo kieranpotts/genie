@@ -166,6 +166,113 @@ describe('permission-gate wiring', () => {
   })
 })
 
+/* Redaction is the one thing this extension does that CHANGES what the agent
+   sees, so the wiring has two jobs: hand Pi a replacement it will honour, and
+   record that it happened without recording what it was. */
+describe('permission-gate tool-output redaction', () => {
+  let dir: string
+  let file: string
+
+  /** A syntactically valid, deliberately fake GitHub token. */
+  const secret = 'ghp_1234567890abcdefghijklmnopqrstuvwxyz'
+
+  const resultEvent = (text: string): Record<string, unknown> => ({
+    toolCallId: 'tc_1',
+    toolName: 'mcp_read_file',
+    input: { path: '/workspace/notes.txt' },
+    content: [{ type: 'text', text }],
+    isError: false,
+  })
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'permgate-redact-'))
+    file = join(dir, 'calls.jsonl')
+  })
+
+  /* Pi replaces the tool result with what this handler returns, and that
+     replacement reaches both the model's context and the session transcript. If
+     the patch is not returned, the redaction is a no-op that logs as a success —
+     the same silent shape as the isError bug. */
+  it('returns replacement content with the secret gone', async () => {
+    const handlers = await loadExtension(file)
+    try {
+      const patch = await handlers.tool_result(
+        resultEvent(`api key: ${secret}`),
+        noUI
+      ) as { content: Array<{ text: string }> }
+
+      assert.ok(patch, 'a patch must be returned, or nothing is redacted')
+      assert.equal(patch.content[0].text, 'api key: [redacted: github-token]')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('records that redaction happened, and which rule fired', async () => {
+    const handlers = await loadExtension(file)
+    try {
+      await handlers.tool_result(resultEvent(`api key: ${secret}`), noUI)
+
+      const lines = await readLines(file)
+      assert.equal(lines[0].phase, 'result')
+      assert.equal(lines[0].redactions, 1)
+      assert.deepEqual(lines[0].rules, ['github-token'])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  /* The sharpest case of the no-content rule: this record is specifically about
+     a secret, so it must describe it without carrying it. */
+  it('never writes the secret to the log', async () => {
+    const handlers = await loadExtension(file)
+    try {
+      await handlers.tool_result(resultEvent(`api key: ${secret}`), noUI)
+
+      const body = await readFile(file, 'utf8')
+      assert.equal(body.includes(secret), false)
+      assert.equal(body.includes('1234567890abcdef'), false)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  /* Returning content unconditionally would rewrite every tool result in the
+     session — into the transcript as well — for no reason. */
+  it('returns no patch, and logs no redaction fields, for clean output', async () => {
+    const handlers = await loadExtension(file)
+    try {
+      const patch = await handlers.tool_result(resultEvent('nothing secret here'), noUI)
+      assert.equal(patch, undefined)
+
+      const lines = await readLines(file)
+      assert.equal('redactions' in lines[0], false)
+      assert.equal('rules' in lines[0], false)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  /* Fails open, deliberately: a redactor that throws must not break tool
+     execution. The result is still recorded, without redaction fields. */
+  it('still records the result when the content is not shaped as expected', async () => {
+    const handlers = await loadExtension(file)
+    try {
+      const patch = await handlers.tool_result(
+        { toolCallId: 'tc_9', toolName: 'mcp_read_file', input: {}, content: undefined, isError: false },
+        noUI
+      )
+
+      assert.equal(patch, undefined)
+      const lines = await readLines(file)
+      assert.equal(lines[0].phase, 'result')
+      assert.equal(lines[0].result, 'ok')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
 /* Model requests were the last channel the trail said nothing about. The hazard
    is the opposite of the usual one: the event hands over the entire conversation,
    so these tests are mostly about what does NOT reach the file. */

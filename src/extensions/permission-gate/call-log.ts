@@ -134,11 +134,30 @@ export interface CallAttemptRecord extends RecordBase {
  * Deliberately carries NO content. `tool_result` hands us the tool's entire
  * output — the file the agent just read — and copying that here would turn the
  * audit trail into a second copy of every secret the agent has touched. The
- * path is already on the `call` line; this line adds only the verdict.
+ * path is already on the `call` line; this line adds the verdict, and what was
+ * withheld from the model.
+ *
+ * The redaction fields are the sharpest case of the no-content rule, because
+ * they describe secrets specifically: they say how many were replaced and which
+ * rules matched, and cannot say what any of them was. A record that reported the
+ * finding in full would be a more convenient way to leak precisely what the
+ * redactor exists to protect.
  */
 export interface CallResultRecord extends RecordBase {
   phase: 'result'
   result: CallResult
+  /**
+   * How many secret-shaped spans were replaced in this result before the model
+   * saw it. Omitted when none were, so the field's presence is the signal.
+   */
+  redactions?: number
+  /**
+   * Which redaction rules fired, by name — `github-token`, `private-key-block`.
+   * Names from a fixed, code-defined vocabulary (`redaction.ts`), never anything
+   * derived from what was matched: this says a GitHub token was in the output,
+   * and cannot say which one. Omitted when nothing was redacted.
+   */
+  rules?: string[]
 }
 
 /**
@@ -249,6 +268,8 @@ export function formatRecord (record: LogRecord): string {
           id: record.id,
           tool: record.tool,
           result: record.result,
+          ...(record.redactions !== undefined ? { redactions: record.redactions } : {}),
+          ...(record.rules !== undefined ? { rules: record.rules } : {}),
         }
   return JSON.stringify(ordered) + '\n'
 }

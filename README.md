@@ -122,9 +122,10 @@ This repository packages the following Pi extensions. Click the links to see
 their READMEs, which provide detailed usage instructions.
 
 - [**`permission-gate`**](./src/extensions/permission-gate/README.md): \
-  Interactive, default-deny confirmation gate on mutating tool calls, plus an
-  absolute refusal of sensitive filenames on every call. Part of the security
-  hardening infrastructure (see below).
+  Interactive, default-deny confirmation gate on mutating tool calls, an absolute
+  refusal of sensitive filenames on every call, and redaction of secret-shaped
+  values from tool output before the model sees them. Writes the system's audit
+  trail. Part of the security hardening infrastructure (see below).
 
 - [**`mcp-client`**](./src/extensions/mcp-client/README.md): \
   MCP client giving Pi mediated filesystem access through the Docker MCP Toolkit

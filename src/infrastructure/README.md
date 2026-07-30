@@ -312,6 +312,7 @@ what keeps the change trail complete.
 | Reads are recorded | ask it to read any ordinary project file | the call log gains a `"phase":"call","outcome":"allowed","confirmation":"not-required"` line naming the path |
 | Results are recorded | ask it to read any ordinary project file | a second `"phase":"result"` line follows with the same `id` and `"result":"ok"` |
 | Turns are delimited | give the agent two separate instructions, each causing a tool call | a `"kind":"turn_start"` line precedes each instruction's calls, with `turn` incrementing and the same `session`; the prompt text appears nowhere in the log |
+| Secrets are redacted from tool output | put a fake credential in a project file (eg. `aws_access_key_id = AKIAIOSFODNN7EXAMPLE`) and ask the agent to read it and repeat it verbatim | the agent reports `[redacted: aws-access-key-id]` and cannot produce the value; the `result` line carries `"redactions":1,"rules":["aws-access-key-id"]`; the value appears neither in the call log nor in the session transcript on `pi-sessions` |
 | Model requests are recorded, as shape only | ask the agent anything that makes it read a file | `"kind":"provider_request"` lines appear with `model`, `messages`, and `approx_bytes` climbing across the turn; no message text, no file content, and no system prompt anywhere in the log |
 | A downstream refusal is visible as one | ask it to read `../../etc/passwd` | the `call` line says `"outcome":"allowed"` (the gate admitted it) and the `result` line says `"result":"error"` (the MCP server refused it). This pairing is the thing the trail could not express before. |
 | Tool surface is the documented eleven | the tool-surface check below | exactly the eleven `mcp_*` tools listed in `docs/solution.md`; no `bash`, no Git, no web fetch |
@@ -403,7 +404,7 @@ before querying it, because every naive count is otherwise doubled:
 | `phase` | Written | Says |
 |---|---|---|
 | `call` | before the tool runs | what the **gate** decided: `outcome` (`allowed` / `blocked`) and `confirmation` (whether a human was involved, and what they said) |
-| `result` | after the tool runs | what the **tool** did: `result` (`ok` / `error`) |
+| `result` | after the tool runs | what the **tool** did: `result` (`ok` / `error`), plus `redactions` and `rules` when a secret-shaped value was replaced in the output |
 
 Both are needed. The gate admits calls but does not perform them, so a read of a
 path outside `/workspace` is `allowed` on the `call` line and `error` on the
@@ -473,6 +474,11 @@ $LOG | jq -rs '
     else . end)
   | .rows[] | @tsv'
 
+# Secrets the redactor caught on their way to the model: which call, which rule.
+# The value is deliberately not recoverable from this log — go to the file named
+# on the matching `call` line if you need to know what is in it.
+$LOG | jq -r 'select(.redactions) | [.id, .tool, .redactions, (.rules | join(","))] | @tsv'
+
 # Model requests, and how the context grew: one row per call to the model.
 # Watch approx_bytes climb — that is file content accumulating in the context and
 # being re-sent on every subsequent request.
@@ -492,7 +498,10 @@ Limits to know before relying on it:
 
 - **Paths, never content.** `detail` carries the path a call named and nothing
   it returned. Logging what was read would copy the secrets out of the files and
-  into the audit trail.
+  into the audit trail. That holds most strictly for the redaction fields: they
+  say a credential was replaced and which rule matched, and cannot say what it
+  was — a record that named the value would be a convenient way to leak precisely
+  what the redactor exists to protect.
 - **Model requests are recorded as shape, not content.** A `provider_request`
   line says which model was called, with how many messages, at what size — never
   what was sent. It is also written in the agent's own process, so it is evidence

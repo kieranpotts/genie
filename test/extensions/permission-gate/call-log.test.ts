@@ -66,14 +66,46 @@ describe('formatRecord — the result line', () => {
   })
 
   /* The result line must never become a second copy of the file the agent read.
-     This asserts the shape is closed: only the five known keys, so a future
-     edit that spreads the tool_result event into the record fails here. */
+     This asserts the shape is closed, so a future edit that spreads the
+     tool_result event into the record fails here. The set grew by two when
+     redaction was added — deliberately, and the guard grew with it rather than
+     being relaxed. */
   it('carries no field beyond ts, phase, id, tool and result', () => {
     const line = formatRecord({ ts: 'T', phase: 'result', id: 'tc_1', tool: 'mcp_read_file', result: 'error' })
     assert.deepEqual(
       Object.keys(JSON.parse(line) as Record<string, unknown>),
       ['ts', 'phase', 'id', 'tool', 'result']
     )
+  })
+
+  it('adds only the two redaction fields when something was redacted', () => {
+    const line = formatRecord({
+      ts: 'T',
+      phase: 'result',
+      id: 'tc_1',
+      tool: 'mcp_read_file',
+      result: 'ok',
+      redactions: 2,
+      rules: ['aws-access-key-id', 'github-token'],
+    })
+    assert.equal(
+      line,
+      '{"ts":"T","phase":"result","id":"tc_1","tool":"mcp_read_file","result":"ok",' +
+      '"redactions":2,"rules":["aws-access-key-id","github-token"]}\n'
+    )
+    assert.deepEqual(
+      Object.keys(JSON.parse(line) as Record<string, unknown>),
+      ['ts', 'phase', 'id', 'tool', 'result', 'redactions', 'rules']
+    )
+  })
+
+  /* The presence of the field is the signal, so an unredacted result must not
+     carry a zero — "nothing matched" and "the redactor did not run" would
+     otherwise look identical. */
+  it('omits the redaction fields entirely when nothing was redacted', () => {
+    const line = formatRecord({ ts: 'T', phase: 'result', id: 'tc_1', tool: 'mcp_read_file', result: 'ok' })
+    assert.equal(line.includes('redactions'), false)
+    assert.equal(line.includes('rules'), false)
   })
 })
 

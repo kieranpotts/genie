@@ -10,6 +10,12 @@
  *      moves, and directory creation. Confirmation times out to DENY, and a
  *      missing interactive UI also denies.
  *
+ * A third control applies on the way BACK: secret-shaped spans are redacted from
+ * tool output before the model sees it (`tool_result`). The first control matches
+ * a file's NAME, so it cannot see a key pasted into an ordinary `.txt`; this one
+ * matches the value's shape wherever it appears. See `redaction.ts`, which is
+ * also explicit about being defence in depth rather than a boundary.
+ *
  * EVERY call is logged to an append-only file outside the agent's writable
  * tree — not only the ones that prompted. A read is an action, and
  * `docs/requirements.md` asks for observability of every action against the
@@ -35,7 +41,10 @@
  *                             this asserts reads the MCP server then refuses
  *                             (traversal, outside the allowed directory).
  *   `tool_result`             after it runs, carrying `isError`: what RESULTED.
- *                             Joined to the attempt by Pi's `toolCallId`.
+ *                             Joined to the attempt by Pi's `toolCallId`. Also
+ *                             the one hook here that CHANGES what the agent
+ *                             sees: secret-shaped spans are redacted from the
+ *                             output before it reaches the model.
  *   `before_agent_start`      the operator submitted an instruction: a turn
  *                             boundary, so the calls between two boundaries are
  *                             attributable to the instruction that caused them.
@@ -64,6 +73,7 @@ import { basename } from 'node:path'
 import { decide, describeCall, requiresConfirmation, type ConfirmOutcome } from './policy.ts'
 import { findSensitiveArgument } from './sensitive-files.ts'
 import { describeProviderRequest } from './provider-request.ts'
+import { redactContent, type RedactionOutcome } from './redaction.ts'
 import { CallLog, makeRecord } from './call-log.ts'
 
 /** Where calls are logged. Outside the writable tree (see compose). */
@@ -195,12 +205,40 @@ export default function (pi: ExtensionAPI): void {
 
      `event.content` is NEVER touched. See the header. */
   pi.on('tool_result', async (event) => {
+    /* Redact before recording, so the record can say what was withheld.
+       `redactContent` is pure and total, but it runs inside the path that
+       delivers a tool result to the model, so an unexpected throw here would
+       break tool execution rather than a log line. It FAILS OPEN: the original
+       content goes to the model and the result is recorded without redaction
+       fields. That is the right way round for a defence-in-depth control — the
+       sensitive-filename refusal and operator confirmation are unaffected — but
+       it does mean a bug here is a quiet loss of this control, not a loud one. */
+    let redacted: RedactionOutcome<typeof event.content> | undefined
+    try {
+      redacted = redactContent(event.content)
+    } catch {
+      redacted = undefined
+    }
+
     await log.record(makeRecord({
       phase: 'result',
       id: event.toolCallId,
       tool: event.toolName,
       result: event.isError ? 'error' : 'ok',
+      ...(redacted !== undefined && redacted.count > 0
+        ? { redactions: redacted.count, rules: redacted.rules }
+        : {}),
     }))
+
+    /* Only return a patch when something actually changed. Pi treats a returned
+       `content` as a replacement (`agent-loop.js` does `content:
+       afterResult.content ?? result.content`), and that replacement lands in
+       BOTH the model's context and the session transcript — so returning
+       untouched content on every call would rewrite every tool result in the
+       session to no purpose. */
+    if (redacted !== undefined && redacted.count > 0) {
+      return { content: redacted.value }
+    }
     return undefined
   })
 }

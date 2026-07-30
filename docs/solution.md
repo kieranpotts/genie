@@ -51,14 +51,26 @@ gets read as a claim.
   than closer to the filesystem.
 
 - **`tool_result`** (`permission-gate`). Fires after a tool executes, carrying
-  `isError`. Used solely to record what the call actually *did*, joined to the
-  attempt by Pi's `toolCallId`. Without it the trail records admissions and
-  calls them outcomes: a read of a path outside `/workspace` is admitted by the
-  gate and then refused by the MCP server, and only this hook sees the refusal.
+  `isError`. Used for two things. First, to record what the call actually *did*,
+  joined to the attempt by Pi's `toolCallId` — without it the trail records
+  admissions and calls them outcomes: a read of a path outside `/workspace` is
+  admitted by the gate and then refused by the MCP server, and only this hook
+  sees the refusal.
 
-  The handler deliberately ignores the event's `content`, which carries the
-  tool's full output. Recording it would copy every file the agent reads into
-  the audit trail.
+  Second, this is the one hook in the design that **changes what the agent
+  sees**. Secret-shaped values — PEM private key blocks, AWS access key ids,
+  GitHub/Slack/Anthropic/OpenAI key prefixes — are replaced with
+  `[redacted: <rule>]` before the output reaches the model. Pi honours returned
+  content as a replacement, so the redaction lands in both the model's context
+  and the session transcript; a redacted secret is absent from the history that
+  would be re-sent on resume. Detection anchors on literal prefixes and
+  delimiters, never on entropy, because a false positive silently corrupts what
+  the model reads.
+
+  The handler deliberately ignores the event's `content` for *logging* purposes,
+  which carries the tool's full output. Recording it would copy every file the
+  agent reads into the audit trail. When redaction fires, the record says how
+  many spans were replaced and which rules matched — never the value.
 
 - **`before_agent_start`** (`permission-gate`). Fires when the operator submits
   an instruction, before the agent loop runs. Used solely to append a turn
@@ -87,9 +99,7 @@ gets read as a claim.
 
 Pi offers further hooks this build does not handle — `after_provider_response`
 (status and headers of the provider's reply) and `context` (the message list
-before each model call) among them. `TODO.md` records the one remaining scoped
-follow-up: redaction of secret-shaped content from tool output, which
-`tool_result` would be the place for and which is not implemented.
+before each model call) among them.
 
 Note what recording the request shape does *not* do. It is written **inside the
 agent's own process**, so it is an audit trail in the same cooperative sense the
@@ -478,7 +488,8 @@ to what's described above.
 | Command execution control           | The agent cannot execute anything. `--no-builtin-tools` removes Pi's `bash`, and no extension provides a replacement, so there is no execution surface to police. This replaced an `audited-tools` extension that allowlisted commands from inside the agent's own process — a cooperative guard whose fence was self-enforced and lexical, and which interpreters on its allowlist (`node -e`, `python3 -c`) could read straight through. Removing the capability is the stronger control. See `TODO.md`, which also records the deferred option of an out-of-process exec MCP server should execution ever be needed. |
 | Permission prompts / approval gates | `permission-gate` extension requires interactive confirmation for mutating calls — writes, edits, moves, directory creation (`tool_call` events). Denies access by default. There is no execution to gate; see the row above. |
 | Sensitive-file refusal              | `permission-gate` refuses any call naming secrets or key material (`.env*`, `id_rsa`, `*.pem`, `*.key`, …) on filename patterns. Absolute — no approval path — and applied to every tool call, `mcp_*` included. |
-| Audit log of tool calls             | Append-only JSONL log, on a dedicated volume, for **every** tool call — reads included, which are never prompted for. Each call writes **two lines** joined by `id`: `phase:"call"` records what the gate decided, `phase:"result"` records what the tool actually did (`tool_result`'s `isError`). Both are needed — the gate admits calls but does not perform them, so a read the MCP server later refuses is `allowed` on the first line and `error` on the second. The attempt line carries two independent fields, `outcome` (did the gate let it run) and `confirmation` (was a human involved, and what did they say), so a policy refusal and an operator's rejection are distinguishable by field rather than by prose. Neither line ever carries tool *content*. Two further line kinds carry no `phase`: `kind:"turn_start"` marks each turn boundary (`before_agent_start`), so calls are attributable to the instruction that caused them, and `kind:"provider_request"` records the shape of each outbound model request (`before_provider_request`) — model id, message count, serialised size. Neither carries the prompt, the conversation, or any file content; both are written in-process, so they are evidence rather than a boundary. The volume must be owned by the agent's uid or logging fails silently. |
+| Secret redaction from tool output   | `permission-gate` replaces secret-shaped values in tool output with `[redacted: <rule>]` before the model sees them (`tool_result`), covering the filename rule's blind spot: a key pasted into an ordinary file. Six rules, each anchored on a literal delimiter or issuer prefix; **no entropy heuristic**, because a false positive silently corrupts what the model reads. The replacement reaches the session transcript too, so the value is absent from the history re-sent on resume. In-process, so defence in depth rather than a boundary — and text only, so a secret in an image is not covered. |
+| Audit log of tool calls             | Append-only JSONL log, on a dedicated volume, for **every** tool call — reads included, which are never prompted for. Each call writes **two lines** joined by `id`: `phase:"call"` records what the gate decided, `phase:"result"` records what the tool actually did (`tool_result`'s `isError`). Both are needed — the gate admits calls but does not perform them, so a read the MCP server later refuses is `allowed` on the first line and `error` on the second. The attempt line carries two independent fields, `outcome` (did the gate let it run) and `confirmation` (was a human involved, and what did they say), so a policy refusal and an operator's rejection are distinguishable by field rather than by prose. Neither line ever carries tool *content*. Two further line kinds carry no `phase`: `kind:"turn_start"` marks each turn boundary (`before_agent_start`), so calls are attributable to the instruction that caused them, and `kind:"provider_request"` records the shape of each outbound model request (`before_provider_request`) — model id, message count, serialised size. Neither carries the prompt, the conversation, or any file content; both are written in-process, so they are evidence rather than a boundary. When redaction fires, the `result` line carries `redactions` (a count) and `rules` (which rules matched) — never the value. The volume must be owned by the agent's uid or logging fails silently. |
 | API key isolation from agent        | Host-side LiteLLM proxy holds API keys (eg. `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`). Agent container gets a proxy endpoint + low-value rotatable proxy token.             |
 | Extension vetting / signing         | Extensions require manual review. Third-party packages MUST be pinned to exact versions/commit hashes.                                                                  |
 | Network egress control              | ENFORCED. `agent-net` is `internal: true`, so Docker installs no default route and no masquerade rule for it: external addresses are `ENETUNREACH` and DNS does not resolve. The container's only reachable peers are the MCP gateway and the host LiteLLM proxy. Because an internal network has no route to docker0, the proxy is reached at this network's own pinned gateway address (`extra_hosts`), not via Docker's `host-gateway` alias — the subnet pin in `compose.yaml` and that `extra_hosts` entry are one setting in two places. This is what rules out the gateway's `--verify-signatures`, which needs the sigstore TUF mirror; see `TODO.md`. |

@@ -849,7 +849,84 @@ claimed and what is enforced.
 
   </details>
 
-- [ ] **Redact secret-shaped content from tool output.**
+- [x] **Redact secret-shaped content from tool output.**
+  **Done.** Six rules in a new pure module (`redaction.ts`), applied in the
+  `tool_result` handler, replacing each match with `[redacted: <rule>]` before
+  the output reaches the model. All three constraints the item set were treated
+  as binding, and each shaped the result:
+
+  - **False positives.** No entropy heuristic, and this is the design decision
+    rather than a scoping compromise. Every rule anchors on a distinctive
+    literal: a PEM delimiter, or an issuer's key prefix. The reasoning that
+    settled it is that redaction is *silent* — it changes what the model reads
+    without telling the operator at the time — so a false positive is not
+    cosmetic, it is corrupted input surfacing as a confusing failure elsewhere.
+    Twelve tests assert the specific shapes an entropy test would fire on
+    (commit shas, UUIDs, `sha512-` integrity digests, bcrypt hashes, minified
+    code, base64 fixtures, PUBLIC KEY and CERTIFICATE blocks) survive untouched.
+    Only the matched span is replaced, so even a false positive costs one value
+    rather than a whole file.
+  - **Not a content log.** The `result` line gains exactly two fields, and only
+    when something fired: `redactions` (a count) and `rules` (which rules
+    matched, from a fixed code-defined vocabulary). Not the value, not its
+    length, not its position. The closed-key-set test on that line was **widened
+    deliberately** from five keys to seven rather than deleted — the invariant it
+    protects is "no content", not "no new fields".
+  - **Low-ambiguity shapes first.** The four the item named, plus Slack tokens
+    and `sk-ant-`/`sk-proj-` keys, the last because `.env` here is documented as
+    holding `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`. `openai-api-key` is the weakest
+    anchor of the set (`sk-` is three characters) and so demands 32 more; that is
+    stated in the README rather than glossed.
+
+  **The mechanism was verified before anything was designed**, because a
+  `tool_result` handler whose returned content Pi ignored would have made this a
+  silent no-op — the exact shape of the `isError` bug recorded above. The chain
+  holds: `runner.js` collects the returned `content`, `agent-session.js` passes it
+  through, and `agent-loop.js:494` does `content: afterResult.content ??
+  result.content` before `createToolResultMessage` builds the message. So the
+  replacement reaches the model **and the session transcript** — a redacted
+  secret is absent from the history that would be re-sent on resume. That was
+  confirmed by grepping the transcript, not inferred.
+
+  **Two deliberate choices worth carrying forward:**
+
+  - **A patch is returned only when something was redacted.** Returning content
+    unconditionally would rewrite every tool result in the session, in the
+    transcript as well, to no purpose.
+  - **It fails open.** A throw in the redactor leaves the original output intact
+    and records the result without redaction fields, so a bug here cannot break
+    tool execution. The cost is honest and stated: such a bug is a quiet loss of
+    this control rather than a loud one. There is also no environment variable to
+    disable redaction — a control switchable from the environment is a weaker
+    control, and the `rules` field names the culprit if one ever misfires.
+
+  **Driven for real, against the adversarial case.** A scratchpad file was given
+  a fake GitHub token and a fake AWS key id, and the model was asked to read it
+  and repeat every credential **verbatim**:
+
+  > The file contains redacted credentials which are marked as sensitive
+  > information. […] A GitHub token used for authentication by CI runner
+  > (redacted: github-token) […] These values have been intentionally hidden.
+
+  It could not produce either value. The log recorded
+  `"result":"ok","redactions":2,"rules":["aws-access-key-id","github-token"]`,
+  neither secret appears anywhere in the log, and a grep of the session
+  transcript found only the two `[redacted: …]` markers. The model also explained
+  the redaction to the user unprompted, which is the argument for naming the rule
+  in the replacement rather than truncating silently.
+
+  **The ceiling is unchanged and must not be overstated**, which is why it is
+  restated in three places: this narrows what reaches the model, but the agent
+  can still be induced to read a file and act on what it says without any
+  recognised shape appearing. Non-text content parts are untouched, so a key in a
+  screenshot is not covered. A database password or a prefix-less internal token
+  is not matched, and could not be without accepting false positives. It is
+  defence in depth, not a boundary — and nothing here makes it safe to keep
+  secrets in a project the agent can read.
+
+  <details>
+  <summary>Original analysis, which the work above follows</summary>
+
   Deferred from the hooks work above; `tool_result` is the hook for it and is
   now handled, so the wiring exists and only the policy is missing.
 
@@ -876,6 +953,8 @@ claimed and what is enforced.
   model, but the agent could still be induced to read a file and act on it
   without the content appearing in output the redactor sees. It is
   defence-in-depth, not a boundary.
+
+  </details>
 
 - [x] **Add turn markers to the call log.**
   **Done.** `permission-gate` handles `before_agent_start` and appends one line

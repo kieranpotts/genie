@@ -6,9 +6,13 @@ model is honored by the harness.
 This extension changes that. With this extension installed, Pi:
 
 - **refuses outright** any tool call naming a sensitive file — secrets and key
-  material — with no approval path at all; and
+  material — with no approval path at all;
 - requires explicit, interactive user confirmation before any mutating tool call
-  runs — writes, edits, moves, and directory creation.
+  runs — writes, edits, moves, and directory creation; and
+- **redacts secret-shaped values from tool output** before the model sees them,
+  which is the same concern approached from the other side: the first control
+  matches a file's *name*, so it cannot see a key pasted into an ordinary
+  `notes.txt`.
 
 Confirmation defaults to deny, so a timeout or a missing interactive UI blocks
 the operation.
@@ -73,10 +77,11 @@ which fires before a tool is invoked:
     `mcp_search_files` — which is to say every read of project content, the
     whole reason the agent has filesystem access at all.
 
-6.  **Log what the call did.** \
-    A second hook, `tool_result`, fires after the tool runs and appends a
-    second line carrying the real outcome. See below for why one line was not
-    enough.
+6.  **Redact secrets from the output, then log what the call did.** \
+    A second hook, `tool_result`, fires after the tool runs. It replaces any
+    secret-shaped value in the output before the model sees it (see *Redaction*
+    below), then appends a second line carrying the real outcome and what was
+    withheld. See below for why one line was not enough.
 
 Two further hooks fire outside that sequence and append their own line kinds:
 
@@ -95,6 +100,7 @@ Two further hooks fire outside that sequence and append their own line kinds:
 {"ts":"2026-06-04T12:00:05.020Z","phase":"result","id":"tc_02","tool":"mcp_write_file","result":"ok"}
 {"ts":"2026-06-04T12:00:10.000Z","phase":"call","id":"tc_03","tool":"mcp_read_file","outcome":"blocked","confirmation":"not-offered","detail":"mcp_read_file: /workspace/.env","reason":"mcp_read_file blocked: sensitive file refused: .env"}
 {"ts":"2026-06-04T12:00:30.000Z","phase":"call","id":"tc_04","tool":"mcp_write_file","outcome":"blocked","confirmation":"timeout","detail":"mcp_write_file: /workspace/y.ts","reason":"mcp_write_file blocked: confirmation timed out (default deny)"}
+{"ts":"2026-06-04T12:00:40.000Z","phase":"result","id":"tc_05","tool":"mcp_read_file","result":"ok","redactions":2,"rules":["aws-access-key-id","github-token"]}
 ```
 
 ### Two lines per call
@@ -104,7 +110,7 @@ Two further hooks fire outside that sequence and append their own line kinds:
 | `phase` | Hook | Written | Records |
 |---|---|---|---|
 | `call` | `tool_call` | before the tool runs | what the **gate** decided |
-| `result` | `tool_result` | after the tool runs | what the **tool** did (`ok` / `error`) |
+| `result` | `tool_result` | after the tool runs | what the **tool** did (`ok` / `error`), and what was redacted from its output |
 
 The second line exists because the first is not a record of what happened. The
 gate decides *admission*; it does not perform the call. A read of a path outside
@@ -127,6 +133,88 @@ to a default; see *Retention* below.
 
 A blocked call has no `result` line if the harness never runs the tool. The
 absence is not ambiguous: the `call` line already says `blocked` and why.
+
+### Redaction
+
+The sensitive-filename refusal matches a file's **name**. So `.env` and `id_rsa`
+cannot be opened — but a key pasted into `notes.txt`, a token in a config sample,
+or a credential in a log excerpt passes straight through into the model's
+context, from where it is re-sent on every subsequent request for the rest of the
+session. `tool_result` is where that is closed:
+
+```
+api key: ghp_1234…      →     api key: [redacted: github-token]
+```
+
+The replacement names the rule that fired, which is deliberate: a silently
+truncated value would have the agent theorising about a corrupt file, whereas a
+named redaction is self-explanatory. The rest of the output is untouched, so the
+file is still readable.
+
+**The rules, and the reason there are only a few.** Every rule anchors on a
+distinctive **literal** — a PEM delimiter, or an issuer's key prefix:
+
+| Rule | Matches |
+|---|---|
+| `private-key-block` | `-----BEGIN … PRIVATE KEY-----` … `-----END … PRIVATE KEY-----`, delimiter to delimiter |
+| `aws-access-key-id` | `AKIA…` / `ASIA…` plus exactly 16 upper-case alphanumerics |
+| `github-token` | `ghp_` / `gho_` / `ghu_` / `ghs_` / `ghr_` with a 36-character body, and the fine-grained `github_pat_` form |
+| `slack-token` | `xox[abprs]-` and a hyphen-delimited body |
+| `anthropic-api-key` | `sk-ant-…` |
+| `openai-api-key` | `sk-…` / `sk-proj-…`, requiring at least 32 further characters |
+
+**There is deliberately no entropy heuristic**, and that is the central design
+decision rather than an omission. High-entropy strings are also hashes, UUIDs,
+minified code, base64 test fixtures, and lockfile integrity digests. Redaction is
+*silent* — it changes what the model reads without telling the operator at the
+time — so a false positive is not a cosmetic problem: it is corrupted input
+producing a confusing failure somewhere else entirely. The test suite pins that
+down with the specific shapes that would fire on a randomness test and must not
+fire here.
+
+`openai-api-key` is the weakest anchor of the set, since `sk-` is only three
+characters, which is why it demands 32 more. Because only the matched span is
+replaced, a false positive costs one value rather than the whole output.
+
+**What the log records.** The `result` line gains two fields, and only when
+something was redacted — the *presence* of the field is the signal, so
+"nothing matched" and "the redactor did not run" cannot be confused:
+
+| Field | Says |
+|---|---|
+| `redactions` | How many spans were replaced. |
+| `rules` | Which rules fired, by name. |
+
+Nothing else, and this is the sharpest case of the no-content rule in this whole
+log: the record is specifically about a secret, so it must describe it without
+carrying it. Not the value, not its length, not its position. A record that
+reported the finding in full would be a more convenient way to leak exactly what
+the redactor exists to protect.
+
+**It changes the session transcript too, which is the point.** Pi treats returned
+content as a replacement, and that replacement lands both in the model's context
+and in the session file on the `pi-sessions` volume. So a redacted secret is not
+merely hidden from this request — it is absent from the conversation history that
+would be re-sent on resume. Verified by reading the transcript, not assumed.
+
+**Limits, stated because the rules invite more confidence than they earn:**
+
+- **Defence in depth, not a boundary.** The agent can still be induced to read a
+  file and act on what it says without any recognised shape appearing. Nothing
+  here makes it safe to keep secrets in a project the agent can read.
+- **Only text.** Non-text content parts pass through untouched — a key in a
+  screenshot is not something a regex over a string can see.
+- **Only these shapes.** A database password, an internal API token with no
+  recognisable prefix, or a passphrase in prose is not matched. A shape with no
+  literal anchor cannot be added without accepting false positives.
+- **Fails open.** If the redactor throws, the original output goes to the model
+  and the result is recorded without redaction fields. That keeps a bug here from
+  breaking tool execution, but it does mean such a bug is a quiet loss of this
+  control rather than a loud one.
+- **No off switch.** There is no environment variable to disable it, deliberately
+  — a control that can be turned off by whatever sets the environment is a weaker
+  control. If a rule misfires, the log's `rules` field names the culprit and the
+  fix is a code change.
 
 ### Turn boundaries
 
@@ -274,18 +362,24 @@ already say everything there is to say.
 - **What a turn was about.** Turn boundaries are recorded; the instruction that
   opened one is not. `turn` and `session` say *which* turn, so the trail can be
   read against a session transcript, but the prompt itself stays out.
-- **Secret-shaped content reaching the model.** The filename refusal at step 1
-  stops `.env` and `id_rsa` being *opened*, but a key pasted into an ordinary
-  `.txt` passes through. Redacting tool output would be a `tool_result`
-  responsibility; it is not implemented. Open item.
+- **Secrets in shapes no rule matches.** Redaction covers the shapes listed
+  above, so a database password, a prefix-less internal token, or a passphrase in
+  prose still reaches the model. The trail records that redaction happened, never
+  that a file was free of secrets.
 
 ### What this extension does not enforce
 
 Containment — keeping file access inside the project — is **not** enforced here.
 That is the MCP filesystem server's job, and it does it on the far side of the
 boundary, where a compromised agent process cannot reach the check. This
-extension only answers the question the MCP server has no opinion on: *is this a
-name we never touch?*
+extension only answers the questions the MCP server has no opinion on: *is this a
+name we never touch?*, and *does this output contain something that looks like a
+credential?*
+
+Both of those run inside the agent's own process, so they are cooperative
+controls — evidence and friction, not a boundary. The boundaries in this design
+are elsewhere: the MCP server's containment, the read-only rootfs, the internal
+network, and the absence of any execution tool.
 
 ## Configuration
 
