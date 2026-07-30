@@ -8,10 +8,9 @@ for *why* the boundary is shaped as it is; this document is the operator's
 entry point to the runnable pieces here.
 
 > [!IMPORTANT]
-> This directory is **not** a Pi extension and is **not** installable.
-> `./run/install` installs only the directories under `src/extensions/`.
-> Nothing under `src/infrastructure/` is ever copied into
-> `~/.pi/agent/extensions/`.
+> This directory is **not** a Pi extension. Extensions are `COPY`'d into the
+> hardened image by the Dockerfile from `src/extensions/` only. Nothing under
+> `src/infrastructure/` is ever shipped into the agent as an extension.
 
 Central to this infrastructure is a **hardened container**. The goal is
 filesystem isolation first, credential isolation second, auditability third. A

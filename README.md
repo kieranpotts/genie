@@ -1,15 +1,14 @@
-# Pi [![CI check pipeline status][ci-badge]][ci-workflow]
+# Genie [![CI check pipeline status][ci-badge]][ci-workflow]
 
 **🚧 Under construction.**
 
-**My AI agent harness, built around the Pi coding agent framework.**
+**My hardened agent harness, built around the Pi coding agent framework.**
 
 Pi is a minimal coding agent, a baseline framework for building your own
 harness, rather a finished product. Out of the box it runs with full system
-permissions and zero security controls. This project ships a suite of Pi
-extensions, plus supporting infrastructure including a hardened container
-and a gated MCP server, to compose a safe, controlled environment in which
-to run agents in Pi.
+permissions and zero security controls. Genie wraps it with a hardened
+container, a gated MCP server, and a host-side model proxy, to compose a
+safe, controlled environment in which to run agents in Pi.
 
 The objective of this project is to compose a secure coding agent framework,
 isolated from the host system, with full audit trails for every action
@@ -17,7 +16,9 @@ performed by agents, and seamlessly supporting a mix of both local
 and cloud models.
 
 Together with my [agent skills][agent-skills] and [Modelfiles](ollama-modelfiles)
-for Ollama, this is my custom AI agent harness.
+for Ollama, this is my custom AI agent harness. For eyes-on, at-keyboard
+extensions to Pi itself (no hardening, just conveniences), see my
+[`pi`][pi-repo] repository instead.
 
 > [!WARNING]
 > These tools are built for my personal use and they are volatile. They
@@ -56,15 +57,7 @@ by a human, not the case it was designed around.
 
 ## ☑️ Requirements
 
-The core requirement, of course, is the [Pi coding agent][pi], installed locally
-and in your `PATH`:
-
-```sh
-npm install -g @earendil-works/pi-coding-agent
-```
-
-To use the full hardened agent infrastructure, the following tools are required,
-too:
+The following tools are required to build and run the hardened infrastructure:
 
 - [Docker][docker] and the [Docker MCP Toolkit][docker-mcp-toolkit]
 - [LiteLLM][lite-llm], **with the proxy extra**:
@@ -77,18 +70,21 @@ too:
   installs the SDK but no `litellm` command, and `./run/startup` needs the
   proxy server on `PATH`.
 
+The [Pi coding agent][pi] itself is baked into the hardened container image at
+build time — you do not need it installed locally to use Genie.
+
 ## 🧭 Usage
 
-There are two parts to this project:
+Genie has two halves:
 
-* A suite of extensions for the Pi coding agent harness.
+* Two Pi extensions — `mcp-client` and `permission-gate` — that run inside the
+  hardened container and form the in-Pi half of the security boundary.
 
-* Configurations for other tools with which Pi interacts, including an MCP
-  server and a model proxy, creating a secure infrastructure within which AI
-  agents operate.
+* Supporting infrastructure: a hardened container, a gated MCP server, and a
+  host-side model proxy, which together compose the boundary the extensions
+  run inside.
 
-Together, both sets of components form a cohesive, robust agent harness
-architecture.
+Together, both halves form a cohesive, robust agent harness architecture.
 
 ```mermaid
 flowchart LR
@@ -116,69 +112,26 @@ flowchart LR
   class Core,MC,PG agent;
 ```
 
-### Pi extensions
-
-This repository packages the following Pi extensions. Click the links to see
-their READMEs, which provide detailed usage instructions.
+### The Pi extensions
 
 - [**`permission-gate`**](./src/extensions/permission-gate/README.md): \
   Interactive, default-deny confirmation gate on mutating tool calls, an absolute
   refusal of sensitive filenames on every call, and redaction of secret-shaped
   values from tool output before the model sees them. Writes the system's audit
-  trail. Part of the security hardening infrastructure (see below).
+  trail.
 
 - [**`mcp-client`**](./src/extensions/mcp-client/README.md): \
   MCP client giving Pi mediated filesystem access through the Docker MCP Toolkit
-  gateway. Part of the security hardening infrastructure (see below)
+  gateway.
 
-- [**`pickling-penguins`**](./src/extensions/pickling-penguins/README.md): \
-  Cosmetic-only replacement for Pi's "Working..." status line. Just for fun.
-
-An install script is provided to automate the installation of these extensions
-into Pi. First, make the script executable:
-
-```sh
-chmod +x run/install
-```
-
-Then run the script from the root of this repository:
+These extensions are not installed on the host. They are baked directly into
+the hardened container image at build time — see the `COPY` lines in
+[`src/infrastructure/pi-container/Dockerfile`](./src/infrastructure/pi-container/Dockerfile).
+If you want to develop or test them against a local, unhardened Pi install,
+copy them over manually. There is no build step.
 
 ```sh
-./run/install
-```
-
-The available options are:
-
-| Invocation              | Effect                                |
-| ----------------------- | ------------------------------------- |
-| `./run/install`         | Install all available extensions.     |
-| `./run/install <name>…` | Install one or more named extensions. |
-| `./run/install -l`      | List available extensions and exit.   |
-| `./run/install --list`  | Same as `-l`.                         |
-| `./run/install -h`      | Show usage help and exit.             |
-| `./run/install --help`  | Same as `-h`.                         |
-
-Examples:
-
-```sh
-./run/install                             # Install all extensions.
-./run/install pickling-penguins           # Install the picking penguins extension only.
-./run/install mcp-client permission-gate  # Install these two extensions only.
-./run/install --list                      # See what's available to install.
-```
-
-Extensions are installed into `~/.pi/agent/extensions/`, where Pi will
-auto-discover them next time it starts.
-
-The same script can be used to update the installed extensions to the latest
-versions in this repository. If an extension is already installed, it is first
-backed-up to `~/.pi/agent/extensions/<name>.backup.<timestamp>/`.
-
-Alternatively, you can manually install extensions simply by copying them
-over. There is no build step.
-
-```sh
-cp -R src/extensions/pickling-penguins ~/.pi/agent/extensions/pickling-penguins
+cp -R src/extensions/permission-gate ~/.pi/agent/extensions/permission-gate
 ```
 
 New and updated extensions will be loaded next time you run `pi`. If you're
@@ -188,15 +141,11 @@ already in Pi, use the `/reload` prompt to reload all extensions, skills, etc.:
 /reload
 ```
 
-> [!TIP]
-> `/reload` is a useful for hot-reloading extensions
-> during their development.
-
 ### Security hardening infrastructure
 
-Beyond the extensions above, this repository also provisions a wider agent
-harness infrastructure: a hardened container, a gated MCP filesystem server,
-and a host-side model proxy. This is the part built for
+Beyond the extensions above, this repository provisions a wider agent harness
+infrastructure: a hardened container, a gated MCP filesystem server, and a
+host-side model proxy. This is the part built for
 [away-from-keyboard use](#-intended-use-away-from-keyboard) — if you are working
 eyes-on, it buys you less than it costs you.
 
@@ -213,9 +162,9 @@ calls are attributable to the instruction that caused them, and records the
 **shape** of every model request: which model, how many messages, how many
 bytes. Never the content of any of it — that is the rule the log is built on.
 
-These components are installed and managed separately from the Pi extension.
-See the [**infrastructure runbook**](./src/infrastructure/README.md) for
-instructions.
+`./run/startup` automates bringing the boundary up. See the
+[**infrastructure runbook**](./src/infrastructure/README.md) for the full
+operator workflow, including the manual verification and teardown steps.
 
 ## 📓 Developer documentation
 
@@ -227,20 +176,12 @@ See also the [docs/](./docs/) directory for design decisions and trade-offs.
 
 Copyright © 2020-present Kieran Potts, [MIT license](./LICENSE.txt)
 
-Acknowledgements: The structure of this project was inspired by
-Owain Lewis's [`pi-extensions`][owain-pi-extensions].
-Owain's "funny status" extension was the direct inspiration for
-[`pickling-penguins`](./src/extensions/pickling-penguins/README.md),
-my first Pi extension. The [Pi example extensions][pi-example-extensions]
-are another useful reference point.
-
 [agent-skills]: https://github.com/kieranpotts/skills
-[ci-badge]: https://github.com/kieranpotts/pi/actions/workflows/check.yaml/badge.svg
-[ci-workflow]: https://github.com/kieranpotts/pi/actions/workflows/check.yaml
+[ci-badge]: https://github.com/kieranpotts/genie/actions/workflows/check.yaml/badge.svg
+[ci-workflow]: https://github.com/kieranpotts/genie/actions/workflows/check.yaml
 [docker]: https://docker.com/
 [docker-mcp-toolkit]: https://docs.docker.com/ai/mcp-catalog-and-toolkit/toolkit/
 [lite-llm]: https://www.litellm.ai/
 [ollama-modelfiles]: https://github.com/kieranpotts/modelfiles
-[owain-pi-extensions]: https://github.com/owainlewis/pi-extensions/
 [pi]: https://pi.dev/
-[pi-example-extensions]: https://github.com/earendil-works/pi/blob/main/packages/coding-agent/examples/extensions/README.md
+[pi-repo]: https://github.com/kieranpotts/pi

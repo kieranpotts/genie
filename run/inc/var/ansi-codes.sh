@@ -3,8 +3,8 @@
 #
 # ANSI escape codes for colored terminal output.
 #
-# Sourced by `run/install` and consumed by the status helpers in
-# `run/inc/fn/statuses.sh` and the banners in `run/inc/fn/banners.sh`.
+# Sourced by `run/startup` and consumed by the status helpers in
+# `run/inc/fn/statuses.sh`.
 #
 # https://en.wikipedia.org/wiki/ANSI_escape_code
 #

@@ -1,10 +1,10 @@
 {
-  "name": "kieranpotts-pi",
+  "name": "kieranpotts-genie",
   "version": "0.0.0",
   "license": "UNLICENSED",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kieranpotts/pi.git"
+    "url": "git+https://github.com/kieranpotts/genie.git"
   },
   "private": true,
   "type": "module",

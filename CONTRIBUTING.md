@@ -4,9 +4,9 @@
 > External contributions to this project are not accepted – this is a personal
 > project. These contributing guidelines are for the benefit of the author.
 
-This page covers working on the extensions themselves. To just install and use
-them, see the Requirements and Usage sections of the
-[README](./README.md) instead.
+This page covers working on the extensions and infrastructure themselves. To
+just build and run the hardened harness, see the Requirements and Usage
+sections of the [README](./README.md) instead.
 
 The [Pi extension docs](https://pi.dev/docs/latest/extensions) are the primary
 reference for writing extensions — the `ExtensionAPI`, lifecycle events, custom
@@ -37,20 +37,16 @@ src/
         └── index.ts
 ```
 
-Everything else under `src/` is **not** an extension and is not installable —
-`src/infrastructure/` holds the container, compose, proxy, and MCP wiring, and
-`./run/install` copies only from `src/extensions/`.
+Everything else under `src/` is **not** an extension — `src/infrastructure/`
+holds the container, compose, proxy, and MCP wiring.
 
-A new extension is not picked up by existing in the repo. Register it in two
-places, both of which list extensions explicitly so that nothing installs by
-accident:
-
-- `run/install` — add the name to the `available_extensions` array.
-- `run/inc/fn/extensions.sh` — add a `case` branch giving its one-line
-  description.
-
-To ship it inside the hardened container as well, add a `COPY` line to
-[`src/infrastructure/pi-container/Dockerfile`](./src/infrastructure/pi-container/Dockerfile).
+There is no installer: extensions are not copied into a host Pi install.
+A new extension is picked up only by being explicitly `COPY`'d into the
+hardened image. Add a line to
+[`src/infrastructure/pi-container/Dockerfile`](./src/infrastructure/pi-container/Dockerfile)
+to ship it. To develop or test an extension against a local, unhardened Pi
+install first, copy it manually — see [Usage](./README.md#-usage) in the
+README.
 
 ## Linting
 
@@ -76,8 +72,8 @@ so there is no test framework to install and no build step. Node 22.18 or newer
 is required.
 
 Test files live under `test/`, mirroring the `src/` layout, and are named
-`*.test.ts`. Keeping them out of `src/` means the installer never ships them
-with an extension.
+`*.test.ts`. Keeping them out of `src/` means the Dockerfile's `COPY` lines
+never ship them into the image.
 
 ```sh
 ./run/test            # Run all tests once.
@@ -120,6 +116,7 @@ pre-commit install
 
 ## Versioning
 
-The extensions are not versioned. There are no release tags, version numbers,
-or changelog — the latest commit on the default branch is the only supported
-state. Reinstall with `./run/install` to pick up changes.
+The extensions and infrastructure are not versioned. There are no release
+tags, version numbers, or changelog — the latest commit on the default branch
+is the only supported state. Rebuild the image with `./run/startup` to pick
+up changes.

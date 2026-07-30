@@ -1,25 +1,31 @@
-# Pi
+# Genie
 
-Personal and experimental extensions for the [Pi coding agent](https://pi.dev)
+My hardened agent harness, built around the [Pi coding agent](https://pi.dev)
 (`@earendil-works/pi-coding-agent`). Each extension is a TypeScript module
 that hooks into Pi's lifecycle events or registers tools, commands, or UI.
 
-Extensions live under `src/extensions/<name>/` and are installed into Pi's
-extensions directory (`~/.pi/agent/extensions/`) by `run/install`, which
-copies each extension directory verbatim. Pi runs the TypeScript directly –
-there is no build step.
+Extensions live under `src/extensions/<name>/`. There is no host installer:
+extensions are baked directly into the hardened container image at build time
+by `COPY` lines in
+[`src/infrastructure/pi-container/Dockerfile`](./src/infrastructure/pi-container/Dockerfile).
+Pi runs the TypeScript directly – there is no build step.
 
 Non-extension infrastructure for the secure local agent architecture
 (Docker images, compose files, the model proxy, MCP server wiring) lives
-under `src/infrastructure/`. This is NOT  installable and `run/install`
-MUST NOT copy it into Pi's extensions directory.
-See [docs/solution.md](./docs/solution.md) for the design, and
-[src/infrastructure/README.md](./src/infrastructure/README.md) for the runbook.
+under `src/infrastructure/`. See [docs/solution.md](./docs/solution.md) for
+the design, and [src/infrastructure/README.md](./src/infrastructure/README.md)
+for the runbook.
 
-The repository ships several extensions, including `pickling-penguins`,
-which replaces the default "Working…" status with randomly composed
-nonsense. See each extension's own README under `src/extensions/<name>/`
-for details.
+The repository ships two extensions, forming the in-Pi half of the security
+boundary:
+
+- `mcp-client`: MCP client giving Pi mediated filesystem access through the
+  Docker MCP Toolkit gateway.
+- `permission-gate`: Interactive, default-deny confirmation gate on mutating
+  tool calls, sensitive-filename refusal, secret redaction, and the audit
+  trail.
+
+See each extension's own README under `src/extensions/<name>/` for details.
 
 The capitalized words REQUIRED, MUST, MUST NOT, RECOMMENDED, SHOULD,
 SHOULD NOT, OPTIONAL, and MAY are to be interpreted as described in
@@ -41,6 +47,8 @@ SHOULD NOT, OPTIONAL, and MAY are to be interpreted as described in
 
 - Bash for the `run/` scripts, with ShellCheck for static analysis.
 
+- Docker, Docker Compose, and LiteLLM for the hardened infrastructure.
+
 - pre-commit for commit-message validation, and GitHub Actions for CI.
 
 ## Project structure
@@ -52,33 +60,31 @@ SHOULD NOT, OPTIONAL, and MAY are to be interpreted as described in
 
 - **`src/infrastructure/`**:
   Non-extension infrastructure for the secure local agent architecture
-  (Docker, compose, model proxy, MCP server wiring). Not installable –
-  see the rule below.
+  (Docker, compose, model proxy, MCP server wiring).
 
 - **`test/extensions/<name>/`**:
   Tests for the Node test runner, mirroring the `src/extensions/`
-  layout (`*.test.ts`). Kept out of `src/` so the installer never
-  ships them.
+  layout (`*.test.ts`). Kept out of `src/` so the Dockerfile's `COPY`
+  lines never ship them.
 
 - **`run/`**:
-  Dev scripts – `install`, `lint`, `fix`, `typecheck`, `test`, `check`.
+  Dev scripts – `startup`, `lint`, `fix`, `typecheck`, `test`, `check`.
 
 - **`tsconfig.json`**:
   TypeScript config for the `noEmit` type-check (NodeNext, strict,
   `.ts` import extensions allowed). Not a build config.
 
 - **`run/inc/fn/`**:
-  Shared shell helpers (status printers, banners, extension install
-  and list helpers).
+  Shared shell helpers (status printers, infrastructure startup).
 
 - **`run/inc/var/`**:
   Shared shell variables (ANSI codes).
 
 - **`docs/`**:
-  Requirements and installation docs.
+  Requirements, design decisions, and trade-offs for the hardened harness.
 
 - **`CONTRIBUTING.md`**:
-  How to develop, lint, test, and check extensions.
+  How to develop, lint, test, and check extensions and infrastructure.
 
 - **`eslint.config.js`**, **`package.json`**:
   Lint configuration and the `npm` script aliases.
@@ -88,9 +94,8 @@ SHOULD NOT, OPTIONAL, and MAY are to be interpreted as described in
 
 ## Tools
 
-- **`./run/install [name…]`** to install extensions into
-  `~/.pi/agent/extensions/` (no arguments installs all; `--list` and
-  `--help` are also available).
+- **`./run/startup`** to bring up the hardened infrastructure (proxy, image,
+  compose boundary) and enter the container.
 
 - **`./run/lint`** and **`./run/fix`** to lint and auto-fix with ESLint.
 
@@ -103,10 +108,10 @@ SHOULD NOT, OPTIONAL, and MAY are to be interpreted as described in
 - **`./run/check`** to run the linter, then the type-check, then the tests –
   the command CI runs, and the one to run before committing.
 
-- **`shellcheck run/install run/lint run/fix run/test run/check run/inc/**/*.sh`**
+- **`shellcheck run/startup run/lint run/fix run/test run/check run/inc/**/*.sh`**
   to lint the shell scripts.
 
-Each `run/` script is also exposed as an `npm run` alias
+Each `run/` script except `startup` is also exposed as an `npm run` alias
 (`lint`, `fix`, `typecheck`, `test`, `check`).
 
 ## Rules
@@ -119,21 +124,20 @@ Each `run/` script is also exposed as an `npm run` alias
   local helper modules with their explicit `.ts` extension – both Pi and Node's
   type stripping require it.
 
-- MUST register a new extension in the `available_extensions` array in
-  `run/install` and add a matching description arm to `list_available_extensions`
-  in `run/inc/fn/extensions.sh`, or the installer will not offer it.
+- MUST add a `COPY` line to
+  [`src/infrastructure/pi-container/Dockerfile`](./src/infrastructure/pi-container/Dockerfile)
+  to ship a new or updated extension inside the hardened image, or it will
+  not reach the agent.
 
 - MUST keep tests under `test/extensions/<name>/`, mirroring the `src/extensions/`
-  layout, and never inside `src/`, because `run/install` copies each extension
-  directory verbatim and would otherwise ship them.
+  layout, and never inside `src/`, so the Dockerfile's `COPY` lines never ship
+  them.
 
-- MUST keep non-extension infrastructure under `src/infrastructure/` and MUST
-  NOT add it to the `available_extensions` array in `run/install`, nor re-point
-  `src_dir` away from `src/extensions`. Infrastructure is not an installable
-  Pi extension.
+- MUST keep non-extension infrastructure under `src/infrastructure/`.
+  Infrastructure is not a Pi extension and is never `COPY`'d as one.
 
 - MUST run `./run/check` and get a clean pass before committing. CI runs the
-  same command on every push and pull request. `check` now includes `typecheck`,
+  same command on every push and pull request. `check` includes `typecheck`,
   so the build must type-check as well as lint and test.
 
 - SHOULD avoid `as never` / `as any` at the `registerTool` and event-handler

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 #
-# Utility functions to print status updates during installation.
+# Utility functions to print status updates during infrastructure startup.
 #
 
 # print_info - Print a general information message.
