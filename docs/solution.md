@@ -272,11 +272,45 @@ inside the agent, for the reason given above.
 The user experience is unchanged. Users interact with Pi in the normal way.
 Only the plumbing beneath the agent changes.
 
-An alternative to Docker would be to use Nvidia's
-[OpenShell](https://build.nvidia.com/openshell). This provides a sandboxed
-environment that keeps API credentials outside of the agent process. However,
-Docker is acceptable if you have another mechanism keeping secrets away from
-the model.
+Pi's own documentation names three containerization patterns for this layer,
+in ascending order of security, and plain Docker — the pattern above — is the
+weakest of the three. Its limitation for regulated use is that credential
+isolation is not built in: without the model proxy this stack adds separately
+(see below), API keys would have to be injected into the container the agent
+itself runs in.
+
+**Gondolin** is the middle option: a local Linux micro-VM
+extension. Pi itself keeps running on the host — its process, its config, and
+its credentials never leave — and only built-in tool *execution* is routed
+into the VM. That is a narrower boundary than this stack's: it hardens where
+a `bash` or `edit` call runs, but says nothing about where Pi's own process
+holds its keys, which is exactly the gap the model proxy below exists to
+close for the Docker pattern instead.
+
+[**OpenShell**][openshell] (NVIDIA) is the most secure of the three, and the
+closest Pi's own documentation describes to a batteries-included regulated
+setup. It provides policy-controlled sandboxing — filesystem, process,
+network, credential, and inference controls in one place — running sandboxes
+through a local gateway (Docker, Podman, or VM) or a remote Kubernetes
+gateway. Critically, it is the only Pi-native pattern that keeps raw model API
+keys **entirely** outside the sandbox: code inside calls a fixed
+`https://inference.local` address and the gateway injects credentials
+upstream, so the sandboxed process never holds a key at all. Against that,
+Docker is acceptable here only because this stack builds the same credential
+isolation itself, by another mechanism — the [host-side model proxy](#model-traffic-proxy)
+below plays OpenShell's gateway role, holding every cloud API key so the
+container never does.
+
+OpenShell requires an external gateway and is aimed primarily at enterprise or
+team deployments, not a single local developer setup — which is why this
+stack does not adopt it outright. For a local, regulated developer setup, the
+realistic path stays the one this document builds: hardened Docker, with a
+host-side model proxy so keys never enter the container, `--no-builtin-tools`,
+the audit-log and secret-sentry extensions, a `permission-gate` extension for
+eyes-on sessions, and session storage on a controlled — ideally encrypted —
+volume outside the working tree.
+
+[openshell]: https://build.nvidia.com/openshell
 
 ## Containerized MCP server
 
