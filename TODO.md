@@ -269,7 +269,7 @@ claimed and what is enforced.
   `readFileSync('/workspace/.env','utf8')` is `.env','utf8')`, which
   matches no pattern. It catches `cat .env`; it does not catch a payload.
 
-- [ ] **Use the gateway's own controls — `--tools`.** *(`--verify-signatures`
+- [x] **Use the gateway's own controls — `--tools`.** *(`--verify-signatures`
   was the other half of this item and is now **declined**; see the sub-item
   below. Only the `--tools` allowlist remains open, and it is blocked on usage
   data rather than on a decision.)*
@@ -1261,6 +1261,13 @@ claimed and what is enforced.
   established, and a DoS-class issue in a single-operator local tool is a
   different risk calculus from the confidentiality controls this project is
   built around. Worth a decision of its own.
+
+  > **Since decided** — see the item below. One clause here was wrong and is
+  > worth naming rather than quietly superseding: `npm audit fix` does **not**
+  > work against the pin. Measured, it touches `package-lock.json` only and
+  > leaves `@earendil-works/pi-coding-agent` at 0.82.0 in both places. The
+  > assumption cost nothing here, but it is why the fix waited as long as it
+  > did.
 
 - [x] **Fix stale cross-references.**
   `compose.yaml`, the Dockerfile, and `src/infrastructure/README.md` all cited
