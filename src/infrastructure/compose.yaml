@@ -127,6 +127,55 @@ services:
       - "--catalog=/etc/mcp/catalog.yaml"
       - "--servers=filesystem"
       - "--block-network"
+      # Tool-surface allowlist, enforced AT THE BOUNDARY and out of process —
+      # unlike permission-gate, which is cooperative and runs inside the agent.
+      # `--servers=filesystem` alone enables all ELEVEN tools that image exposes;
+      # this narrows that to eight.
+      #
+      # This flag can only SUBTRACT from what the enabled servers expose. There
+      # is no way to add a tool here, and nothing outside the catalog's servers
+      # can be named.
+      #
+      # THE THREE OMISSIONS ARE JUSTIFIED BY SUBSTITUTABILITY, NOT BY USE COUNTS.
+      # The call log's measured working set is still too thin to trim on (see
+      # TODO.md — four short non-interactive sessions, no writes exercised at
+      # all), so each of these is dropped because a kept tool does the same job,
+      # which is an argument that does not depend on how much data we have:
+      #
+      #   read_multiple_files  read_file, called N times. Dropping it also FIXES
+      #                        AN AUDIT GAP: permission-gate's describeCall
+      #                        truncates a joined `paths` list at 120 characters,
+      #                        so a multi-file read of deep paths records only
+      #                        the first few. Sequential single reads produce one
+      #                        complete line each. Re-enabling this tool means
+      #                        fixing that truncation first — see TODO.md.
+      #   directory_tree       list_directory, and search_files for a recursive
+      #                        look. The one tool here with unbounded output: it
+      #                        can pull an entire tree into the model's context
+      #                        in a single call, which costs context and widens
+      #                        what a compromised model can hoover up per call.
+      #   get_file_info        Metadata only (size, mtime, permissions). Nothing
+      #                        in a coding task needs it that list_directory and
+      #                        read_file do not already answer.
+      #
+      # KEPT DELIBERATELY, against TODO.md's earlier guess that it was an obvious
+      # candidate: `list_allowed_directories`. Nothing tells the agent its
+      # project root — start-pi sets no system prompt, and Pi's cwd is /home/pi,
+      # not /workspace — so this is its only in-band way to discover where the
+      # project is. It returns one path and can read no content. Dropping it
+      # risks an agent that cannot find the project, which is a confusing failure
+      # for no gain.
+      #
+      # FAILURE MODE, and why starting narrow is safe: a tool named nowhere here
+      # is simply absent from tools/list, so the model reports it has no such
+      # tool. That is loud and trivially reversible — add the name back. Verify
+      # the surface with the tool-surface check in README.md after any change.
+      #
+      # HONEST CEILING: all eleven are filesystem tools already confined to
+      # /workspace by the catalog's allowed-directory argument, so this is
+      # defence in depth and a reduction of accidental behaviour — NOT a new
+      # boundary. The containment is, and remains, the MCP server's.
+      - "--tools=read_file,list_directory,search_files,list_allowed_directories,write_file,edit_file,move_file,create_directory"
       # --block-secrets and --log-calls default to true.
     networks:
       - agent-net

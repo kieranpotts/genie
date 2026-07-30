@@ -315,7 +315,7 @@ what keeps the change trail complete.
 | Secrets are redacted from tool output | put a fake credential in a project file (eg. `aws_access_key_id = AKIAIOSFODNN7EXAMPLE`) and ask the agent to read it and repeat it verbatim | the agent reports `[redacted: aws-access-key-id]` and cannot produce the value; the `result` line carries `"redactions":1,"rules":["aws-access-key-id"]`; the value appears neither in the call log nor in the session transcript on `pi-sessions` |
 | Model requests are recorded, as shape only | ask the agent anything that makes it read a file | `"kind":"provider_request"` lines appear with `model`, `messages`, and `approx_bytes` climbing across the turn; no message text, no file content, and no system prompt anywhere in the log |
 | A downstream refusal is visible as one | ask it to read `../../etc/passwd` | the `call` line says `"outcome":"allowed"` (the gate admitted it) and the `result` line says `"result":"error"` (the MCP server refused it). This pairing is the thing the trail could not express before. |
-| Tool surface is the documented eleven | the tool-surface check below | exactly the eleven `mcp_*` tools listed in `docs/solution.md`; no `bash`, no Git, no web fetch |
+| Tool surface is the documented eight | the tool-surface check below | exactly the eight `mcp_*` tools listed in `docs/solution.md` — the gateway's `--tools` allowlist withholds three of the eleven the server exposes; no `bash`, no Git, no web fetch |
 | No network binaries | `docker compose ... exec pi sh -c 'for b in git curl wget nc ssh; do command -v $b \|\| echo "$b absent"; done'` | all five absent |
 | Gateway starts hardened | `docker compose ... up` then `docker compose ... ps` | `mcp-gateway` is healthy with `cap_drop: ALL` + read-only rootfs. If it fails to start, relax `cap_drop` to the minimum it reports needing (see the compose comment). |
 | Egress is blocked | the egress check below | the gateway and the proxy are reachable; every external address is `ENETUNREACH` and DNS does not resolve |
@@ -382,11 +382,53 @@ for (const t of tools) console.log('  mcp_' + t.name)
 EOF
 ```
 
-Expect exactly eleven, all `mcp_*`, all filesystem. Anything else — especially
-anything that executes, fetches a URL, or reaches outside `/workspace` — means
-the surface has grown and `docs/solution.md` is out of date. Re-run this after
-changing the gateway's `--servers`/`--tools` flags, the catalog, or the pinned
-`mcp/filesystem` image.
+Expect exactly these **eight**, all `mcp_*`, all filesystem:
+
+```
+read_file  list_directory  search_files  list_allowed_directories
+write_file  edit_file  move_file  create_directory
+```
+
+Eight, not eleven. The `mcp/filesystem` image exposes eleven; the gateway's
+`--tools` allowlist in `compose.yaml` enables eight, and that comment explains
+each omission. The gateway's own startup log states the same count — `filesystem:
+(8 tools)` — which is the quickest place to look.
+
+**This check is the one that proves the flag works, and that is measured rather
+than assumed:** a tool name in `--tools` that does not match anything is
+**silently ignored**. Verified directly against the pinned image, by starting a
+throwaway gateway with `--tools=read_file,definitely_not_a_tool` — it starts
+normally, logs `filesystem: (1 tools)`, and issues no warning or error of any
+kind. So a typo here does not fail loudly; it quietly narrows the agent's
+surface, and this check is the only thing that would catch it. Hence:
+
+- **Fewer than eight** means a name in `--tools` does not match what the server
+  exposes. Compare against the eleven listed in `docs/solution.md`.
+- **All eleven** means the flag is not taking effect at all: check it is on the
+  `mcp-gateway` service's `command` and that the container was recreated
+  (`docker compose ... up -d --force-recreate mcp-gateway`) rather than reused.
+- **Anything else** — especially anything that executes, fetches a URL, or
+  reaches outside `/workspace` — means the surface has grown and
+  `docs/solution.md` is out of date.
+
+Re-run this after changing the gateway's `--servers`/`--tools` flags, the
+catalog, or the pinned `mcp/filesystem` image.
+
+**A withheld tool is unreachable, not merely hidden.** Absence from `tools/list`
+would be satisfied by a tool that still worked when called directly, so that was
+checked too — the gateway rejects a `tools/call` for a name outside the allowlist:
+
+```
+directory_tree      → unknown tool "directory_tree"
+get_file_info       → unknown tool "get_file_info"
+read_multiple_files → unknown tool "read_multiple_files"
+```
+
+Verified in the same pass: `list_directory(/workspace)` still returns the project
+listing, and `read_file(/etc/passwd)` is still refused by the MCP server with
+`Access denied - path outside allowed directories` and `isError: true` — so the
+allowlist narrows the surface without disturbing the containment underneath it or
+the audit trail's outcome axis.
 
 **9. Inspect the audit trail**
 

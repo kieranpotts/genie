@@ -330,6 +330,74 @@ claimed and what is enforced.
     and re-run the `jq` line before deciding. The trap to avoid is treating a
     thin sample as a measured result, which is the same mistake as guessing,
     with better presentation.
+
+    **A FIRST CUT IS NOW SHIPPED: eight of eleven.** `compose.yaml` carries
+    `--tools` with `read_file`, `list_directory`, `search_files`,
+    `list_allowed_directories`, `write_file`, `edit_file`, `move_file`,
+    `create_directory`.
+
+    This does **not** contradict the paragraph above, because it does not use
+    the frequency data. Each omission is justified by a kept tool doing the same
+    job, which is an argument that holds whatever the sample size:
+
+    - `read_multiple_files` → `read_file`, N times. **This one also closes an
+      audit gap** (see the new item below): `describeCall` truncates a joined
+      `paths` list at 120 characters, so a multi-file read of deep paths records
+      only the first few. Sequential single reads log one complete line each.
+    - `directory_tree` → `list_directory`, plus `search_files` for a recursive
+      look. It is the only tool in the set with unbounded output: one call can
+      pull an entire tree into the model's context, which costs context and
+      widens what a compromised model can extract per call.
+    - `get_file_info` → nothing needs it that `list_directory` and `read_file`
+      do not already answer.
+
+    **`list_allowed_directories` is KEPT, reversing this item's earlier guess**
+    that it was an obvious first candidate. Nothing tells the agent its project
+    root: `start-pi` sets no system prompt and Pi's cwd is `/home/pi`, not
+    `/workspace`, so this is the agent's only in-band way to discover where the
+    project is. It returns one path and can read no content. Dropping it to save
+    nothing risks an agent that cannot find the project — a confusing failure
+    for no gain. If it is ever dropped, the root has to be stated in the system
+    prompt in the same change.
+
+    The asymmetry that makes shipping this early safe: guessing **inclusively**
+    fails loudly and reversibly (the model reports having no such tool; add the
+    name back), whereas guessing **exclusively** — trimming to the two tools the
+    thin sample happened to show — is the mistake this item has warned about
+    throughout.
+
+    **Verified against the running stack**, not just parsed by compose. Brought
+    up `mcp-gateway` + `pi` (no proxy needed for `tools/list`) and ran the
+    runbook's tool-surface check:
+
+    - The gateway's own startup log says `filesystem: (8 tools)`, and the check
+      from inside the agent container lists exactly the eight named above and
+      nothing else. So the comma-separated bare-name syntax is accepted — the
+      names are not server-qualified.
+    - **A withheld tool is unreachable, not merely hidden.** Absence from
+      `tools/list` would also be satisfied by a tool that still worked when
+      called directly, so all three were called: each returns
+      `unknown tool "directory_tree"` and so on, refused at the gateway.
+    - **Containment and the outcome axis are undisturbed.**
+      `list_directory(/workspace)` still returns the listing;
+      `read_file(/etc/passwd)` is still refused with `Access denied - path
+      outside allowed directories` and `isError: true` — which re-confirms the
+      `mcp-client` fix recorded further down, this time on the real gateway.
+    - **A mistyped tool name is silently ignored**, measured rather than
+      inferred: a throwaway gateway started with
+      `--tools=read_file,definitely_not_a_tool` comes up normally, logs
+      `filesystem: (1 tools)`, and emits no warning or error. So a typo here
+      does not fail loudly — it quietly narrows the agent's surface, and the
+      tool-surface check is the only thing that would catch it. That is now
+      stated in the runbook, along with what "fewer than eight" and "all eleven"
+      each indicate.
+
+    The stack was torn down afterwards (`compose down`, volumes untouched).
+
+    **Still open, and this is what the interactive data is for:** whether the
+    *used* set is narrower than eight. The four write tools have never been
+    exercised at all, and `search_files` has not been seen in use either — so the
+    remaining question is unchanged in kind, only smaller.
   - **`--verify-signatures`: DECLINED, not deferred.** The instruction above was
     "close to free; turn it on unless it breaks the bring-up". Measured, it is
     neither free nor compatible, and the item is closed rather than left open.
@@ -369,6 +437,41 @@ claimed and what is enforced.
     Revisit only if the topology changes — specifically if the gateway stops
     sharing a network with the agent, or if the Toolkit gains a way to pin which
     network spawned servers attach to. Neither is true today.
+
+- [ ] **`describeCall` truncates a multi-file read's path list, so the audit
+  trail loses which files were read.**
+  Found while justifying the `--tools` first cut above, not from a failure —
+  which is why it is recorded rather than quietly fixed alongside it.
+
+  `policy.ts`:
+
+  ```ts
+  if (paths.length > 0) return `${toolName}: ${truncate(paths.join(', '), 120)}`
+  ```
+
+  `mcp_read_multiple_files` takes a `paths` array. Joined `/workspace/…` paths
+  reach 120 characters after roughly two or three realistic entries, so a read of
+  ten files records the first few and an ellipsis. **The audit trail then cannot
+  say what was read**, which is precisely the question it exists to answer, and
+  the omission is invisible in the log — an ellipsis reads like formatting, not
+  like missing evidence.
+
+  This is the same class of defect as the `command` truncation recorded above,
+  which was made moot by deleting the `bash` tool rather than fixed. The parallel
+  is exact and worth noting: a display cap borrowed for an audit record.
+
+  **Currently unreachable, deliberately.** The `--tools` allowlist does not
+  enable `read_multiple_files`, so nothing can produce a `paths` argument today.
+  That is what makes this a recorded finding rather than an active bug — and it is
+  also a **precondition on re-enabling that tool**: doing so without fixing this
+  reintroduces the gap silently.
+
+  The fix is small and worth doing anyway, because dead code that is wrong is a
+  trap for whoever re-enables the tool: log every path in full, and let the
+  confirmation *prompt* be the only thing that truncates. The two consumers of
+  `describeCall` want different things — a dialog wants to fit on a screen, an
+  audit record wants to be complete — and one string currently serves both. That
+  is the actual design error; the cap is only its symptom.
 
 - [x] **Record read-only tool calls in the audit trail.**
   `docs/requirements.md` asks for "full observability and auditability of every

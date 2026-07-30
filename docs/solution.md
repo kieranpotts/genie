@@ -170,21 +170,42 @@ on the gateway) rather than from the design's intent:
 | Tool | Arguments | Kind |
 |---|---|---|
 | `mcp_read_file` | `path` | read |
-| `mcp_read_multiple_files` | `paths` | read |
 | `mcp_list_directory` | `path` | read |
-| `mcp_directory_tree` | `path` | read |
 | `mcp_search_files` | `path`, `pattern`, `excludePatterns` | read |
-| `mcp_get_file_info` | `path` | read |
 | `mcp_list_allowed_directories` | — | read |
 | `mcp_write_file` | `path`, `content` | write — **operator-confirmed** |
 | `mcp_edit_file` | `path`, `edits`, `dryRun` | write — **operator-confirmed** |
 | `mcp_move_file` | `source`, `destination` | write — **operator-confirmed** |
 | `mcp_create_directory` | `path` | write — **operator-confirmed** |
 
-Eleven tools. All filesystem. All resolve inside the MCP server's container,
+Eight tools. All filesystem. All resolve inside the MCP server's container,
 confined to `/workspace`. The four writes require interactive approval; any of
-the eleven is refused outright if it names a sensitive file; and every call,
+the eight is refused outright if it names a sensitive file; and every call,
 read or write, is logged (`permission-gate`).
+
+**Eight of the eleven the server exposes.** The `mcp/filesystem` image also
+offers `read_multiple_files`, `directory_tree`, and `get_file_info`; the
+gateway's `--tools` allowlist (`compose.yaml`) does not enable them. That flag
+is enforced at the boundary, out of the agent's process, and can only subtract
+from what the catalog's servers expose — nothing can be added through it.
+
+Each omission is justified by a **kept tool doing the same job**, rather than by
+how often the call log has seen it used: `read_file` replaces
+`read_multiple_files` and records one complete audit line per file rather than a
+truncated list; `list_directory` plus `search_files` replaces `directory_tree`,
+which is the only tool here with unbounded output and could pull a whole tree
+into the model's context in one call; and `get_file_info` returns metadata
+nothing in a coding task needs. `list_allowed_directories` is **kept**, because
+nothing else tells the agent that its project root is `/workspace`.
+
+The trimming is defence in depth, not a new boundary — all eleven are filesystem
+tools already confined to `/workspace`. Verified against the running gateway
+rather than assumed: the withheld three are not merely absent from `tools/list`
+but refused when called (`unknown tool "directory_tree"`), while
+`list_directory(/workspace)` still works and `read_file(/etc/passwd)` is still
+refused by the MCP server. `TODO.md` records what is still open here, which is
+whether the *used* set is narrower still; that needs interactive session data,
+including writes, which the current sample lacks.
 
 That is the complete surface because only two extensions ship in the image —
 `mcp-client`, which registers exactly the tools above, and `permission-gate`,
@@ -484,7 +505,7 @@ to what's described above.
 |-------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Filesystem access control           | ALL agent file access mediated by the MCP server, reached by the `mcp-client` extension. The project is mounted read-only in the agent container for the human operator to browse; the agent has no local tool that can read it (`--no-builtin-tools`, and no extension restores one), and the MCP server holds the only writable handle. |
 | Project scoping                     | Exactly ONE project per stack, at `/workspace`, set by `PROJECT_PATH`. The allowlist is therefore a single directory rather than a per-project permission model — see `docs/requirements.md` for why this is a requirement and not an unfinished feature. Two projects means two stacks. |
-| Agent tool surface                  | Exactly eleven `mcp_*` filesystem tools, enumerated in "The agent's tool surface, exhaustively" above. No `bash`, no Git, no web fetch, no execution of any kind — and no `git`/`curl`/`wget`/`nc`/`ssh` binaries in the image. Pi's seven built-ins are disabled by `--no-builtin-tools` in `start-pi`; only `mcp-client` (which registers those eleven) and `permission-gate` (which registers none) ship in the image. Re-verify with the tool-surface check in the runbook. |
+| Agent tool surface                  | Exactly eight `mcp_*` filesystem tools, enumerated in "The agent's tool surface, exhaustively" above — eight of the eleven the server exposes, narrowed by the gateway's `--tools` allowlist, which is enforced out of the agent's process and can only subtract. No `bash`, no Git, no web fetch, no execution of any kind — and no `git`/`curl`/`wget`/`nc`/`ssh` binaries in the image. Pi's seven built-ins are disabled by `--no-builtin-tools` in `start-pi`; only `mcp-client` (which registers whatever the gateway offers) and `permission-gate` (which registers none) ship in the image. Re-verify with the tool-surface check in the runbook. |
 | Command execution control           | The agent cannot execute anything. `--no-builtin-tools` removes Pi's `bash`, and no extension provides a replacement, so there is no execution surface to police. This replaced an `audited-tools` extension that allowlisted commands from inside the agent's own process — a cooperative guard whose fence was self-enforced and lexical, and which interpreters on its allowlist (`node -e`, `python3 -c`) could read straight through. Removing the capability is the stronger control. See `TODO.md`, which also records the deferred option of an out-of-process exec MCP server should execution ever be needed. |
 | Permission prompts / approval gates | `permission-gate` extension requires interactive confirmation for mutating calls — writes, edits, moves, directory creation (`tool_call` events). Denies access by default. There is no execution to gate; see the row above. |
 | Sensitive-file refusal              | `permission-gate` refuses any call naming secrets or key material (`.env*`, `id_rsa`, `*.pem`, `*.key`, …) on filename patterns. Absolute — no approval path — and applied to every tool call, `mcp_*` included. |
