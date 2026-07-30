@@ -168,6 +168,9 @@ export interface TurnRecord {
  * has read. `provider-request.ts` extracts named scalars from it and this record
  * carries only those. Every field is optional because the payload's shape
  * belongs to the provider; an absent field means the request did not carry it.
+ * `hash` is a SHA-256 digest of the serialised payload — a fingerprint for
+ * tying a logged request back to a specific body, never a means of recovering
+ * the body from the log.
  *
  * Like `TurnRecord`, it carries no `phase` — see there for why.
  */
@@ -201,6 +204,7 @@ export function formatRecord (record: LogRecord): string {
           ...(record.model !== undefined ? { model: record.model } : {}),
           ...(record.messages !== undefined ? { messages: record.messages } : {}),
           ...(record.approx_bytes !== undefined ? { approx_bytes: record.approx_bytes } : {}),
+          ...(record.hash !== undefined ? { hash: record.hash } : {}),
         }
     : record.phase === 'call'
       ? {

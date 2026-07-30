@@ -9,7 +9,14 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { describeProviderRequest } from '../../../src/extensions/audit-log/provider-request.ts'
+
+/** The digest `describeProviderRequest` should produce for a given payload,
+ * computed independently so the tests do not just re-implement the module. */
+function sha256 (payload: unknown): string {
+  return createHash('sha256').update(JSON.stringify(payload), 'utf8').digest('hex')
+}
 
 /** An OpenAI-completions body, which is the shape this stack's LiteLLM route
  * sends. The message bodies are the thing that must not survive extraction. */
@@ -25,11 +32,20 @@ const openAiPayload = {
 }
 
 describe('describeProviderRequest', () => {
-  it('takes the model, the message count, and the size', () => {
+  it('takes the model, the message count, the size, and a hash', () => {
     const shape = describeProviderRequest(openAiPayload)
     assert.equal(shape.model, 'computer-programmer')
     assert.equal(shape.messages, 3)
     assert.equal(shape.approx_bytes, Buffer.byteLength(JSON.stringify(openAiPayload), 'utf8'))
+    assert.equal(shape.hash, sha256(openAiPayload))
+  })
+
+  /* The hash is a fingerprint of the exact bytes sent, so it must change
+     whenever the payload does — that is the whole point of logging it. */
+  it('changes the hash when the payload changes, even trivially', () => {
+    const a = describeProviderRequest(openAiPayload)
+    const b = describeProviderRequest({ ...openAiPayload, stream: false })
+    assert.notEqual(a.hash, b.hash)
   })
 
   /* The point of the module. A reviewer must be able to see that a request went
@@ -45,13 +61,13 @@ describe('describeProviderRequest', () => {
 
   /* The key set is closed, so a payload carrying extra fields cannot widen the
      record. This is the guard against a future edit that spreads the payload. */
-  it('yields only the three known keys, whatever else the payload holds', () => {
+  it('yields only the four known keys, whatever else the payload holds', () => {
     const shape = describeProviderRequest({
       ...openAiPayload,
       temperature: 0.2,
       metadata: { user: 'pi', notes: 'SHOULD-NOT-APPEAR' },
     })
-    assert.deepEqual(Object.keys(shape).sort(), ['approx_bytes', 'messages', 'model'])
+    assert.deepEqual(Object.keys(shape).sort(), ['approx_bytes', 'hash', 'messages', 'model'])
   })
 
   it('counts Google\'s `contents` as messages too', () => {
@@ -66,6 +82,7 @@ describe('describeProviderRequest', () => {
     assert.equal('model' in shape, false)
     assert.equal('messages' in shape, false)
     assert.equal(shape.approx_bytes, Buffer.byteLength('{"stream":true}', 'utf8'))
+    assert.equal(shape.hash, sha256({ stream: true }))
   })
 
   it('reports an empty message list as 0, which is a fact rather than an absence', () => {
@@ -84,12 +101,13 @@ describe('describeProviderRequest', () => {
     assert.deepEqual(describeProviderRequest('a string'), {})
   })
 
-  it('omits the size, rather than throwing, when the payload cannot be serialised', () => {
+  it('omits the size and the hash, rather than throwing, when the payload cannot be serialised', () => {
     const circular: Record<string, unknown> = { model: 'm', messages: [{}] }
     circular.self = circular
     const shape = describeProviderRequest(circular)
     assert.equal(shape.model, 'm')
     assert.equal(shape.messages, 1)
     assert.equal('approx_bytes' in shape, false)
+    assert.equal('hash' in shape, false)
   })
 })

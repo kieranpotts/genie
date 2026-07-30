@@ -14,6 +14,14 @@
  * would look plausible while carrying the whole context. The extension's test
  * suite asserts the resulting key set is closed for the same reason.
  *
+ * `hash` is the one field here that lets a reviewer tie a logged request back
+ * to a specific payload without the payload itself ever touching the trail:
+ * a SHA-256 digest of the serialised body, taken over the same bytes
+ * `approx_bytes` measures. It is a fingerprint, not a decode path — nothing in
+ * this file, or anywhere the log is read, can turn a hash back into the
+ * conversation it was taken from. Two requests with the same hash carried the
+ * same bytes; that is the entire claim it makes.
+ *
  * The payload's shape is the PROVIDER's, not Pi's — it is whatever the API
  * client is about to send, so the OpenAI-completions body for this stack's
  * LiteLLM route (`{ model, messages, tools, stream, … }`), and something else
@@ -25,6 +33,8 @@
  * because the verbatim-copy installer requires each extension directory to be
  * self-contained (no cross-directory imports survive installation).
  */
+
+import { createHash } from 'node:crypto'
 
 /** The shape of one outbound model request. Every field is optional: an absent
  * field means the payload did not carry it, never that its value was zero. */
@@ -39,6 +49,10 @@ export interface ProviderRequestShape {
    * and any provider-side re-encoding are all outside it. It exists to make
    * context growth visible WITHOUT recording the context. */
   approx_bytes?: number
+  /** SHA-256 digest, hex-encoded, of the same serialised body `approx_bytes`
+   * measures. A fingerprint for tying a logged request to a specific payload
+   * after the fact — never a means of recovering the payload from the log. */
+  hash?: string
 }
 
 /**
@@ -66,24 +80,26 @@ export function describeProviderRequest (payload: unknown): ProviderRequestShape
     shape.messages = messages.length
   }
 
-  const bytes = serialisedBytes(payload)
-  if (bytes !== undefined) {
-    shape.approx_bytes = bytes
+  const serialised = serialise(payload)
+  if (serialised !== undefined) {
+    shape.approx_bytes = Buffer.byteLength(serialised, 'utf8')
+    shape.hash = createHash('sha256').update(serialised, 'utf8').digest('hex')
   }
 
   return shape
 }
 
 /**
- * Byte length of the serialised payload, or `undefined` if it cannot be
- * serialised (a circular reference, a `BigInt`, a throwing getter).
+ * The payload serialised to JSON, or `undefined` if it cannot be (a circular
+ * reference, a `BigInt`, a throwing getter).
  *
- * The string exists only long enough to be measured. It is never returned, never
- * logged, and nothing else in this module sees it.
+ * The string exists only long enough for `approx_bytes` and `hash` to be
+ * derived from it. It is never returned, never logged, and nothing else in
+ * this module sees it.
  */
-function serialisedBytes (payload: unknown): number | undefined {
+function serialise (payload: unknown): string | undefined {
   try {
-    return Buffer.byteLength(JSON.stringify(payload) ?? '', 'utf8')
+    return JSON.stringify(payload) ?? undefined
   } catch {
     return undefined
   }

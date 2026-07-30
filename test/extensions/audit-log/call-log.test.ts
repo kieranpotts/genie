@@ -102,24 +102,25 @@ describe('formatRecord — the provider-request line', () => {
       model: 'computer-programmer',
       messages: 34,
       approx_bytes: 18422,
+      hash: 'deadbeef',
     })
     assert.equal(
       line,
       '{"ts":"T","kind":"provider_request","model":"computer-programmer",' +
-      '"messages":34,"approx_bytes":18422}\n'
+      '"messages":34,"approx_bytes":18422,"hash":"deadbeef"}\n'
     )
   })
 
   /* The line this rule matters most on: the event behind it carries the whole
      conversation. Asserting the key set is closed is what stops a future edit
      spreading the payload into the record. */
-  it('carries no field beyond ts, kind, model, messages and approx_bytes', () => {
+  it('carries no field beyond ts, kind, model, messages, approx_bytes and hash', () => {
     const line = formatRecord({
-      ts: 'T', kind: 'provider_request', model: 'm', messages: 1, approx_bytes: 2,
+      ts: 'T', kind: 'provider_request', model: 'm', messages: 1, approx_bytes: 2, hash: 'deadbeef',
     })
     assert.deepEqual(
       Object.keys(JSON.parse(line) as Record<string, unknown>),
-      ['ts', 'kind', 'model', 'messages', 'approx_bytes']
+      ['ts', 'kind', 'model', 'messages', 'approx_bytes', 'hash']
     )
   })
 

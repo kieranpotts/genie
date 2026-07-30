@@ -251,6 +251,7 @@ describe('audit-log model-request logging', () => {
       assert.equal(lines[0]!.model, 'computer-programmer')
       assert.equal(lines[0]!.messages, 2)
       assert.ok(Number(lines[0]!.approx_bytes) > 0)
+      assert.equal(typeof lines[0]!.hash, 'string')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -266,7 +267,7 @@ describe('audit-log model-request logging', () => {
       assert.equal(body.includes('CONVERSATION-CONTENT'), false)
       assert.deepEqual(
         Object.keys(JSON.parse(body.trimEnd()) as Record<string, unknown>),
-        ['ts', 'kind', 'model', 'messages', 'approx_bytes']
+        ['ts', 'kind', 'model', 'messages', 'approx_bytes', 'hash']
       )
     } finally {
       await rm(dir, { recursive: true, force: true })

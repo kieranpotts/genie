@@ -158,7 +158,7 @@ the process, carrying whatever the agent has read, and the trail used to say
 nothing about it at all. `before_provider_request` closes that:
 
 ```json
-{"ts":"…","kind":"provider_request","model":"computer-programmer","messages":34,"approx_bytes":18422}
+{"ts":"…","kind":"provider_request","model":"computer-programmer","messages":34,"approx_bytes":18422,"hash":"a94a8fe5ccb19ba61c4c0873d391e987982fbbd3"}
 ```
 
 | Field | Says |
@@ -166,6 +166,7 @@ nothing about it at all. `before_provider_request` closes that:
 | `model` | The model id **as it appears in the outbound body** — what was asked for, not what Pi has selected in its own state. |
 | `messages` | How many messages the request carries. |
 | `approx_bytes` | Size of the serialised body. |
+| `hash` | SHA-256 digest, hex-encoded, of the same serialised body `approx_bytes` measures. |
 
 Every field is omitted when the payload does not carry it, because a `0` would
 be a claim about the request rather than an absence of one. The payload's shape
@@ -178,6 +179,13 @@ provider-side re-encoding are outside it. It exists so that context growth is
 visible *without* recording the context. Watching it climb across a turn is the
 cheapest signal there is that the agent is accumulating file content it will
 re-send on every subsequent call.
+
+**`hash` is a fingerprint, not a decode path.** It lets a reviewer confirm that
+two logged requests carried identical bytes, or tie a request in this log back
+to a copy captured elsewhere (a provider-side request log, for instance),
+without the payload itself — system prompt, messages, file contents — ever
+touching this file. A SHA-256 digest cannot be inverted back into the
+conversation it was taken from; it only ever answers "was this the same body."
 
 **Shape, never content — and this is the line where that rule earns its keep.**
 The event hands the handler `payload: unknown`, and that payload is the whole
