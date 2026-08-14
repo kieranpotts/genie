@@ -209,7 +209,23 @@ Each `run/` script except `install`, `startup`, and `log` is also exposed as an
 - SHOULD write documentation prose as one line per paragraph, with no hard
   wrapping, and let the editor soft-wrap.
 
-## Skills
+## References
 
-Skills that are specific to this project are installed in `./agents/skills/`.
-None are defined yet.
+The following technical standards (TS) govern this project. Fetch and ingest
+the relevant standards as-and-when required for the task at hand.
+
+- [**TS-32: Bash**](https://kieranpotts.com/standards/032) \
+  Use when authoring or modifying scripts that target Bash specifically, and
+  which use Bash extensions ("Bashisms").
+
+- [**TS-36: ECMAScript (JavaScript/TypeScript)**](https://kieranpotts.com/standards/036) \
+  Use when writing or reviewing JavaScript or TypeScript source code. Covers
+  syntax, modules, async programming, functional patterns, and testing.
+
+- [**TS-58: Docker**](https://kieranpotts.com/standards/058) \
+  Use when designing Dockerfiles, building Docker images, or running Docker
+  containers.
+
+- [**TS-60: GitHub Actions**](https://kieranpotts.com/standards/060) \
+  Use when designing, authoring, reviewing, or securing GitHub Actions workflows
+  or custom actions.
