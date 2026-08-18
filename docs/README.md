@@ -7,3 +7,4 @@ and its supporting infrastructure.
 - [**Requirements**](./requirements.md)
 - [**The solution**](./solution.md)
 - [**Alternatives**](./alternatives.md)
+- [**🛠️ Development tools and methods**](./development/)
