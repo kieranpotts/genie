@@ -1,6 +1,6 @@
 # Genie [![CI check pipeline status][ci-badge]][ci-workflow]
 
-**🚧 Under construction.**
+**🚧 UNDER CONSTRUCTION 🚧**
 
 **My hardened agent harness, built around the Pi coding agent framework.**
 
