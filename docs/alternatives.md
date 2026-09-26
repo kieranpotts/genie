@@ -2,12 +2,7 @@
 
 I considered three other isolation models.
 
-- **Pi running as a process inside each project's own devcontainer** with a
-  mounted workspace volume scoped to the project. This approach was rejected
-  as it still allows unmediated read/write to the project workspace, with no
-  policy enforcement gate. This is perfectly adequate for eyes-on AI-assisted
-  development within regular code editor UIs, but it is insufficient for
-  away-from-keyboard agentic workflows.
+- **Pi running as a process inside each project's own devcontainer** with a mounted workspace volume scoped to the project. This approach was rejected as it still allows unmediated read/write to the project workspace, with no policy enforcement gate. This is perfectly adequate for eyes-on AI-assisted development within regular code editor UIs, but it is insufficient for away-from-keyboard agentic workflows.
 
   ```mermaid
   flowchart LR
@@ -22,11 +17,7 @@ I considered three other isolation models.
     class ws danger;
   ```
 
-- **Pi running in its own container sharing named volumes with devcontainers.**
-  This approach was rejected because it still gives direct access to parts of
-  the host filesystem. The only gate is the volumes that happen to be mounted
-  within the network. Still no fine-grained control over which filesystem
-  operations are allowed.
+- **Pi running in its own container sharing named volumes with devcontainers.** This approach was rejected because it still gives direct access to parts of the host filesystem. The only gate is the volumes that happen to be mounted within the network. Still no fine-grained control over which filesystem operations are allowed.
 
   ```mermaid
   flowchart LR
@@ -47,11 +38,7 @@ I considered three other isolation models.
     class vola,volb danger;
   ```
 
-- **Pi running in its own container** with no mounts, instead
-  **executing commands inside devcontainers via `docker.sock` or SSH**.
-  This approach was also rejected, as it requires granting broad, dangerous
-  host privileges, and mediation is only shell-level and not structured or
-  auditable.
+- **Pi running in its own container** with no mounts, instead **executing commands inside devcontainers via `docker.sock` or SSH**. This approach was also rejected, as it requires granting broad, dangerous host privileges, and mediation is only shell-level and not structured or auditable.
 
   ```mermaid
   flowchart LR

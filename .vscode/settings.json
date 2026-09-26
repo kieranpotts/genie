@@ -38,8 +38,7 @@
   ],
 
   "[markdown]": {
-    /* Wrap documentation files at the viewport width. Hard-wrapping
-    should be applied at 80 characters, except for tables and long URLs. */
+    /* Wrap documentation files at the viewport width. */
     "editor.wordWrap": "on",
 
     /* Enable auto-formatting for Markdown files. */

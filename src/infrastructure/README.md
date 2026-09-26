@@ -1,26 +1,13 @@
 # Security hardening infrastructure
 
-The Pi extensions are designed to be used in the context of a wider agent
-harness infrastructure, provisioned through the configuration in this
-directory. It is designed in
-[../../docs/solution.md](../../docs/solution.md), which is the source of truth
-for *why* the boundary is shaped as it is; this document is the operator's
-entry point to the runnable pieces here.
+The Pi extensions are designed to be used in the context of a wider agent harness infrastructure, provisioned through the configuration in this directory. It is designed in [../../docs/solution.md](../../docs/solution.md), which is the source of truth for *why* the boundary is shaped as it is; this document is the operator's entry point to the runnable pieces here.
 
 > [!IMPORTANT]
-> This directory is **not** a Pi extension. Extensions are `COPY`'d into the
-> hardened image by the Dockerfile from `src/extensions/` only. Nothing under
-> `src/infrastructure/` is ever shipped into the agent as an extension.
+> This directory is **not** a Pi extension. Extensions are `COPY`'d into the hardened image by the Dockerfile from `src/extensions/` only. Nothing under `src/infrastructure/` is ever shipped into the agent as an extension.
 
-Central to this infrastructure is a **hardened container**. The goal is
-filesystem isolation first, credential isolation second, auditability third. A
-fully compromised Pi process should reach no project files outside its scope,
-no host files, no cloud credentials, and no host Docker control — and every
-filesystem action it takes should be logged.
+Central to this infrastructure is a **hardened container**. The goal is filesystem isolation first, credential isolation second, auditability third. A fully compromised Pi process should reach no project files outside its scope, no host files, no cloud credentials, and no host Docker control — and every filesystem action it takes should be logged.
 
-The architecture has two halves. This directory is the host-and-container
-half; the in-Pi controls are the `mcp-client`, `secret-sentry`, and
-`audit-log` extensions under `src/extensions/`.
+The architecture has two halves. This directory is the host-and-container half; the in-Pi controls are the `mcp-client`, `secret-sentry`, and `audit-log` extensions under `src/extensions/`.
 
 ## Components
 
@@ -35,52 +22,22 @@ half; the in-Pi controls are the `mcp-client`, `secret-sentry`, and
 
 ## Trust boundaries
 
-- **Host:** Ollama (local inference) and the LiteLLM proxy (holds the keys).
-  The proxy must bind to an address reachable from `agent-net` — which since
-  that network became `internal: true` means **its gateway, `172.31.60.1`**, and
-  no longer docker0's `172.17.0.1`. A proxy left on `127.0.0.1` was never
-  reachable and still is not.
+- **Host:** Ollama (local inference) and the LiteLLM proxy (holds the keys). The proxy must bind to an address reachable from `agent-net` — which since that network became `internal: true` means **its gateway, `172.31.60.1`**, and no longer docker0's `172.17.0.1`. A proxy left on `127.0.0.1` was never reachable and still is not.
 
   > [!IMPORTANT]
-  > If the agent cannot reach the model after an upgrade, this is the first
-  > thing to check. The symptom is a connection failure to `host-gateway:4000`
-  > from inside the pi container. `ECONNREFUSED` means the route is fine and
-  > nothing is listening on that address (bind the proxy wider);
-  > `ENETUNREACH` means the `extra_hosts` entry in `compose.yaml` has drifted
-  > from the pinned `gateway:` on `agent-net`.
+  > If the agent cannot reach the model after an upgrade, this is the first thing to check. The symptom is a connection failure to `host-gateway:4000` from inside the pi container. `ECONNREFUSED` means the route is fine and nothing is listening on that address (bind the proxy wider); `ENETUNREACH` means the `extra_hosts` entry in `compose.yaml` has drifted from the pinned `gateway:` on `agent-net`.
 - **`agent-net`:** the pi-container (no keys, no FS, no socket) and the **mcp-gateway**, which is the agent's only MCP endpoint and which spawns the filesystem MCP server (the sole filesystem gatekeeper) through the Docker socket. The agent reaches files only through MCP tool calls and reaches models only through the proxy endpoint. Note that compose starts two containers here, not three: the MCP server is the gateway's child, which is why the socket grant below exists.
 
-  The network is **`internal: true`**: no default route, no outbound NAT, so
-  nothing on it can reach the internet. This also means the **gateway** has no
-  egress, which is why `--verify-signatures` is not enabled — it needs the
-  sigstore TUF mirror. Image pulls are unaffected: the gateway asks the *host
-  daemon* to pull over the Docker socket, and the daemon has its own network.
+  The network is **`internal: true`**: no default route, no outbound NAT, so nothing on it can reach the internet. This also means the **gateway** has no egress, which is why `--verify-signatures` is not enabled — it needs the sigstore TUF mirror. Image pulls are unaffected: the gateway asks the *host daemon* to pull over the Docker socket, and the daemon has its own network.
 
-See [../../docs/solution.md](../../docs/solution.md) for the full boundary
-diagrams.
+See [../../docs/solution.md](../../docs/solution.md) for the full boundary diagrams.
 
 ## Operator runbook
 
-End-to-end procedure to bring the stack up against a real project and verify
-the security boundary. All three in-Pi extensions (`mcp-client`,
-`secret-sentry`, `audit-log`) are baked into the hardened image, so once it is
-built they are present in the agent.
+End-to-end procedure to bring the stack up against a real project and verify the security boundary. All three in-Pi extensions (`mcp-client`, `secret-sentry`, `audit-log`) are baked into the hardened image, so once it is built they are present in the agent.
 
 > [!TIP]
-> **`genie` automates steps 3 to 6.** Once installed (`./run/install`), a single
-> `genie --up` builds the image, brings up the boundary, and starts the proxy in
-> the right order; `genie --tui` or `genie -p "..."` then starts an agent. This
-> runbook remains the source of truth for **what** those steps do and **why the
-> order matters**, and steps 1, 2, 8, and 9 are still yours.
->
-> Two differences from what this document used to describe are worth knowing:
-> `genie` reads its config from `~/.config/genie/env` rather than
-> `src/infrastructure/.env` (a checkout's `.env` is still used as a fallback, and
-> is adopted on a first install), and it takes the project from `--project`
-> rather than from `PROJECT_PATH`, defaulting to the working directory.
->
-> The stack it brings up is **persistent** — nothing is torn down until
-> `genie --down`. See the note under step 5.
+> **`genie` automates steps 3 to 6.** Once installed (`./run/install`), a single `genie --up` builds the image, brings up the boundary, and starts the proxy in the right order; `genie --tui` or `genie -p "..."` then starts an agent. This runbook remains the source of truth for **what** those steps do and **why the order matters**, and steps 1, 2, 8, and 9 are still yours.  Two differences from what this document used to describe are worth knowing: `genie` reads its config from `~/.config/genie/env` rather than `src/infrastructure/.env` (a checkout's `.env` is still used as a fallback, and is adopted on a first install), and it takes the project from `--project` rather than from `PROJECT_PATH`, defaulting to the working directory.  The stack it brings up is **persistent** — nothing is torn down until `genie --down`. See the note under step 5.
 
 **1. Configure the host**
 
@@ -93,67 +50,34 @@ cp src/infrastructure/.env.example ~/.config/genie/env   # or src/infrastructure
 #                             defaults to the working directory
 ```
 
-`./run/install` creates that file from the example on a first install, so this
-step is usually "fill in the file it made" rather than "copy it yourself".
+`./run/install` creates that file from the example on a first install, so this step is usually "fill in the file it made" rather than "copy it yourself".
 
 > [!NOTE]
-> There is no `MCP_GATEWAY_AUTH_TOKEN`. The Docker MCP gateway enforces bearer
-> auth only when bound to localhost outside a container; in the compose stack it
-> logs `Authentication disabled (running in container)` and ignores any token
-> set. Reachability of port 8811 is scoped by the private `agent-net` bridge
-> instead — it is not published to the host, and the pi container is its only
-> other member. If you have the variable in an existing `.env`, delete it.
+> There is no `MCP_GATEWAY_AUTH_TOKEN`. The Docker MCP gateway enforces bearer auth only when bound to localhost outside a container; in the compose stack it logs `Authentication disabled (running in container)` and ignores any token set. Reachability of port 8811 is scoped by the private `agent-net` bridge instead — it is not published to the host, and the pi container is its only other member. If you have the variable in an existing `.env`, delete it.
 
-`OLLAMA_HOST` is the address **the proxy** uses to reach Ollama, and the proxy
-runs on the host — so it should point at your existing Ollama daemon on
-loopback:
+`OLLAMA_HOST` is the address **the proxy** uses to reach Ollama, and the proxy runs on the host — so it should point at your existing Ollama daemon on loopback:
 
 ```sh
 OLLAMA_HOST=http://127.0.0.1:11434
 ```
 
-Nothing in a container ever talks to Ollama directly. The agent reaches models
-only through LiteLLM, and reaches LiteLLM via `LITELLM_HOST` — which is the
-bridge gateway. Only that one needs to be.
+Nothing in a container ever talks to Ollama directly. The agent reaches models only through LiteLLM, and reaches LiteLLM via `LITELLM_HOST` — which is the bridge gateway. Only that one needs to be.
 
-`LITELLM_HOST` is the address the proxy **binds** to, and it must be
-`agent-net`'s gateway:
+`LITELLM_HOST` is the address the proxy **binds** to, and it must be `agent-net`'s gateway:
 
 ```sh
 LITELLM_HOST=172.31.60.1
 ```
 
 > [!WARNING]
-> This changed when `agent-net` became `internal: true`. It was previously
-> docker0's `172.17.0.1`, which an internal network has no route to — so an
-> older `.env` carrying that value produces an agent that starts cleanly and
-> cannot reach a model. Keep it equal to the `gateway:` pinned on `agent-net` in
-> `compose.yaml`, and to the `extra_hosts` entry on the `pi` service; the three
-> are one address written in three places.
->
-> Binding wider (`0.0.0.0`) also works and removes the coupling, but puts a
-> proxy holding every cloud API key on every host interface, including your LAN.
-> Don't.
+> This changed when `agent-net` became `internal: true`. It was previously docker0's `172.17.0.1`, which an internal network has no route to — so an older `.env` carrying that value produces an agent that starts cleanly and cannot reach a model. Keep it equal to the `gateway:` pinned on `agent-net` in `compose.yaml`, and to the `extra_hosts` entry on the `pi` service; the three are one address written in three places.  Binding wider (`0.0.0.0`) also works and removes the coupling, but puts a proxy holding every cloud API key on every host interface, including your LAN. Don't.
 
 > [!WARNING]
-> Do not start a second `ollama serve` bound to the bridge gateway to satisfy
-> this. A second daemon runs under a different home directory, so it has its own
-> (empty) model store and its own freshly generated `~/.ollama/id_ed25519` — an
-> identity not associated with your ollama.com account. Requests to it fail with
-> `{"error":"Unauthorized"}` for any `:cloud` model, which surfaces in the agent
-> as a LiteLLM `APIConnectionError - OllamaException`. Check with:
->
-> ```sh
-> curl -s "$OLLAMA_HOST/api/tags"   # must list your models, not {"models":[]}
-> ```
+> Do not start a second `ollama serve` bound to the bridge gateway to satisfy this. A second daemon runs under a different home directory, so it has its own (empty) model store and its own freshly generated `~/.ollama/id_ed25519` — an identity not associated with your ollama.com account. Requests to it fail with `{"error":"Unauthorized"}` for any `:cloud` model, which surfaces in the agent as a LiteLLM `APIConnectionError - OllamaException`. Check with:  ```sh curl -s "$OLLAMA_HOST/api/tags"   # must list your models, not {"models":[]} ```
 
 **2. Check the model routes' prerequisites**
 
-The proxy is started in step 5, *after* the boundary — see the note there for
-why. What it will serve is one route per role — `computer-programmer`,
-`technical-lead`, `technical-writer`, `security-analyst` — each backed by a
-capability-tuned Ollama model from the [modelfiles][modelfiles] project. The
-agent never holds a provider credential of any kind.
+The proxy is started in step 5, *after* the boundary — see the note there for why. What it will serve is one route per role — `computer-programmer`, `technical-lead`, `technical-writer`, `security-analyst` — each backed by a capability-tuned Ollama model from the [modelfiles][modelfiles] project. The agent never holds a provider credential of any kind.
 
 Those Ollama models must exist before the routes resolve:
 
@@ -162,9 +86,7 @@ ollama list   # expects computer-programming, technical-reasoning,
               #         prose-writing, security-analysis
 ```
 
-If any are missing, build and create them from the modelfiles project. Whether
-they are cloud-backed or local is that project's `profile` decision, and is
-deliberately out of scope here:
+If any are missing, build and create them from the modelfiles project. Whether they are cloud-backed or local is that project's `profile` decision, and is deliberately out of scope here:
 
 ```sh
 ./run/build                # cloud-backed models
@@ -180,8 +102,7 @@ ollama create <capability> -f ./dist/<profile>/<capability>/Modelfile
 docker build -f src/infrastructure/pi-container/Dockerfile -t pi-agent:hardened .
 ```
 
-No keys, no socket, no project source in the image. The three security
-extensions are copied into `~/.pi/agent/extensions/` inside it.
+No keys, no socket, no project source in the image. The three security extensions are copied into `~/.pi/agent/extensions/` inside it.
 
 **4. Bring up the boundary**
 
@@ -189,9 +110,7 @@ extensions are copied into `~/.pi/agent/extensions/` inside it.
 docker compose -f src/infrastructure/compose.yaml --env-file src/infrastructure/.env up -d
 ```
 
-This starts `agent-net`, the project volume (bound to `PROJECT_PATH`), the
-`mcp-gateway` (which spawns and fronts the `mcp/filesystem` server over SSE),
-and the hardened `pi` container.
+This starts `agent-net`, the project volume (bound to `PROJECT_PATH`), the `mcp-gateway` (which spawns and fronts the `mcp/filesystem` server over SSE), and the hardened `pi` container.
 
 **5. Start the model proxy on the host**
 
@@ -202,34 +121,14 @@ litellm --config src/infrastructure/proxy/litellm.config.yaml \
 ```
 
 > [!IMPORTANT]
-> **This comes after the boundary, not before it.** `LITELLM_HOST` is
-> `agent-net`'s gateway address, and that interface does not exist on the host
-> until compose creates the network in step 3. Run this first and it fails with
-> `Cannot assign requested address`.
->
-> Nothing in step 3 needs a model: the `pi` container's PID 1 is `sleep
-> infinity`, so no agent exists until step 5. `genie --up` performs these in the
-> same order, and `lib/fn/boundary.sh` carries the same warning where the order
-> is set.
+> **This comes after the boundary, not before it.** `LITELLM_HOST` is `agent-net`'s gateway address, and that interface does not exist on the host until compose creates the network in step 3. Run this first and it fails with `Cannot assign requested address`.  Nothing in step 3 needs a model: the `pi` container's PID 1 is `sleep infinity`, so no agent exists until step 5. `genie --up` performs these in the same order, and `lib/fn/boundary.sh` carries the same warning where the order is set.
 
 > [!NOTE]
-> **Run by hand, this proxy is a foreground process you stop with Ctrl-C. Run by
-> `genie`, it is detached and persistent** — it stays up between invocations so
-> repeated prompts do not each pay a proxy start, and `genie --down` is what stops
-> it. That means a process holding every cloud API key keeps running after your
-> command returns. It binds only to `agent-net`'s gateway, never `0.0.0.0`, so the
-> exposure is longer-lived rather than wider. `genie --status` reports it.
->
-> `genie` will not reuse a proxy blindly. It replaces one whose
-> `litellm.config.yaml` or config file has changed since it started (the proxy
-> resolves both exactly once, at startup, so a stale one silently serves old
-> routes), and one it did not start itself — including the hand-run proxy from
-> this step, whose config it cannot know.
+> **Run by hand, this proxy is a foreground process you stop with Ctrl-C. Run by `genie`, it is detached and persistent** — it stays up between invocations so repeated prompts do not each pay a proxy start, and `genie --down` is what stops it. That means a process holding every cloud API key keeps running after your command returns. It binds only to `agent-net`'s gateway, never `0.0.0.0`, so the exposure is longer-lived rather than wider. `genie --status` reports it.  `genie` will not reuse a proxy blindly. It replaces one whose `litellm.config.yaml` or config file has changed since it started (the proxy resolves both exactly once, at startup, so a stale one silently serves old routes), and one it did not start itself — including the hand-run proxy from this step, whose config it cannot know.
 
 **6. Start an agent**
 
-Entering the container lands you in the hardened Pi harness, with your shell's
-working directory set to the project at `/workspace`:
+Entering the container lands you in the hardened Pi harness, with your shell's working directory set to the project at `/workspace`:
 
 ```sh
 genie --tui                                                 # or, by hand:
@@ -240,30 +139,18 @@ docker compose -f src/infrastructure/compose.yaml exec pi bash
 pi-container:/workspace$
 ```
 
-For an agent that takes one instruction and exits, with its response on stdout —
-the scriptable path, and the reason `genie` exists — there is no interactive shell
-in the way:
+For an agent that takes one instruction and exits, with its response on stdout — the scriptable path, and the reason `genie` exists — there is no interactive shell in the way:
 
 ```sh
 genie -p "List the entries of /workspace."                  # or, by hand:
 docker compose -f src/infrastructure/compose.yaml exec -T pi start-pi -p "..."
 ```
 
-Note `exec -T` on the by-hand form: with a pseudo-tty, Pi renders for a terminal
-and the captured output arrives full of control sequences.
+Note `exec -T` on the by-hand form: with a pseudo-tty, Pi renders for a terminal and the captured output arrives full of control sequences.
 
-If you land in `~` instead, the shell says so on entry — the project volume is
-not mounted. `genie --status` reports which project the stack is scoped to, and
-`--project` (or `PROJECT_PATH`, when running by hand) is the thing to check. That
-directory is the operator's, and is set by `PI_PROJECT_DIR`. The agent has no
-working directory in this container at all — it has no shell and no local file
-tools.
+If you land in `~` instead, the shell says so on entry — the project volume is not mounted. `genie --status` reports which project the stack is scoped to, and `--project` (or `PROJECT_PATH`, when running by hand) is the thing to check. That directory is the operator's, and is set by `PI_PROJECT_DIR`. The agent has no working directory in this container at all — it has no shell and no local file tools.
 
-The agent starts automatically. It is launched by the shell (`~/.bashrc` calls
-`start-pi`) rather than being the container's main process, which is what makes
-`/quit` useful: it returns you to a shell **inside** the container, with the
-harness list printed, instead of stopping the container. Run `start-pi` to go
-back in, or `harnesses` to re-show the list.
+The agent starts automatically. It is launched by the shell (`~/.bashrc` calls `start-pi`) rather than being the container's main process, which is what makes `/quit` useful: it returns you to a shell **inside** the container, with the harness list printed, instead of stopping the container. Run `start-pi` to go back in, or `harnesses` to re-show the list.
 
 ```
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
@@ -271,81 +158,46 @@ back in, or `harnesses` to re-show the list.
 ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 ```
 
-`start-pi` supplies `--model` (the proxy route, from `PI_MODEL`),
-`--no-builtin-tools`, so the `mcp_*` tools are the only file tools and the agent
-has no shell, and `--no-approve` (see below). These flags live in the image, not
-in `compose.yaml`, precisely so they cannot be lost by an override.
+`start-pi` supplies `--model` (the proxy route, from `PI_MODEL`), `--no-builtin-tools`, so the `mcp_*` tools are the only file tools and the agent has no shell, and `--no-approve` (see below). These flags live in the image, not in `compose.yaml`, precisely so they cannot be lost by an override.
 
-An interactive shell aliases `pi` to `start-pi`, so the name an operator already
-knows gets the security profile too. That alias is a convenience, not a control:
-it exists only in interactive shells, so `docker compose exec pi pi …` never sees
-it, and `\pi`, `command pi`, and `/usr/local/bin/pi` all step around it. Raw `\pi`
-bypasses the profile — use it only when debugging the harness itself, and note
-that doing so re-enables Pi's built-in `read`/`grep`/`find`/`edit` against the
-project mount below.
+An interactive shell aliases `pi` to `start-pi`, so the name an operator already knows gets the security profile too. That alias is a convenience, not a control: it exists only in interactive shells, so `docker compose exec pi pi …` never sees it, and `\pi`, `command pi`, and `/usr/local/bin/pi` all step around it. Raw `\pi` bypasses the profile — use it only when debugging the harness itself, and note that doing so re-enables Pi's built-in `read`/`grep`/`find`/`edit` against the project mount below.
 
 ### Project trust
 
-Pi asks `Trust project folder?` whenever the working tree holds trust-requiring
-resources — `.agents/skills` in the project **or any ancestor directory**, or a
-`.pi/` config directory. Trust is not cosmetic: it lets Pi load project
-settings, install missing project packages, and **execute project extensions
-inside Pi's own process** — alongside `secret-sentry` and `audit-log` rather
-than behind them.
+Pi asks `Trust project folder?` whenever the working tree holds trust-requiring resources — `.agents/skills` in the project **or any ancestor directory**, or a `.pi/` config directory. Trust is not cosmetic: it lets Pi load project settings, install missing project packages, and **execute project extensions inside Pi's own process** — alongside `secret-sentry` and `audit-log` rather than behind them.
 
-The harness therefore decides this up front rather than prompting, via
-`PI_PROJECT_TRUST` (`compose.yaml`), which `start-pi` turns into Pi's
-`--approve` / `--no-approve`:
+The harness therefore decides this up front rather than prompting, via `PI_PROJECT_TRUST` (`compose.yaml`), which `start-pi` turns into Pi's `--approve` / `--no-approve`:
 
 | `PI_PROJECT_TRUST` | Flag           | Effect                                                          |
 | ------------------ | -------------- | --------------------------------------------------------------- |
 | `deny` (default)   | `--no-approve` | Project skills and settings are not loaded. No project code runs. |
 | `approve`          | `--approve`    | Project skills and settings load. Project extensions execute.     |
 
-Anything else is an error, so a typo fails closed rather than silently granting
-trust.
+Anything else is an error, so a typo fails closed rather than silently granting trust.
 
-Deciding it here is what makes a **non-interactive** run possible: the prompt
-would otherwise block, and because the agent directory is a tmpfs that never
-persists `trust.json`, it would block on *every* run rather than just the first.
-Both flags short-circuit ahead of the trust store, so the decision is
-deterministic either way.
+Deciding it here is what makes a **non-interactive** run possible: the prompt would otherwise block, and because the agent directory is a tmpfs that never persists `trust.json`, it would block on *every* run rather than just the first. Both flags short-circuit ahead of the trust store, so the decision is deterministic either way.
 
-To land in the shell without starting an agent — inspecting the boundary, or
-running the checks below — set `PI_AUTOSTART=0`:
+To land in the shell without starting an agent — inspecting the boundary, or running the checks below — set `PI_AUTOSTART=0`:
 
 ```sh
 docker compose -f src/infrastructure/compose.yaml exec -e PI_AUTOSTART=0 pi bash
 ```
 
-Note that the container's own main process is `sleep`, not an agent: `up -d`
-has no operator attached, so nothing should be running there unwatched. Agents
-exist only for the length of a session someone is actually sitting in.
+Note that the container's own main process is `sleep`, not an agent: `up -d` has no operator attached, so nothing should be running there unwatched. Agents exist only for the length of a session someone is actually sitting in.
 
 **7. Browse the project (as the operator)**
 
-The project is mounted **read-only** at `/workspace`, which is where your
-shell starts — so `ls` shows exactly what the agent is working against. To look
-without starting an agent at all:
+The project is mounted **read-only** at `/workspace`, which is where your shell starts — so `ls` shows exactly what the agent is working against. To look without starting an agent at all:
 
 ```sh
 docker compose -f src/infrastructure/compose.yaml exec -e PI_AUTOSTART=0 pi bash
 ```
 
-This mount is for **you**, not the agent. The agent has no tool that can read it
-— `--no-builtin-tools` removes Pi's own `read`, `grep`, `find`, and `edit`, and
-no extension restores local file or shell access — so it still reaches project
-files only through the `mcp_*` tools, where the access is mediated and logged.
-Your own shell is unrestricted; you are not the threat model.
+This mount is for **you**, not the agent. The agent has no tool that can read it — `--no-builtin-tools` removes Pi's own `read`, `grep`, `find`, and `edit`, and no extension restores local file or shell access — so it still reaches project files only through the `mcp_*` tools, where the access is mediated and logged. Your own shell is unrestricted; you are not the threat model.
 
-This used to be enforced by a path fence in an `audited-tools` extension, which
-policed the same boundary from inside the agent's own process. That extension
-was removed: a cooperative guard is weaker than not having the capability. See
-`TODO.md`.
+This used to be enforced by a path fence in an `audited-tools` extension, which policed the same boundary from inside the agent's own process. That extension was removed: a cooperative guard is weaker than not having the capability. See `TODO.md`.
 
-Because the mount is read-only, nothing in this container can modify the project
-through it. The MCP filesystem server holds the only writable handle, which is
-what keeps the change trail complete.
+Because the mount is read-only, nothing in this container can modify the project through it. The MCP filesystem server holds the only writable handle, which is what keeps the change trail complete.
 
 **8. Verify the boundary**
 
@@ -370,10 +222,7 @@ what keeps the change trail complete.
 | Gateway starts hardened | `docker compose ... up` then `docker compose ... ps` | `mcp-gateway` is healthy with `cap_drop: ALL` + read-only rootfs. If it fails to start, relax `cap_drop` to the minimum it reports needing (see the compose comment). |
 | Egress is blocked | the egress check below | the gateway and the proxy are reachable; every external address is `ENETUNREACH` and DNS does not resolve |
 
-**The egress check.** `agent-net` is `internal: true`, and the hardening table
-now claims that as an enforced control rather than an absence of capability — so
-it has to be checkable. This uses `node`, because the hardened image
-deliberately has no `curl`, `wget`, or `nc` (see the row above):
+**The egress check.** `agent-net` is `internal: true`, and the hardening table now claims that as an enforced control rather than an absence of capability — so it has to be checkable. This uses `node`, because the hardened image deliberately has no `curl`, `wget`, or `nc` (see the row above):
 
 ```sh
 docker compose -f src/infrastructure/compose.yaml exec -T pi node -e '
@@ -410,15 +259,9 @@ LiteLLM proxy    (must work) => CONNECTED
 DNS npmjs        (must fail) => FAILED(EAI_AGAIN)
 ```
 
-Read the failures precisely: `ENETUNREACH` on the external rows is the control
-working. `ENETUNREACH` on the **LiteLLM** row is a misconfiguration — the
-`extra_hosts` entry no longer matches the pinned `gateway:` on `agent-net`.
-`ECONNREFUSED` there means the route is correct and the proxy is not listening
-on that address.
+Read the failures precisely: `ENETUNREACH` on the external rows is the control working. `ENETUNREACH` on the **LiteLLM** row is a misconfiguration — the `extra_hosts` entry no longer matches the pinned `gateway:` on `agent-net`. `ECONNREFUSED` there means the route is correct and the proxy is not listening on that address.
 
-**The tool-surface check.** `docs/solution.md` enumerates the agent's entire
-tool surface, so that list has to be checkable rather than trusted. This asks
-the gateway directly, using the same client the agent uses:
+**The tool-surface check.** `docs/solution.md` enumerates the agent's entire tool surface, so that list has to be checkable rather than trusted. This asks the gateway directly, using the same client the agent uses:
 
 ```sh
 docker compose -f src/infrastructure/compose.yaml exec -T pi \
@@ -439,34 +282,17 @@ read_file  list_directory  search_files  list_allowed_directories
 write_file  edit_file  move_file  create_directory
 ```
 
-Eight, not eleven. The `mcp/filesystem` image exposes eleven; the gateway's
-`--tools` allowlist in `compose.yaml` enables eight, and that comment explains
-each omission. The gateway's own startup log states the same count — `filesystem:
-(8 tools)` — which is the quickest place to look.
+Eight, not eleven. The `mcp/filesystem` image exposes eleven; the gateway's `--tools` allowlist in `compose.yaml` enables eight, and that comment explains each omission. The gateway's own startup log states the same count — `filesystem: (8 tools)` — which is the quickest place to look.
 
-**This check is the one that proves the flag works, and that is measured rather
-than assumed:** a tool name in `--tools` that does not match anything is
-**silently ignored**. Verified directly against the pinned image, by starting a
-throwaway gateway with `--tools=read_file,definitely_not_a_tool` — it starts
-normally, logs `filesystem: (1 tools)`, and issues no warning or error of any
-kind. So a typo here does not fail loudly; it quietly narrows the agent's
-surface, and this check is the only thing that would catch it. Hence:
+**This check is the one that proves the flag works, and that is measured rather than assumed:** a tool name in `--tools` that does not match anything is **silently ignored**. Verified directly against the pinned image, by starting a throwaway gateway with `--tools=read_file,definitely_not_a_tool` — it starts normally, logs `filesystem: (1 tools)`, and issues no warning or error of any kind. So a typo here does not fail loudly; it quietly narrows the agent's surface, and this check is the only thing that would catch it. Hence:
 
-- **Fewer than eight** means a name in `--tools` does not match what the server
-  exposes. Compare against the eleven listed in `docs/solution.md`.
-- **All eleven** means the flag is not taking effect at all: check it is on the
-  `mcp-gateway` service's `command` and that the container was recreated
-  (`docker compose ... up -d --force-recreate mcp-gateway`) rather than reused.
-- **Anything else** — especially anything that executes, fetches a URL, or
-  reaches outside `/workspace` — means the surface has grown and
-  `docs/solution.md` is out of date.
+- **Fewer than eight** means a name in `--tools` does not match what the server exposes. Compare against the eleven listed in `docs/solution.md`.
+- **All eleven** means the flag is not taking effect at all: check it is on the `mcp-gateway` service's `command` and that the container was recreated (`docker compose ... up -d --force-recreate mcp-gateway`) rather than reused.
+- **Anything else** — especially anything that executes, fetches a URL, or reaches outside `/workspace` — means the surface has grown and `docs/solution.md` is out of date.
 
-Re-run this after changing the gateway's `--servers`/`--tools` flags, the
-catalog, or the pinned `mcp/filesystem` image.
+Re-run this after changing the gateway's `--servers`/`--tools` flags, the catalog, or the pinned `mcp/filesystem` image.
 
-**A withheld tool is unreachable, not merely hidden.** Absence from `tools/list`
-would be satisfied by a tool that still worked when called directly, so that was
-checked too — the gateway rejects a `tools/call` for a name outside the allowlist:
+**A withheld tool is unreachable, not merely hidden.** Absence from `tools/list` would be satisfied by a tool that still worked when called directly, so that was checked too — the gateway rejects a `tools/call` for a name outside the allowlist:
 
 ```
 directory_tree      → unknown tool "directory_tree"
@@ -474,16 +300,11 @@ get_file_info       → unknown tool "get_file_info"
 read_multiple_files → unknown tool "read_multiple_files"
 ```
 
-Verified in the same pass: `list_directory(/workspace)` still returns the project
-listing, and `read_file(/etc/passwd)` is still refused by the MCP server with
-`Access denied - path outside allowed directories` and `isError: true` — so the
-allowlist narrows the surface without disturbing the containment underneath it or
-the audit trail's outcome axis.
+Verified in the same pass: `list_directory(/workspace)` still returns the project listing, and `read_file(/etc/passwd)` is still refused by the MCP server with `Access denied - path outside allowed directories` and `isError: true` — so the allowlist narrows the surface without disturbing the containment underneath it or the audit trail's outcome axis.
 
 **9. Inspect the audit trail**
 
-There are **two** log files now, on the `pi-logs` volume, outside the agent's
-read-only rootfs — one per extension, split by responsibility:
+There are **two** log files now, on the `pi-logs` volume, outside the agent's read-only rootfs — one per extension, split by responsibility:
 
 ```sh
 # Every call: what it named, what it did, turn boundaries, model-request shapes.
@@ -493,8 +314,7 @@ docker compose -f src/infrastructure/compose.yaml exec pi cat /var/log/pi/audit-
 docker compose -f src/infrastructure/compose.yaml exec pi cat /var/log/pi/secret-sentry/security.jsonl
 ```
 
-`genie --logs` wraps the same commands with `tail -F`, for watching a session live
-rather than dumping the whole file:
+`genie --logs` wraps the same commands with `tail -F`, for watching a session live rather than dumping the whole file:
 
 ```sh
 genie --logs            # Both files (default).
@@ -502,75 +322,40 @@ genie --logs audit      # Just audit-log/calls.jsonl.
 genie --logs security   # Just secret-sentry/security.jsonl.
 ```
 
-They used to be one file, written by one extension. `secret-sentry` now
-records only what it itself decides; `audit-log` records everything else, with
-no power to decide anything. **The consequence worth knowing before you query
-either:** Pi stops dispatching a `tool_call` event to further extensions the
-instant one blocks it, so a call `secret-sentry` refuses may or may not have a
-matching line in `audit-log`'s file at all, depending on an extension load
-order Pi does not guarantee. `secret-sentry`'s file is the one to trust for
-"was this call refused, and why" regardless of that order; `audit-log`'s is
-the one to trust for "did this call run, and what did it do."
+They used to be one file, written by one extension. `secret-sentry` now records only what it itself decides; `audit-log` records everything else, with no power to decide anything. **The consequence worth knowing before you query either:** Pi stops dispatching a `tool_call` event to further extensions the instant one blocks it, so a call `secret-sentry` refuses may or may not have a matching line in `audit-log`'s file at all, depending on an extension load order Pi does not guarantee. `secret-sentry`'s file is the one to trust for "was this call refused, and why" regardless of that order; `audit-log`'s is the one to trust for "did this call run, and what did it do."
 
-**`audit-log/calls.jsonl` — a call writes two lines, joined by `id`.** This is
-the first thing to know before querying it, because every naive count is
-otherwise doubled:
+**`audit-log/calls.jsonl` — a call writes two lines, joined by `id`.** This is the first thing to know before querying it, because every naive count is otherwise doubled:
 
 | `phase` | Written | Says |
 |---|---|---|
 | `call` | when `audit-log` is dispatched the event | what the call named (`detail`) — no verdict, this extension does not decide admission |
 | `result` | after the tool runs | what the **tool** did: `result` (`ok` / `error`) |
 
-A call `secret-sentry` refuses never reaches `tool_result` — the tool never
-ran — so it has no `result` line here, and it may have no `call` line either
-(see above). A call that ran and then errored inside the MCP server (a path
-outside `/workspace`, say) has both lines: `call`, then `result` with
-`"result":"error"`.
+A call `secret-sentry` refuses never reaches `tool_result` — the tool never ran — so it has no `result` line here, and it may have no `call` line either (see above). A call that ran and then errored inside the MCP server (a path outside `/workspace`, say) has both lines: `call`, then `result` with `"result":"error"`.
 
-Neither line ever carries tool *content*. `detail` is the path; the file's
-contents are never copied into the trail. It is, however, the *whole* path, and
-every path when a call names several — `detail` is never truncated, so a line
-can be long.
+Neither line ever carries tool *content*. `detail` is the path; the file's contents are never copied into the trail. It is, however, the *whole* path, and every path when a call names several — `detail` is never truncated, so a line can be long.
 
-**Two further line kinds carry `kind` rather than `phase`**, so the queries below
-are unaffected by either:
+**Two further line kinds carry `kind` rather than `phase`**, so the queries below are unaffected by either:
 
 ```json
 {"ts":"…","kind":"turn_start","turn":7,"session":"01936f2e-6b2a-7c31-9e4d-8f1a2b3c4d5e"}
 {"ts":"…","kind":"provider_request","model":"computer-programmer","messages":34,"approx_bytes":18422}
 ```
 
-A `provider_request` line records one outbound model call as **shape only** —
-which model, how many messages, how many bytes of serialised body. Never the
-payload, which is the entire conversation including every file the agent has
-read. Expect several per turn: the agent loops until it stops calling tools, and
-`approx_bytes` climbing across those lines is the cheapest available signal that
-context is accumulating.
+A `provider_request` line records one outbound model call as **shape only** — which model, how many messages, how many bytes of serialised body. Never the payload, which is the entire conversation including every file the agent has read. Expect several per turn: the agent loops until it stops calling tools, and `approx_bytes` climbing across those lines is the cheapest available signal that context is accumulating.
 
-Every `call` line belongs to the turn whose boundary most recently preceded it,
-which is what makes "what did the agent do in response to *that* instruction"
-answerable from this file rather than by correlating timestamps against a session
-transcript on the `pi-sessions` volume. `turn` is an ordinal counted by the
-running Pi process from 1 — it starts again at 1 after a restart, `--resume`
-included, so `session` and file order are what identify a turn; the number is for
-referring to one. The prompt that opened the turn is deliberately **not**
-recorded.
+Every `call` line belongs to the turn whose boundary most recently preceded it, which is what makes "what did the agent do in response to *that* instruction" answerable from this file rather than by correlating timestamps against a session transcript on the `pi-sessions` volume. `turn` is an ordinal counted by the running Pi process from 1 — it starts again at 1 after a restart, `--resume` included, so `session` and file order are what identify a turn; the number is for referring to one. The prompt that opened the turn is deliberately **not** recorded.
 
-**`secret-sentry/security.jsonl` — two record kinds, neither a `call`/`result`
-pair.** A blocked call never runs, so there is nothing to pair it with; a
-redaction is a fact about a result that already has its own line in
-`audit-log`'s file:
+**`secret-sentry/security.jsonl` — two record kinds, neither a `call`/`result` pair.** A blocked call never runs, so there is nothing to pair it with; a redaction is a fact about a result that already has its own line in `audit-log`'s file:
 
 | `kind` | Written | Says |
 |---|---|---|
 | `blocked` | before the tool would have run | `path` (the full sensitive path matched) and `reason` |
 | `redaction` | after the tool runs | `redactions` (a count) and `rules` (which fired) — only written when at least one rule fired |
 
-Both carry `id`, so this file can be joined against `audit-log`'s by that field
-when you need the complete picture of one call.
+Both carry `id`, so this file can be joined against `audit-log`'s by that field when you need the complete picture of one call.
 
-The image has no `jq` — it is a hardened runtime, not an analysis box — so pipe
-the logs out to the host and query them there:
+The image has no `jq` — it is a hardened runtime, not an analysis box — so pipe the logs out to the host and query them there:
 
 ```sh
 LOG='docker compose -f src/infrastructure/compose.yaml exec -T pi cat /var/log/pi/audit-log/calls.jsonl'
@@ -624,63 +409,24 @@ $LOG | jq -rs '
 
 Limits to know before relying on it:
 
-- **Paths, never content.** `detail` carries the path a call named and nothing
-  it returned. Logging what was read would copy the secrets out of the files and
-  into the audit trail. That holds most strictly for the redaction fields: they
-  say a credential was replaced and which rule matched, and cannot say what it
-  was — a record that named the value would be a convenient way to leak precisely
-  what the redactor exists to protect.
-- **Model requests are recorded as shape, not content.** A `provider_request`
-  line says which model was called, with how many messages, at what size — never
-  what was sent. It is also written in the agent's own process, so it is evidence
-  rather than a boundary; an independent record would come from the host proxy,
-  which is deliberately not built (see `TODO.md`). Nothing records the provider's
-  *reply*, either: `after_provider_response` is not handled.
-- **Both grow without bound, and that is the stated policy, not an oversight.**
-  Nothing in the stack rotates, caps, or prunes either file. See *Retention*
-  below for the reasoning and for the operator's part in it.
-- **Turn boundaries, not turn contents.** A `kind:"turn_start"` line says a turn
-  began and which one; the instruction that opened it is not recorded, so reading
-  *what was asked* still means going to the session transcript. The trail says
-  what the agent did in response.
-- **A blocked call's presence in `audit-log`'s file is not guaranteed either
-  way.** Depending on extension load order, a refused call may show a `call`
-  line here with no matching `result` (indistinguishable, in this file alone,
-  from an allowed call the MCP server then errored on) or may not appear at
-  all. `secret-sentry`'s file is authoritative for refusals regardless.
+- **Paths, never content.** `detail` carries the path a call named and nothing it returned. Logging what was read would copy the secrets out of the files and into the audit trail. That holds most strictly for the redaction fields: they say a credential was replaced and which rule matched, and cannot say what it was — a record that named the value would be a convenient way to leak precisely what the redactor exists to protect.
+- **Model requests are recorded as shape, not content.** A `provider_request` line says which model was called, with how many messages, at what size — never what was sent. It is also written in the agent's own process, so it is evidence rather than a boundary; an independent record would come from the host proxy, which is deliberately not built (see `TODO.md`). Nothing records the provider's *reply*, either: `after_provider_response` is not handled.
+- **Both grow without bound, and that is the stated policy, not an oversight.** Nothing in the stack rotates, caps, or prunes either file. See *Retention* below for the reasoning and for the operator's part in it.
+- **Turn boundaries, not turn contents.** A `kind:"turn_start"` line says a turn began and which one; the instruction that opened it is not recorded, so reading *what was asked* still means going to the session transcript. The trail says what the agent did in response.
+- **A blocked call's presence in `audit-log`'s file is not guaranteed either way.** Depending on extension load order, a refused call may show a `call` line here with no matching `result` (indistinguishable, in this file alone, from an allowed call the MCP server then errored on) or may not appear at all. `secret-sentry`'s file is authoritative for refusals regardless.
 
 > [!IMPORTANT]
-> The `pi-logs` volume must be owned by the agent's uid (1001) or **both** logs
-> fail **silently** — each sink swallows write errors so a logging failure
-> cannot change a tool's outcome. Ownership is seeded from the image, so a
-> volume created before that layer existed is still `root:root`. Fix it once:
->
-> ```sh
-> docker compose -f src/infrastructure/compose.yaml down
-> docker volume rm pi-secure-agent_pi-logs
-> ```
+> The `pi-logs` volume must be owned by the agent's uid (1001) or **both** logs fail **silently** — each sink swallows write errors so a logging failure cannot change a tool's outcome. Ownership is seeded from the image, so a volume created before that layer existed is still `root:root`. Fix it once:  ```sh docker compose -f src/infrastructure/compose.yaml down docker volume rm pi-secure-agent_pi-logs ```
 
 ### Retention
 
-**The policy: both log files grow without bound. Nothing in the stack ever
-deletes a line from either. Pruning and archival are the operator's, done from
-the host, deliberately.**
+**The policy: both log files grow without bound. Nothing in the stack ever deletes a line from either. Pruning and archival are the operator's, done from the host, deliberately.**
 
-This is a decision, not a default inherited from whichever tool was convenient,
-and it applies identically to `audit-log/calls.jsonl` and
-`secret-sentry/security.jsonl` — splitting logging into two extensions did not
-change the policy, only which file each line lands in. The reasoning, in the
-order it matters:
+This is a decision, not a default inherited from whichever tool was convenient, and it applies identically to `audit-log/calls.jsonl` and `secret-sentry/security.jsonl` — splitting logging into two extensions did not change the policy, only which file each line lands in. The reasoning, in the order it matters:
 
-- **Deletion is data loss from an accountability record.** `docs/requirements.md`
-  asks for auditability of every filesystem action and does not put a horizon on
-  it. Size-capped rotation answers "how much disk" by discarding the oldest
-  evidence, which is the wrong axis to optimise for a log whose purpose is
-  answering questions about the past.
+- **Deletion is data loss from an accountability record.** `docs/requirements.md` asks for auditability of every filesystem action and does not put a horizon on it. Size-capped rotation answers "how much disk" by discarding the oldest evidence, which is the wrong axis to optimise for a log whose purpose is answering questions about the past.
 
-- **The volume pressure it would relieve is not there.** Measured against the
-  real record format — a `call` line with a deep path plus its `result` line —
-  a call costs about **316 bytes** in `audit-log`'s file:
+- **The volume pressure it would relieve is not there.** Measured against the real record format — a `call` line with a deep path plus its `result` line — a call costs about **316 bytes** in `audit-log`'s file:
 
   | Tool calls | `calls.jsonl` size |
   |---|---|
@@ -689,23 +435,9 @@ order it matters:
   | 100,000 | 32 MB |
   | 1,000,000 | 316 MB |
 
-  A million tool calls is years of heavy single-operator use. Paying real
-  accountability loss to avoid a few hundred megabytes over that horizon is a
-  bad trade, and it stays a bad trade until the numbers move. The two `kind`
-  lines do not move them: a turn line is ~112 bytes with one per instruction, and
-  a provider-request line ~126 bytes with roughly one per model call — a few
-  percent on top of the calls they describe. `secret-sentry`'s
-  `security.jsonl` is smaller still by construction — it gains a line only when
-  a call is actually refused or something is actually redacted, so a clean
-  session leaves it empty.
+  A million tool calls is years of heavy single-operator use. Paying real accountability loss to avoid a few hundred megabytes over that horizon is a bad trade, and it stays a bad trade until the numbers move. The two `kind` lines do not move them: a turn line is ~112 bytes with one per instruction, and a provider-request line ~126 bytes with roughly one per model call — a few percent on top of the calls they describe. `secret-sentry`'s `security.jsonl` is smaller still by construction — it gains a line only when a call is actually refused or something is actually redacted, so a clean session leaves it empty.
 
-- **A cap would have to live in the wrong place.** The agent's rootfs is
-  read-only, so rotation state would have to sit on the `pi-logs` volume itself,
-  and an in-process cap in either extension would put truncation logic inside
-  the audited process — the one place from which an accountability record should
-  not be deletable. Today both extensions can only append; `compose.yaml` notes
-  that the volume outliving the container is what stops a session erasing its
-  own history. Adding a delete path would spend that property.
+- **A cap would have to live in the wrong place.** The agent's rootfs is read-only, so rotation state would have to sit on the `pi-logs` volume itself, and an in-process cap in either extension would put truncation logic inside the audited process — the one place from which an accountability record should not be deletable. Today both extensions can only append; `compose.yaml` notes that the volume outliving the container is what stops a session erasing its own history. Adding a delete path would spend that property.
 
 **What the operator does.** Check the size of each when it is worth knowing:
 
@@ -714,8 +446,7 @@ docker compose -f src/infrastructure/compose.yaml exec -T pi \
   wc -c /var/log/pi/audit-log/calls.jsonl /var/log/pi/secret-sentry/security.jsonl
 ```
 
-Archive by piping each out to the host — the same route the queries above use, so
-there is no second image to pin and nothing new to trust:
+Archive by piping each out to the host — the same route the queries above use, so there is no second image to pin and nothing new to trust:
 
 ```sh
 docker compose -f src/infrastructure/compose.yaml exec -T pi \
@@ -727,47 +458,25 @@ docker compose -f src/infrastructure/compose.yaml exec -T pi \
   | gzip > "security-$(date +%Y%m%d).jsonl.gz"
 ```
 
-JSONL concatenates, so dated archives can be `cat`-ed back together in order and
-queried as one file. Truncating a live log after archiving is a choice
-available to the operator and is **not** part of the supported flow — if you do
-it, the archive is the record, so put it somewhere durable first.
+JSONL concatenates, so dated archives can be `cat`-ed back together in order and queried as one file. Truncating a live log after archiving is a choice available to the operator and is **not** part of the supported flow — if you do it, the archive is the record, so put it somewhere durable first.
 
-**Revisit this if any of these changes**, because each one breaks an assumption
-above rather than merely making a file bigger:
+**Revisit this if any of these changes**, because each one breaks an assumption above rather than merely making a file bigger:
 
 - either log passes **1 GB**, or growth stops looking like the table above;
-- the stack stops being single-operator, or the volume stops being local — a
-  shipped, multi-tenant trail is a different retention problem;
-- a compliance obligation names an actual retention period, at which point
-  "unbounded" needs replacing with that period and an expiry mechanism, not with
-  a size cap.
+- the stack stops being single-operator, or the volume stops being local — a shipped, multi-tenant trail is a different retention problem;
+- a compliance obligation names an actual retention period, at which point "unbounded" needs replacing with that period and an expiry mechanism, not with a size cap.
 
 ## Troubleshooting
 
-**The agent prints its reasoning, then stops.** Typically after something like
-*"I should explore the directory structure"*, with no error and no further
-output. This is a tool-calling failure, not a hang: the model asked for a tool
-and the request never became a tool call, so there was nothing to run and
-nothing to report.
+**The agent prints its reasoning, then stops.** Typically after something like *"I should explore the directory structure"*, with no error and no further output. This is a tool-calling failure, not a hang: the model asked for a tool and the request never became a tool call, so there was nothing to run and nothing to report.
 
-There are **two** causes with an identical symptom. Rule out the second before
-touching the config, because it is the cheaper check.
+There are **two** causes with an identical symptom. Rule out the second before touching the config, because it is the cheaper check.
 
-**Cause 1 — the wrong LiteLLM prefix.** An `ollama/` prefix in
-`proxy/litellm.config.yaml` where `ollama_chat/` is required. That integration
-drops tool-call deltas when streaming and delivers the call as assistant text
-instead — the agent shows a bare JSON object like
-`{"name": "mcp_list_directory", "arguments": {…}}` and stops. See the warning in
-that file.
+**Cause 1 — the wrong LiteLLM prefix.** An `ollama/` prefix in `proxy/litellm.config.yaml` where `ollama_chat/` is required. That integration drops tool-call deltas when streaming and delivers the call as assistant text instead — the agent shows a bare JSON object like `{"name": "mcp_list_directory", "arguments": {…}}` and stops. See the warning in that file.
 
-**Cause 2 — the model does not emit tool calls, whatever it advertises.**
-Observed with `qwen2.5-coder:14b`, the base of the `workstation` profile's
-`computer-programming` capability. Ollama reports `"capabilities": ["completion",
-"tools", "insert"]` for it, and it still returns the call as ordinary content.
-The config is irrelevant here; no prefix change helps.
+**Cause 2 — the model does not emit tool calls, whatever it advertises.** Observed with `qwen2.5-coder:14b`, the base of the `workstation` profile's `computer-programming` capability. Ollama reports `"capabilities": ["completion", "tools", "insert"]` for it, and it still returns the call as ordinary content. The config is irrelevant here; no prefix change helps.
 
-Isolate it by asking Ollama directly, bypassing the proxy and the agent
-entirely — `tool_calls` must be non-null:
+Isolate it by asking Ollama directly, bypassing the proxy and the agent entirely — `tool_calls` must be non-null:
 
 ```sh
 curl -s http://127.0.0.1:11434/api/chat -d '{
@@ -779,14 +488,9 @@ curl -s http://127.0.0.1:11434/api/chat -d '{
     "required":["path"]}}}]}' | jq '.message.tool_calls'
 ```
 
-`null` means the model is the problem. Swap the capability's base model in the
-modelfiles project — `qwen2.5:14b`, `llama3.1:8b`, `qwen3.6:27b` and
-`gpt-oss:20b` were all verified to emit proper `tool_calls` — or drive the
-session on a role whose capability uses one of those (`--model
-litellm/technical-lead` maps to `technical-reasoning`, which is `qwen2.5:14b`).
+`null` means the model is the problem. Swap the capability's base model in the modelfiles project — `qwen2.5:14b`, `llama3.1:8b`, `qwen3.6:27b` and `gpt-oss:20b` were all verified to emit proper `tool_calls` — or drive the session on a role whose capability uses one of those (`--model litellm/technical-lead` maps to `technical-reasoning`, which is `qwen2.5:14b`).
 
-What makes this one expensive to diagnose is that every layer looks healthy, and
-the obvious checks all pass:
+What makes this one expensive to diagnose is that every layer looks healthy, and the obvious checks all pass:
 
 | Check | What it shows |
 |---|---|
@@ -795,9 +499,7 @@ the obvious checks all pass:
 | a `curl` tool test against the proxy | **passes** — non-streaming works under both prefixes |
 | the session transcript | one assistant message, `"stopReason":"stop"`, thinking only, no `tool_call` entry |
 
-The transcripts under `/home/pi/sessions/` are the fastest way in: if no session
-has ever contained a `tool_call` entry, the problem is upstream of every
-security control in this repo. Reproduce it directly with a streaming request:
+The transcripts under `/home/pi/sessions/` are the fastest way in: if no session has ever contained a `tool_call` entry, the problem is upstream of every security control in this repo. Reproduce it directly with a streaming request:
 
 ```sh
 docker compose -f src/infrastructure/compose.yaml exec pi node -e '
@@ -812,47 +514,18 @@ fetch("http://host-gateway:4000/v1/chat/completions", { method: "POST",
   t.includes("tool_calls") ? "OK: tool_call deltas present" : "BROKEN: no tool_call deltas"))'
 ```
 
-**Verifying the extensions are loaded.** `pi list` is *not* the check — it lists
-installed packages, and these extensions are auto-discovered from
-`~/.pi/agent/extensions/*/index.ts` instead, so it correctly reports "No
-packages installed" on a healthy container. Confirm loading by the tools the
-model is offered, or by watching for audit-log entries.
+**Verifying the extensions are loaded.** `pi list` is *not* the check — it lists installed packages, and these extensions are auto-discovered from `~/.pi/agent/extensions/*/index.ts` instead, so it correctly reports "No packages installed" on a healthy container. Confirm loading by the tools the model is offered, or by watching for audit-log entries.
 
 ## The docker.sock trade-off (read this)
 
-The Docker MCP Toolkit gateway **spawns and manages** the filesystem MCP server
-itself, so it requires the Docker socket. The architecture confines that
-privilege to the **gateway** — the agent (`pi`) still has no socket, no keys, and
-no project mount. This is the deliberate, contained version of the concern that
-got the third alternative in [../../docs/alternatives.md](../../docs/alternatives.md)
-rejected — granting broad host privilege via `docker.sock`: the privilege
-exists, but on a component the agent cannot reach, not on the agent itself.
-[../../docs/solution.md](../../docs/solution.md) carries the same trade-off in
-the design's own terms.
+The Docker MCP Toolkit gateway **spawns and manages** the filesystem MCP server itself, so it requires the Docker socket. The architecture confines that privilege to the **gateway** — the agent (`pi`) still has no socket, no keys, and no project mount. This is the deliberate, contained version of the concern that got the third alternative in [../../docs/alternatives.md](../../docs/alternatives.md) rejected — granting broad host privilege via `docker.sock`: the privilege exists, but on a component the agent cannot reach, not on the agent itself. [../../docs/solution.md](../../docs/solution.md) carries the same trade-off in the design's own terms.
 
-The gateway is still hardened as far as its role allows: `cap_drop: [ALL]`,
-`no-new-privileges`, a read-only rootfs with in-memory tmpfs, and resource
-limits. The socket is the irreducible privilege; everything else is locked down.
-For stricter environments, replace the raw socket bind with a
-[docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy)
-allowlisting only the container APIs the gateway needs.
+The gateway is still hardened as far as its role allows: `cap_drop: [ALL]`, `no-new-privileges`, a read-only rootfs with in-memory tmpfs, and resource limits. The socket is the irreducible privilege; everything else is locked down. For stricter environments, replace the raw socket bind with a [docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy) allowlisting only the container APIs the gateway needs.
 
-If even the proxied socket is unacceptable, the alternative is to run `mcp/filesystem`
-directly (stdio) without the Toolkit gateway and bridge it to the agent — at the
-cost of the Toolkit's catalog/secret/network controls.
+If even the proxied socket is unacceptable, the alternative is to run `mcp/filesystem` directly (stdio) without the Toolkit gateway and bridge it to the agent — at the cost of the Toolkit's catalog/secret/network controls.
 
 > [!IMPORTANT]
-> **The boundary is defined in `mcp/toolkit/catalog.yaml`, not in `compose.yaml`.**
-> The gateway learns the filesystem server's allowed directory (its `command`
-> arg) and what it can see (its `volumes`) from that catalog entry — `--oci-ref`
-> alone does not carry them. The gateway flags
-> (`docker mcp gateway run --transport streaming --catalog … --servers filesystem --block-network`)
-> and the catalog schema were checked against the installed Toolkit, but the
-> catalog format varies by Toolkit version and **must be verified on first
-> bring-up**: run with `--dry-run` to validate config without listening, and use
-> the traversal test in the verification table as the functional proof that the
-> boundary holds. All three images are digest-pinned (re-pin commands are in the
-> respective files).
+> **The boundary is defined in `mcp/toolkit/catalog.yaml`, not in `compose.yaml`.** The gateway learns the filesystem server's allowed directory (its `command` arg) and what it can see (its `volumes`) from that catalog entry — `--oci-ref` alone does not carry them. The gateway flags (`docker mcp gateway run --transport streaming --catalog … --servers filesystem --block-network`) and the catalog schema were checked against the installed Toolkit, but the catalog format varies by Toolkit version and **must be verified on first bring-up**: run with `--dry-run` to validate config without listening, and use the traversal test in the verification table as the functional proof that the boundary holds. All three images are digest-pinned (re-pin commands are in the respective files).
 
 ## Security notes
 

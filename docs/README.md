@@ -1,7 +1,6 @@
 # 🎨 Design docs
 
-These docs capture decisions and trade-offs in the design of my agent harness
-and its supporting infrastructure.
+These docs capture decisions and trade-offs in the design of my agent harness and its supporting infrastructure.
 
 - [**The problem**](./problem.md)
 - [**Requirements**](./requirements.md)
